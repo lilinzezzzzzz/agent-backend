@@ -359,7 +359,9 @@ def load_config() -> Settings:
             _logger.info("Configuration Details (ECHO_CONFIG=true):")
             for key, value in _settings.model_dump().items():
                 # SecretStr 类型需要获取原始值
-                if hasattr(_settings, key) and hasattr(getattr(_settings, key), "get_secret_value"):
+                if hasattr(_settings, key) and hasattr(
+                    getattr(_settings, key), "get_secret_value"
+                ):
                     value = getattr(_settings, key).get_secret_value()
                 _logger.info(f"  {key}: {value}")
 

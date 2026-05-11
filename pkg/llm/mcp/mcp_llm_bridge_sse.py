@@ -76,7 +76,9 @@ async def run() -> None:
 
         # --- 1. 从线上服务发现工具 ---
         tools_result = await session.list_tools()
-        tools: list[ChatCompletionToolParam] = [mcp_tool_to_openai(t) for t in tools_result.tools]
+        tools: list[ChatCompletionToolParam] = [
+            mcp_tool_to_openai(t) for t in tools_result.tools
+        ]
 
         print(f"🔌 已从 SSE 服务端加载 {len(tools)} 个工具:")
         for t in tools:
@@ -84,7 +86,9 @@ async def run() -> None:
         print()
 
         # --- 2. 用户提问 ---
-        user_query = "北京今天天气怎么样？顺便帮我算一下 128 * 256 等于多少，再告诉我现在几点了"  # noqa: E501
+        user_query = (
+            "北京今天天气怎么样？顺便帮我算一下 128 * 256 等于多少，再告诉我现在几点了"  # noqa: E501
+        )
         print(f"🙋 用户: {user_query}\n")
 
         messages: list[ChatCompletionMessageParam] = [
@@ -132,7 +136,9 @@ async def run() -> None:
                 fn_name = tool_call.function.name
                 raw_args = json.loads(tool_call.function.arguments)
                 if not isinstance(raw_args, dict):
-                    result_text = f"函数参数必须是 JSON object: {tool_call.function.arguments}"
+                    result_text = (
+                        f"函数参数必须是 JSON object: {tool_call.function.arguments}"
+                    )
                 else:
                     fn_args = cast(dict[str, Any], raw_args)
 

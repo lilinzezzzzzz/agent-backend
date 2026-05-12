@@ -9,7 +9,13 @@ from pkg.logger import logger
 class SignatureAuthHandler:
     SUPPORTED_HASH_ALGOS = {"sha256", "sha1", "md5"}  # 可扩展
 
-    def __init__(self, *, secret_key: str, hash_algorithm: str = "sha256", timestamp_tolerance: int = 300):
+    def __init__(
+        self,
+        *,
+        secret_key: str,
+        hash_algorithm: str = "sha256",
+        timestamp_tolerance: int = 300,
+    ):
         """
         :param secret_key: 用于签名的密钥（建议环境变量管理）
         :param hash_algorithm: 哈希算法（支持 sha256/sha1/md5）
@@ -34,7 +40,9 @@ class SignatureAuthHandler:
             # 保证所有 value 都转为字符串
             sorted_items = sorted((str(k), str(v)) for k, v in data.items())
             message = "&".join(f"{k}={v}" for k, v in sorted_items).encode("utf-8")
-            signature = hmac.new(self.secret_key, message, getattr(hashlib, self.hash_algorithm)).hexdigest()
+            signature = hmac.new(
+                self.secret_key, message, getattr(hashlib, self.hash_algorithm)
+            ).hexdigest()
             return signature
         except Exception as e:
             logger.error(f"generate_signature error: {e}, data={data}")
@@ -55,7 +63,9 @@ class SignatureAuthHandler:
             expected_signature = self.generate_signature(data)
             return hmac.compare_digest(expected_signature, signature)
         except Exception as e:
-            logger.error(f"verify_signature error: {e}, data={data}, signature={signature}")
+            logger.error(
+                f"verify_signature error: {e}, data={data}, signature={signature}"
+            )
             return False
 
     def verify_timestamp(self, request_time: str | None) -> bool:
@@ -80,7 +90,9 @@ class SignatureAuthHandler:
             return False
         return True
 
-    def verify(self, x_signature: str | None, x_timestamp: str | None, x_nonce: str | None) -> bool:
+    def verify(
+        self, x_signature: str | None, x_timestamp: str | None, x_nonce: str | None
+    ) -> bool:
         """
         统一验签入口
         :param x_signature: 签名字符串
@@ -94,7 +106,9 @@ class SignatureAuthHandler:
 
         data = {"timestamp": x_timestamp, "nonce": x_nonce}
         if not self.verify_signature(data, x_signature):
-            logger.warning(f"Signature check failed, data={data}, signature={x_signature}")
+            logger.warning(
+                f"Signature check failed, data={data}, signature={x_signature}"
+            )
             return False
 
         return True

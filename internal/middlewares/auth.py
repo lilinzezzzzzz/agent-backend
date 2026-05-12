@@ -21,7 +21,7 @@ class _AuthConstants:
     BEARER_PREFIX: str = "Bearer "
 
     # 路径前缀 (认证策略说明)
-    PATH_PUBLIC: str = "/v1/public"      # 公共API，无需认证
+    PATH_PUBLIC: str = "/v1/public"  # 公共API，无需认证
     PATH_INTERNAL: str = "/v1/internal"  # 内部API，签名认证
     # 其他所有路径默认 Token 认证
 
@@ -35,7 +35,7 @@ class _AuthConstants:
         {
             "/auth/login",
             "/auth/register",
-            "/auth/wechat/login",      # 微信登录
+            "/auth/wechat/login",  # 微信登录
             "/docs",
             "/openapi.json",
         }
@@ -117,7 +117,9 @@ class ASGIAuthMiddleware:
         """处理内部接口签名认证"""
         x_signature, x_timestamp, x_nonce = auth_ctx.get_signature_headers()
 
-        if not signature_auth_handler.verify(x_signature=x_signature, x_timestamp=x_timestamp, x_nonce=x_nonce):
+        if not signature_auth_handler.verify(
+            x_signature=x_signature, x_timestamp=x_timestamp, x_nonce=x_nonce
+        ):
             raise AppException(
                 errors.InvalidSignature,
                 message=f"Signature authentication failed, x_signature={x_signature}, x_timestamp={x_timestamp}, x_nonce={x_nonce}",
@@ -137,7 +139,9 @@ class ASGIAuthMiddleware:
 
         user_id = auth_metadata.get("id")
         if not isinstance(user_id, int):
-            raise AppException(errors.Unauthorized, message="Invalid user_id in token metadata")
+            raise AppException(
+                errors.Unauthorized, message="Invalid user_id in token metadata"
+            )
 
         # 设置用户上下文
         logger.debug(f"Set user_id to context: {user_id}")

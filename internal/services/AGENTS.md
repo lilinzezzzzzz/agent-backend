@@ -11,30 +11,47 @@ Service 层承载业务用例、领域规则、跨 DAO 编排、缓存一致性�
 - 对外提供清晰的业务方法，方法名以业务动作表达，不暴露 SQL 或缓存实现细节。
 - 通过 `internal/dao/` 访问数据库或缓存。
 - 多个 DAO 协作时，在 Service 中统一处理事务边界、幂等性和错误转换。
-- 输入输出优先使用明确类型；跨层数据结构优先使用 schema、DTO、dataclass 或 TypedDict。
+- 输入输出优先使用明确类型；Service 对外返回业务数据 DTO，优先使用 dataclass、namedtuple
+  或 TypedDict，不直接返回响应信封。
+- 业务 DTO 可以提供无副作用的 `to_schema()` 方法，把业务数据转换为
+  `internal/schemas/` 中的 API response schema；该方法只能做字段映射，不访问数据库、
+  缓存、上下文或外部服务。
 - 业务异常统一继承项目基类 `AppException`（错误码稳定性规则见全局 `~/.qoder/AGENTS.md`）。
 - 写入后需要立即读取一致数据时，使用 DAO 提供的主库查询能力。
+- 通用分层命名规则见根目录 `AGENTS.md`，Service 层不重复定义。
 
 ## 代码最小正确形态
 
 一个合格 Service 的最小形态：
 
 ```python
+from dataclasses import dataclass
+
 from internal.core import AppException, errors
 from internal.dao.user import UserDao, new_user_dao
 from internal.schemas.user import UserDetailSchema
+
+
+@dataclass(frozen=True, slots=True)
+class UserDetailDTO:
+    id: int
+    name: str
+    phone: str
+
+    def to_schema(self) -> UserDetailSchema:
+        return UserDetailSchema(id=self.id, name=self.name, phone=self.phone)
 
 
 class UserService:
     def __init__(self, *, user_dao: UserDao):
         self._user_dao = user_dao
 
-    async def get_user_detail(self, *, user_id: int) -> UserDetailSchema:
+    async def get_user_detail(self, *, user_id: int) -> UserDetailDTO:
         user = await self._user_dao.get_by_id(user_id)
         if user is None:
             raise AppException(errors.NotFound, message="用户不存在")
 
-        return UserDetailSchema(id=user.id, name=user.name, phone=user.phone)
+        return UserDetailDTO(id=user.id, name=user.name, phone=user.phone)
 
 
 # 全局单例（懒加载）
@@ -56,7 +73,9 @@ def new_user_service() -> UserService:
 - 提供 `new_xxx_service()` 工厂函数作为 FastAPI 依赖注入入口，采用模块级 `_xxx_service` 懒加载单例，避免每次请求重复构造无状态 Service。
 - 业务存在性、权限、状态流转等规则在 Service 内判断。
 - DAO 异常不在这里静默吞掉；业务不可满足时转换为稳定 `AppException`。
-- 返回 Controller 需要的 schema/DTO，不把多余 ORM 细节暴露给 API 层。
+- 返回 Controller 需要的业务 DTO，不把多余 ORM 细节暴露给 API 层。
+- 不在 Service 方法里调用 `success_response`、`success_list_response`、`error_response`
+  或构造 `BaseResponse` / `BaseListResponse`。
 
 ## 数据安全
 

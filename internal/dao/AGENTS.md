@@ -15,6 +15,7 @@ Redis / 缓存访问不放在本层，见 `internal/cache/AGENTS.md`。
 - 读操作优先使用 `querier`、`querier_unsorted`、`col_querier` 等已有 builder。
 - 写后读一致性需要时使用 `write_querier` 或写库 session provider。
 - DAO 方法返回 ORM model、基础值或明确类型，不返回含义不清的临时 dict。
+- 通用分层命名规则见根目录 `AGENTS.md`，DAO 层不重复定义。
 
 ## 代码最小正确形态
 

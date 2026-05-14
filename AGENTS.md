@@ -48,6 +48,29 @@
 - `docs/`：补充文档。
 - `ddl/`、`dml/`：数据库 SQL。
 
+## 分层命名规则
+
+跨 Controller / Service / DAO / Model / Schema 的通用命名在根目录统一定义，子目录
+`AGENTS.md` 不重复维护同一套规则；只补充该层特有约束。
+
+- `{Resource}`：ORM / domain entity，映射数据库表和持久化字段，例如 `Account`、
+  `Order`、`KnowledgeBase`。
+- `{Resource}Dao`：持久化访问对象，封装对应 ORM model 的查询和写入，例如
+  `AccountDao`、`OrderDao`。
+- `{Resource}Service`：业务用例入口，承载领域规则、跨 DAO / 缓存 / 外部服务编排，
+  例如 `AccountService`、`OrderService`。
+- `{Action}DTO` 或 `{Resource}{Action}DTO`：Service 返回给 Controller 的业务数据；
+  Service 对外返回业务 DTO 时优先使用 dataclass 定义，命名使用 `*DTO` 后缀，
+  例如 `LoginDTO`、`AccountLoginDTO`、`OrderSummaryDTO`。
+- `{Action}ReqSchema` 或 `{Resource}{Action}ReqSchema`：API request schema，用于
+  请求体、查询参数或路径参数的传输层校验，例如 `LoginReqSchema`、
+  `AccountLoginReqSchema`。
+- `{Action}RespSchema` 或 `{Resource}{Action}RespSchema`：API response schema，用于
+  `response_model`、响应数据结构和 OpenAPI contract，例如 `LoginRespSchema`、
+  `AccountLoginRespSchema`。
+- `{Resource}DetailSchema` / `{Resource}ItemSchema`：API detail / item schema，用于
+  响应中的资源详情或列表项，例如 `AccountDetailSchema`、`OrderItemSchema`。
+
 ## 常用命令
 
 安装开发依赖：

@@ -15,6 +15,8 @@
 - 对外字段命名、必填性、默认值和枚举值属于兼容性边界，修改前要评估调用方影响。
 - Service 层业务 DTO 可以通过 `to_schema()` 转换为本层 response schema；schema
   自身不得反向依赖 Service、DAO、ORM 或缓存。
+- Service DTO 定义在 `internal/services/dto/`；Schema 层只定义 API request /
+  response schema，不定义 `*DTO`。
 - 通用分层命名规则见根目录 `AGENTS.md`，Schema 层不重复定义。
 
 ## 代码最小正确形态

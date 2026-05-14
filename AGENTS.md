@@ -32,6 +32,7 @@
 - `internal/middlewares/`：认证、请求记录等 ASGI 中间件。
 - `internal/infra/`：数据库、Redis 等基础设施连接。
 - `internal/services/`：业务逻辑。
+- `internal/services/dto/`：Service 对外返回给 Controller 的业务 DTO。
 - `internal/dao/`：ORM 数据访问层。
 - `internal/cache/`：业务缓存层（按业务域组织的 Redis 访问）。
 - `internal/models/`：SQLAlchemy ORM 模型。
@@ -50,7 +51,7 @@
 
 ## 分层命名规则
 
-跨 Controller / Service / DAO / Model / Schema 的通用命名在根目录统一定义，子目录
+跨 Controller / Service / DTO / DAO / Model / Schema 的通用命名在根目录统一定义，子目录
 `AGENTS.md` 不重复维护同一套规则；只补充该层特有约束。
 
 - `{Resource}`：ORM / domain entity，映射数据库表和持久化字段，例如 `Account`、
@@ -61,7 +62,8 @@
   例如 `AccountService`、`OrderService`。
 - `{Action}DTO` 或 `{Resource}{Action}DTO`：Service 返回给 Controller 的业务数据；
   Service 对外返回业务 DTO 时优先使用 dataclass 定义，命名使用 `*DTO` 后缀，
-  例如 `LoginDTO`、`AccountLoginDTO`、`OrderSummaryDTO`。
+  统一放在 `internal/services/dto/<domain>.py`，例如 `LoginDTO`、`AccountLoginDTO`、
+  `OrderSummaryDTO`。
 - `{Action}ReqSchema` 或 `{Resource}{Action}ReqSchema`：API request schema，用于
   请求体、查询参数或路径参数的传输层校验，例如 `LoginReqSchema`、
   `AccountLoginReqSchema`。

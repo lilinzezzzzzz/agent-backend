@@ -1,44 +1,18 @@
 """认证服务层"""
 
 import secrets
-from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from internal.cache.auth import AuthCache, new_auth_cache
 from internal.config import settings
 from internal.core import AppException, errors
 from internal.models.user import User
-from internal.schemas.user import UserDetailSchema, UserLoginRespSchema
+from internal.services.dto.auth import AuthUserDTO, UserLoginDTO
 from internal.services.user import UserService, new_user_service
 from pkg.logger import logger
 from pkg.third_party_auth import WeChatAuthStrategy, WeChatConfig
 
 TOKEN_EXPIRE_MINUTES = 30
-
-
-@dataclass(frozen=True, slots=True)
-class AuthUserDTO:
-    """认证用例返回的用户业务数据。"""
-
-    id: int
-    name: str
-    phone: str
-
-    def to_schema(self) -> UserDetailSchema:
-        """转换为 API 响应 schema。"""
-        return UserDetailSchema(id=self.id, name=self.name, phone=self.phone)
-
-
-@dataclass(frozen=True, slots=True)
-class UserLoginDTO:
-    """认证成功后的业务数据。"""
-
-    user: AuthUserDTO
-    token: str
-
-    def to_schema(self) -> UserLoginRespSchema:
-        """转换为 API 响应 schema。"""
-        return UserLoginRespSchema(user=self.user.to_schema(), token=self.token)
 
 
 class AuthService:

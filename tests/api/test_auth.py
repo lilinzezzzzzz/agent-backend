@@ -10,7 +10,7 @@ from internal.schemas.user import (
     UserRegisterReqSchema,
     WeChatLoginReqSchema,
 )
-from internal.services.auth import AuthUserDTO, UserLoginDTO
+from internal.services.dto.auth import AuthUserDTO, UserLoginDTO
 
 
 class FakeAuthService:

@@ -18,6 +18,8 @@
 - 实际返回值使用 `pkg.toolkit.response` 中的工厂函数：成功调用 `success_response(data=...)`，分页调用 `success_list_response(data=..., page=..., limit=..., total=...)`，错误调用 `error_response(error, message=..., lang=...)`，Service 只返回业务数据，不关心 envelope。
 - 当 Service 返回 dataclass / DTO 且该对象提供 `to_schema()` 时，Controller 负责调用
   `dto.to_schema()` 得到对应 response schema，再传给响应工厂函数。
+- Service DTO 定义位置遵循根目录规则，默认来自 `internal/services/dto/<domain>.py`；
+  Controller 不在本层定义 DTO。
 - 业务逻辑调用 `internal/services/`，不要直接操作 ORM session。
 - 需要读当前用户时使用上下文工具，例如 `pkg.toolkit.context.get_user_id()`，不要重新解析 token。
 - 业务错误使用 `internal.core.AppException` 和 `internal.core.errors`。

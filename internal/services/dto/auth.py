@@ -2,8 +2,6 @@
 
 from dataclasses import dataclass
 
-from internal.schemas.user import UserDetailSchema, UserLoginRespSchema
-
 
 @dataclass(frozen=True, slots=True)
 class AuthUserDTO:
@@ -13,10 +11,6 @@ class AuthUserDTO:
     name: str
     phone: str
 
-    def to_schema(self) -> UserDetailSchema:
-        """转换为 API 响应 schema。"""
-        return UserDetailSchema(id=self.id, name=self.name, phone=self.phone)
-
 
 @dataclass(frozen=True, slots=True)
 class UserLoginDTO:
@@ -24,7 +18,3 @@ class UserLoginDTO:
 
     user: AuthUserDTO
     token: str
-
-    def to_schema(self) -> UserLoginRespSchema:
-        """转换为 API 响应 schema。"""
-        return UserLoginRespSchema(user=self.user.to_schema(), token=self.token)

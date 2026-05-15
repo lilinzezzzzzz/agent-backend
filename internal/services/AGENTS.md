@@ -15,9 +15,8 @@ Service 层承载业务用例、领域规则、跨 DAO 编排、缓存一致性�
   或 TypedDict，不直接返回响应信封。
 - Service 对外返回的业务 DTO 统一定义在 `internal/services/dto/<domain>.py`，
   按业务域拆文件；只在单个 Service 方法内部使用的临时私有数据结构可以留在当前文件。
-- 业务 DTO 可以提供无副作用的 `to_schema()` 方法，把业务数据转换为
-  `internal/schemas/` 中的 API response schema；该方法只能做字段映射，不访问数据库、
-  缓存、上下文或外部服务。
+- 业务 DTO 不依赖 `internal/schemas/`，不提供 `to_schema()` / `to_response()`；DTO 到
+  API response schema 的转换由对应 response schema 的 `from_dto()` 类方法负责。
 - 业务异常统一继承项目基类 `AppException`（错误码稳定性规则见全局 `~/.qoder/AGENTS.md`）。
 - 写入后需要立即读取一致数据时，使用 DAO 提供的主库查询能力。
 - 通用分层命名规则见根目录 `AGENTS.md`，Service 层不重复定义。

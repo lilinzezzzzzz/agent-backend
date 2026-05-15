@@ -16,8 +16,8 @@
 - 请求体、响应体使用 `internal/schemas/` 中的 Pydantic v2 model。
 - `response_model` 统一使用 `BaseResponse[T]` / `BaseListResponse[T]` 声明响应信封（用于 OpenAPI schema 和响应校验）。
 - 实际返回值使用 `pkg.toolkit.response` 中的工厂函数：成功调用 `success_response(data=...)`，分页调用 `success_list_response(data=..., page=..., limit=..., total=...)`，错误调用 `error_response(error, message=..., lang=...)`，Service 只返回业务数据，不关心 envelope。
-- 当 Service 返回 dataclass / DTO 时，Controller 负责调用对应 response schema 的
-  `from_dto()` 得到 API response schema，再传给响应工厂函数。
+- 当 Service 返回 dataclass / DTO 且该对象提供 `to_schema()` 时，Controller 负责调用
+  `dto.to_schema()` 得到对应 response schema，再传给响应工厂函数。
 - Service DTO 定义位置遵循根目录规则，默认来自 `internal/services/dto/<domain>.py`；
   Controller 不在本层定义 DTO。
 - 业务逻辑调用 `internal/services/`，不要直接操作 ORM session。
@@ -84,7 +84,7 @@ async def get_user(
         用户不存在返回 `errors.USER_NOT_FOUND`，无权限返回 `errors.PERMISSION_DENIED`。
     """
     user = await user_service.get_user_detail(user_id=user_id)
-    return success_response(data=UserDetailSchema.from_dto(user))
+    return success_response(data=user.to_schema())
 ```
 
 最低要求：
@@ -92,9 +92,8 @@ async def get_user(
 - 只声明路由、参数、依赖和 response model。
 - `response_model` 统一使用 `BaseResponse[T]` 或 `BaseListResponse[T]` 包装业务 schema，保持响应信封一致。
 - 参数名和 schema 字段名与 API contract 一致。
-- 调用一个明确的 Service 方法完成用例，Service 返回业务数据，Controller 负责通过
-  response schema 的 `from_dto()` 转换并通过 `success_response` / `success_list_response` /
-  `error_response` 包装响应。
+- 调用一个明确的 Service 方法完成用例，Service 返回业务数据，Controller 负责转换为
+  response schema 并通过 `success_response` / `success_list_response` / `error_response` 包装响应。
 - 直接返回响应工厂函数生成的 `CustomORJSONResponse`，不要手动构造 `BaseResponse` 实例。
 - 需要当前用户时只读取上下文，不自行校验 token。
 - 必须提供完整 docstring，至少包含 **业务摘要 / 权限边界 / 业务边界 / Args / Returns** 五个小节，缺一不可。

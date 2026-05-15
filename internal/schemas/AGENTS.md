@@ -13,10 +13,8 @@
 - 字段类型要具体，避免 loose `dict`、`list` 或 `Any`。
 - 需要复用字段时使用小的基础 schema，但不要为了少量字段创建过深继承层级。
 - 对外字段命名、必填性、默认值和枚举值属于兼容性边界，修改前要评估调用方影响。
-- Response schema 可以提供无副作用的 `from_dto()` 类方法，把 Service DTO 转换为
-  API response schema；该方法只能做字段映射，不访问数据库、缓存、上下文或外部服务。
-- Schema 不得依赖 Service 业务逻辑、DAO、ORM 或缓存；如需标注 DTO 类型，优先使用
-  `TYPE_CHECKING` 导入，避免运行时循环依赖。
+- Service 层业务 DTO 可以通过 `to_schema()` 转换为本层 response schema；schema
+  自身不得反向依赖 Service、DAO、ORM 或缓存。
 - Service DTO 定义在 `internal/services/dto/`；Schema 层只定义 API request /
   response schema，不定义 `*DTO`。
 - 通用分层命名规则见根目录 `AGENTS.md`，Schema 层不重复定义。
@@ -47,9 +45,8 @@ class UserDetailSchema(BaseModel):
 - 字段使用具体类型和必要 `Field` 约束。
 - 响应模型不包含密码、token secret、内部缓存 key 或数据库内部字段。
 - schema 只做传输层格式校验，不访问数据库，不判断业务存在性。
-- response schema 的 `from_dto()` 只做 DTO 到 API contract 的字段映射，不构造响应信封。
 - 兼容性字段不要随意改名、改必填或改默认值。
-- response schema 只表达 API contract，不承担业务 DTO 的查询、缓存或业务构造逻辑。
+- response schema 只表达 API contract，不承担业务 DTO 的构造、查询或缓存逻辑。
 
 ## 校验规则
 

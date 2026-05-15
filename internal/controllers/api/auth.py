@@ -56,7 +56,7 @@ async def login(
         用户名或密码错误返回 `errors.Unauthorized`。
     """
     login_data = await auth_service.login(username=req.username, password=req.password)
-    return success_response(data=UserLoginRespSchema.from_dto(login_data))
+    return success_response(data=login_data.to_schema())
 
 
 @router.post("/logout", response_model=BaseResponse[None], summary="用户登出")
@@ -119,7 +119,7 @@ async def register(
         phone=req.phone,
         password=req.password,
     )
-    return success_response(data=UserLoginRespSchema.from_dto(login_data))
+    return success_response(data=login_data.to_schema())
 
 
 @router.get("/me", response_model=BaseResponse[UserDetailSchema], summary="获取当前用户信息")
@@ -144,7 +144,7 @@ async def get_current_user(auth_service: AuthServiceDep) -> CustomORJSONResponse
         用户上下文无效返回 `errors.Unauthorized`。
     """
     user_data = await auth_service.get_current_user(user_id=get_user_id())
-    return success_response(data=UserDetailSchema.from_dto(user_data))
+    return success_response(data=user_data.to_schema())
 
 
 @router.post(
@@ -177,4 +177,4 @@ async def wechat_login(
         授权失败返回 `errors.BadRequest`，第三方异常返回 `errors.InternalServerError`。
     """
     login_data = await auth_service.wechat_login(code=req.code)
-    return success_response(data=UserLoginRespSchema.from_dto(login_data))
+    return success_response(data=login_data.to_schema())

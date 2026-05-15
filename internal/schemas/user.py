@@ -1,13 +1,6 @@
-from __future__ import annotations
-
-from typing import TYPE_CHECKING, Self
-
 from pydantic import BaseModel, Field
 
 from internal.schemas import BaseListResponse
-
-if TYPE_CHECKING:
-    from internal.services.dto.auth import AuthUserDTO, UserLoginDTO
 
 
 class UserLoginReqSchema(BaseModel):
@@ -52,6 +45,13 @@ class ThirdPartyBindPhoneReqSchema(BaseModel):
     sms_code: str = Field(..., description="短信验证码", min_length=4, max_length=8)
 
 
+class UserLoginRespSchema(BaseModel):
+    """用户登录响应"""
+
+    user: "UserDetailSchema"
+    token: str = Field(..., description="访问令牌")
+
+
 class UserListReqSchema(BaseModel):
     name: str = Field(min_length=1, max_length=20)
 
@@ -60,23 +60,6 @@ class UserDetailSchema(BaseModel):
     id: int
     name: str
     phone: str
-
-    @classmethod
-    def from_dto(cls, dto: AuthUserDTO) -> Self:
-        """从认证用户 DTO 构造用户详情响应。"""
-        return cls(id=dto.id, name=dto.name, phone=dto.phone)
-
-
-class UserLoginRespSchema(BaseModel):
-    """用户登录响应"""
-
-    user: UserDetailSchema
-    token: str = Field(..., description="访问令牌")
-
-    @classmethod
-    def from_dto(cls, dto: UserLoginDTO) -> Self:
-        """从认证登录 DTO 构造用户登录响应。"""
-        return cls(user=UserDetailSchema.from_dto(dto.user), token=dto.token)
 
 
 class UserListResponseSchema(BaseListResponse):

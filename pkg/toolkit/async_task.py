@@ -1,6 +1,7 @@
+import asyncio
 import multiprocessing
 import random
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Coroutine, Sequence
 from dataclasses import dataclass
 from functools import partial
 from typing import Any, Literal
@@ -22,6 +23,94 @@ from pkg.logger import logger
 
 
 # ---------- anyio wrapper functions ----------
+def _format_callable_name(
+    func_name: str | None, *, bound_owner: Any = None, fallback: str = "background-task"
+) -> str:
+    if not isinstance(func_name, str):
+        return fallback
+    if bound_owner is not None:
+        owner_name = (
+            bound_owner.__name__
+            if isinstance(bound_owner, type)
+            else bound_owner.__class__.__name__
+        )
+        return f"{owner_name}.{func_name}"
+    return "lambda_func" if func_name == "<lambda>" else func_name
+
+
+def _get_coroutine_name(coro: Coroutine[Any, Any, Any]) -> str:
+    code = getattr(coro, "cr_code", None)
+    func_name = getattr(code, "co_name", None)
+
+    frame = getattr(coro, "cr_frame", None)
+    frame_locals = getattr(frame, "f_locals", None)
+    if isinstance(frame_locals, dict):
+        bound_self = frame_locals.get("self")
+        if bound_self is not None:
+            return _format_callable_name(func_name, bound_owner=bound_self)
+
+        bound_cls = frame_locals.get("cls")
+        if isinstance(bound_cls, type):
+            return _format_callable_name(func_name, bound_owner=bound_cls)
+
+    return _format_callable_name(func_name)
+
+
+def asyncio_run_background[T](
+    coro: Coroutine[Any, Any, T],
+    *,
+    on_error: Callable[[Exception], None] | None = None,
+) -> asyncio.Task[T]:
+    """
+    在当前 asyncio event loop 中后台执行协程，并消费任务结果。
+
+    Args:
+        coro: 需要后台执行的协程对象
+        on_error: 后台任务异常回调；未提供时交给事件循环异常处理器
+
+    Returns:
+        asyncio.Task 对象，可用于取消或检查状态
+    """
+    task_name = _get_coroutine_name(coro)
+    try:
+        task = asyncio.create_task(coro, name=task_name)
+    except RuntimeError:
+        coro.close()
+        raise
+
+    def _consume_result(done_task: asyncio.Task[T]) -> None:
+        done_task_name = done_task.get_name()
+        try:
+            done_task.result()
+        except asyncio.CancelledError:
+            return
+        except Exception as exc:
+            if on_error is not None:
+                try:
+                    on_error(exc)
+                except Exception as handler_exc:
+                    done_task.get_loop().call_exception_handler(
+                        {
+                            "message": f"background task {done_task_name} error handler failed",
+                            "exception": handler_exc,
+                            "source_exception": exc,
+                            "task": done_task,
+                        }
+                    )
+                return
+
+            done_task.get_loop().call_exception_handler(
+                {
+                    "message": f"background task {done_task_name} failed",
+                    "exception": exc,
+                    "task": done_task,
+                }
+            )
+
+    task.add_done_callback(_consume_result)
+    return task
+
+
 async def anyio_run_in_thread(
     func: Callable[..., Any],
     *args: Any,
@@ -43,7 +132,9 @@ async def anyio_run_in_thread(
         函数执行结果
     """
     bound = partial(func, *args, **kwargs)
-    return await to_thread.run_sync(bound, abandon_on_cancel=abandon_on_cancel, limiter=limiter)  # type: ignore
+    return await to_thread.run_sync(
+        bound, abandon_on_cancel=abandon_on_cancel, limiter=limiter
+    )  # type: ignore
 
 
 async def anyio_run_in_process(
@@ -144,19 +235,14 @@ class AnyioTaskHandler:
     # ---------- helpers ----------
     @staticmethod
     def get_coro_func_name(func: Callable[..., Any]) -> str:
-        if getattr(func, "__name__", None) == "<lambda>":
-            return "lambda_func"
-
         while isinstance(func, partial):
             func = func.func
 
         bound_self = getattr(func, "__self__", None)
         func_name = getattr(func, "__name__", None)
-        if bound_self is not None and isinstance(func_name, str):
-            return f"{bound_self.__class__.__name__}.{func_name}"
-        if isinstance(func_name, str):
-            return func_name
-        return str(func)
+        return _format_callable_name(
+            func_name, bound_owner=bound_self, fallback=str(func)
+        )
 
     async def _run_task_inner(
         self,
@@ -222,9 +308,13 @@ class AnyioTaskHandler:
         async def _run():
             if backend == "thread":
                 # AnyIO 4.1.0+: thread 使用 abandon_on_cancel
-                return await anyio_run_in_thread(bound, abandon_on_cancel=cancellable, limiter=self._thread_limiter)
+                return await anyio_run_in_thread(
+                    bound, abandon_on_cancel=cancellable, limiter=self._thread_limiter
+                )
             else:
-                return await anyio_run_in_process(bound, cancellable=cancellable, limiter=self._process_limiter)
+                return await anyio_run_in_process(
+                    bound, cancellable=cancellable, limiter=self._process_limiter
+                )
 
         if timeout and timeout > 0:
             with fail_after(timeout):
@@ -242,9 +332,13 @@ class AnyioTaskHandler:
         timeout: float | None = None,
     ) -> bool:
         if not self._accepting:
-            raise RuntimeError("AsyncTaskManagerAnyIO is shutting down, not accepting new tasks.")
+            raise RuntimeError(
+                "AsyncTaskManagerAnyIO is shutting down, not accepting new tasks."
+            )
         if not self._tg_started or self._tg is None:
-            raise RuntimeError("AsyncTaskManagerAnyIO is not started. Call await start() first.")
+            raise RuntimeError(
+                "AsyncTaskManagerAnyIO is not started. Call await start() first."
+            )
 
         task_id = str(task_id)
         kwargs_dict = kwargs_dict or {}
@@ -263,7 +357,9 @@ class AnyioTaskHandler:
             info = TaskInfo(task_id=task_id, name=coro_name, scope=scope)
             self.tasks[task_id] = info
 
-            self._tg.start_soon(self._run_task_inner, info, coro_func, args_tuple, kwargs_dict, timeout)
+            self._tg.start_soon(
+                self._run_task_inner, info, coro_func, args_tuple, kwargs_dict, timeout
+            )
         return True
 
     async def cancel_task(self, task_id: str) -> bool:
@@ -306,7 +402,9 @@ class AnyioTaskHandler:
                         res = await coro_func(*args)
                     results[index] = res
                 except TimeoutError:
-                    logger.error(f"Task-{index} ({coro_name}) timed out (single task limit).")
+                    logger.error(
+                        f"Task-{index} ({coro_name}) timed out (single task limit)."
+                    )
                     results[index] = None
                 except get_cancelled_exc_class():
                     logger.debug(f"Task-{index} ({coro_name}) cancelled.")
@@ -322,7 +420,9 @@ class AnyioTaskHandler:
                         tg.start_soon(_worker, i, args_tuple)
 
             if scope.cancelled_caught:
-                logger.warning(f"Batch task ({coro_name}) hit global timeout {global_timeout}s.")
+                logger.warning(
+                    f"Batch task ({coro_name}) hit global timeout {global_timeout}s."
+                )
         except Exception as e:
             logger.error(f"Batch task ({coro_name}) unexpected error: {e}")
 
@@ -337,7 +437,14 @@ class AnyioTaskHandler:
         timeout: float | None = None,
         cancellable: bool = False,
     ) -> Any:
-        return await self._execute_sync(sync_func, args_tuple or (), kwargs_dict or {}, timeout, cancellable, "thread")
+        return await self._execute_sync(
+            sync_func,
+            args_tuple or (),
+            kwargs_dict or {},
+            timeout,
+            cancellable,
+            "thread",
+        )
 
     async def run_in_process(
         self,
@@ -348,7 +455,14 @@ class AnyioTaskHandler:
         timeout: float | None = None,
         cancellable: bool = False,
     ) -> Any:
-        return await self._execute_sync(sync_func, args_tuple or (), kwargs_dict or {}, timeout, cancellable, "process")
+        return await self._execute_sync(
+            sync_func,
+            args_tuple or (),
+            kwargs_dict or {},
+            timeout,
+            cancellable,
+            "process",
+        )
 
     async def run_in_threads(
         self,
@@ -359,7 +473,9 @@ class AnyioTaskHandler:
         timeout: float | None = None,
         cancellable: bool = False,
     ) -> list[Any]:
-        return await self._run_batch_sync(sync_func, args_tuple_list, kwargs_dict_list, timeout, cancellable, "thread")
+        return await self._run_batch_sync(
+            sync_func, args_tuple_list, kwargs_dict_list, timeout, cancellable, "thread"
+        )
 
     async def run_in_processes(
         self,
@@ -370,7 +486,14 @@ class AnyioTaskHandler:
         timeout: float | None = None,
         cancellable: bool = False,
     ) -> list[Any]:
-        return await self._run_batch_sync(sync_func, args_tuple_list, kwargs_dict_list, timeout, cancellable, "process")
+        return await self._run_batch_sync(
+            sync_func,
+            args_tuple_list,
+            kwargs_dict_list,
+            timeout,
+            cancellable,
+            "process",
+        )
 
     async def _run_batch_sync(
         self,
@@ -381,7 +504,9 @@ class AnyioTaskHandler:
         cancellable: bool,
         backend: Literal["thread", "process"],
     ) -> list[Any]:
-        resolved_args: list[tuple[Any, ...]] = args_list if args_list is not None else []
+        resolved_args: list[tuple[Any, ...]] = (
+            args_list if args_list is not None else []
+        )
         resolved_kwargs: Sequence[dict[str, Any] | None]
         if kwargs_list is None:
             resolved_kwargs = [None] * len(resolved_args)
@@ -403,11 +528,15 @@ class AnyioTaskHandler:
                     async def _run():
                         if backend == "thread":
                             return await anyio_run_in_thread(
-                                bound, abandon_on_cancel=cancellable, limiter=self._thread_limiter
+                                bound,
+                                abandon_on_cancel=cancellable,
+                                limiter=self._thread_limiter,
                             )
                         else:
                             return await anyio_run_in_process(
-                                bound, cancellable=cancellable, limiter=self._process_limiter
+                                bound,
+                                cancellable=cancellable,
+                                limiter=self._process_limiter,
                             )
 
                     if timeout and timeout > 0:
@@ -425,7 +554,9 @@ class AnyioTaskHandler:
                     logger.error(f"{backend}-{idx} ({func_name}) failed: {e}")
 
         async with create_task_group() as tg:
-            for i, (args, kwargs) in enumerate(zip(resolved_args, resolved_kwargs, strict=False)):
+            for i, (args, kwargs) in enumerate(
+                zip(resolved_args, resolved_kwargs, strict=False)
+            ):
                 tg.start_soon(_worker, i, args, kwargs)
 
         return results

@@ -1,4 +1,4 @@
-"""异步 span 上下文与装饰器。"""
+"""异步 span 上下文与装饰器(参考OTEL)。"""
 
 import re
 import time
@@ -190,6 +190,10 @@ class _AsyncSpanContext:
         exc: BaseException | None,
         tb: Any,
     ) -> bool:
+        if self._frame is None:
+            self._reset_state()
+            return False
+
         elapsed_ms = 0.0
         if self._start_at is not None:
             elapsed_ms = round((time.perf_counter() - self._start_at) * 1000, 3)
@@ -236,6 +240,7 @@ def with_span[**P, T](
         async def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
             async with _AsyncSpanContext(span_name=validated_span_name):
                 return await func(*args, **kwargs)
+            raise RuntimeError("unreachable")
 
         return wrapper
 

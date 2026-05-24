@@ -52,6 +52,12 @@ class UserLoginRespSchema(BaseModel):
     token: str = Field(..., description="访问令牌")
 
 
+class UserLogoutRespSchema(BaseModel):
+    """用户登出响应"""
+
+    message: str = Field(..., description="登出结果")
+
+
 class UserListReqSchema(BaseModel):
     name: str = Field(min_length=1, max_length=20)
 
@@ -62,5 +68,5 @@ class UserDetailSchema(BaseModel):
     phone: str
 
 
-class UserListResponseSchema(BaseListResponse):
-    items: list[UserDetailSchema]
+class UserListResponseSchema(BaseListResponse[UserDetailSchema]):
+    """用户列表响应"""

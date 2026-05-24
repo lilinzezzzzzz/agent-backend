@@ -7,62 +7,61 @@ requires-python = ">=3.12"
 
 # 生产运行时依赖：只保留真正业务需要 import 的模块
 dependencies = [
-    "fastapi",
-    "uvicorn",
-    "starlette>0.49.1",
-    "pydantic",
-    "annotated-types",
-    "anyio>=4.10.0",
-    "httpx",
-    "h11",
-    "httpcore",
-    "idna",
-    "SQLAlchemy",
-    "asyncpg>=0.30.0",
-    "numpy",
-    "pandas",
-    "celery",
-    "APScheduler",
-    "amqp",
-    "kombu",
-    "billiard",
-    "vine",
-    "celery-types",
-    "redis",
-    "loguru",
-    "PyJWT",
-    "bcrypt",
-    "python-dotenv",
-    "shortuuid",
-    "snowflake-id",
-    "openai",
-    "orjson",
-    "tqdm",
-    "jiter",
-    "protobuf",
-    "grpcio",
-    "grpcio-tools",
-    "certifi",
-    "click",
-    "packaging",
-    "python-dateutil",
-    "pytz",
-    "tzdata",
-    "tzlocal",
-    "typing-extensions",
-    "typing-inspection",
-    "xxhash",
+    "fastapi>=0.135.1",
+    "uvicorn>=0.41.0",
+    "starlette>=0.52.1",
+    "pydantic>=2.12.5",
+    "annotated-types>=0.7.0",
+    "anyio>=4.12.1",
+    "httpx>=0.28.1",
+    "h11>=0.16.0",
+    "httpcore>=1.0.9",
+    "idna>=3.11",
+    "SQLAlchemy>=2.0.47",
+    "asyncpg>=0.31.0",
+    "numpy>=2.4.2",
+    "pandas>=3.0.1",
+    "celery>=5.6.2",
+    "APScheduler>=3.11.2",
+    "amqp>=5.3.1",
+    "kombu>=5.6.2",
+    "billiard>=4.2.4",
+    "vine>=5.1.0",
+    "celery-types>=0.24.0",
+    "redis>=7.2.1",
+    "loguru>=0.7.3",
+    "PyJWT>=2.11.0",
+    "bcrypt>=5.0.0",
+    "python-dotenv>=1.2.2",
+    "shortuuid>=1.0.13",
+    "snowflake-id>=1.0.2",
+    "openai>=2.24.0",
+    "orjson>=3.11.7",
+    "tqdm>=4.67.3",
+    "jiter>=0.13.0",
+    "protobuf>=6.33.5",
+    "grpcio>=1.78.0",
+    "grpcio-tools>=1.78.0",
+    "certifi>=2026.2.25",
+    "click>=8.3.1",
+    "packaging>=26.0",
+    "python-dateutil>=2.9.0.post0",
+    "pytz>=2025.2",
+    "tzdata>=2025.3",
+    "tzlocal>=5.3.1",
+    "typing-extensions>=4.15.0",
+    "typing-inspection>=0.4.2",
+    "xxhash>=3.6.0",
     "uvloop>=0.22.1; sys_platform != 'win32'",
-    "httptools",
-    "async-lru>=2.0.5",
+    "httptools>=0.7.1",
+    "async-lru>=2.2.0",
     "celery-redbeat>=2.3.3",
-    "trio>=0.32.0",
-    "pydantic-settings>=2.12.0",
-    "cryptography>=46.0.3",
-    "ruff>=0.14.6",
+    "trio>=0.33.0",
+    "pydantic-settings>=2.13.1",
+    "cryptography>=46.0.5",
     "oss2>=2.19.1",
-    "boto3>=1.42.6",
-    "boto3-stubs>=1.42.6",
+    "boto3>=1.42.59",
+    "boto3-stubs>=1.42.59",
     "uuid6>=2025.0.1",
     "pyyaml>=6.0.3",
     "aiosqlite>=0.22.1",
@@ -83,7 +82,6 @@ dev = [
     "pytest-asyncio",
     "httpx", # 测试请求常用
     "black",
-    "ruff",
     "mypy",
     "types-redis",
     "types-pytz",
@@ -116,39 +114,6 @@ name = "aliyun"
 url = "https://mirrors.aliyun.com/pypi/simple"
 default = true
 python-downloads = false
-
-[tool.ruff]
-# 核心规则
-line-length = 120
-target-version = "py312" # 假设你用 Python 3.12+
-
-[tool.ruff.lint]
-# 启用规则组合：
-# E/W: Pycodestyle
-# F: Pyflakes
-# I: Isort (导入排序)
-# B: Bugbear (发现潜在 bug)
-# UP: Pyupgrade (自动升级语法)
-# FAST: FastAPI 特有规则 (如果 Ruff 版本够新)
-select = ["E", "W", "F", "I", "B", "UP"]
-
-# 忽略规则：
-# E501: 行太长由 formatter 处理，不需要 linter 报错
-ignore = ["E501"]
-
-[tool.ruff.format]
-# 格式化风格
-quote-style = "double"
-indent-style = "space"
-# 保持魔法尾随逗号功能 (True=禁用, False=启用)
-# 也就是你想要的: 加了逗号就换行，没加就折叠
-skip-magic-trailing-comma = false
-# 行尾符
-line-ending = "auto"
-
-[tool.ruff.lint.isort]
-# 导入分组设置
-combine-as-imports = true
 
 [tool.pytest.ini_options]
 markers = [

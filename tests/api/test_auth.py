@@ -22,11 +22,13 @@ class TestAuthEndpoints:
         response = await authenticated_client.get("/v1/auth/me")
         assert response.status_code == 200
         data = response.json()
-        assert "id" in data
-        assert "name" in data
+        assert data["code"] == 20000
+        assert "id" in data["data"]
+        assert "name" in data["data"]
 
     @pytest.mark.asyncio
     async def test_logout(self, authenticated_client):
         """测试登出"""
         response = await authenticated_client.post("/v1/auth/logout")
         assert response.status_code == 200
+        assert response.json()["code"] == 20000

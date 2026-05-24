@@ -14,6 +14,7 @@ from internal.schemas.user import (
     UserDetailSchema,
     UserLoginReqSchema,
     UserLoginRespSchema,
+    UserLogoutRespSchema,
     UserRegisterReqSchema,
     WeChatLoginReqSchema,
 )
@@ -21,6 +22,7 @@ from internal.services.user import UserService, new_user_service
 from pkg.logger import logger
 from pkg.third_party_auth import WeChatAuthStrategy, WeChatConfig
 from pkg.toolkit.context import get_user_id
+from pkg.toolkit.response import ResponsePayload, success_response
 
 _auth_cache = new_auth_cache()
 
@@ -50,13 +52,11 @@ def generate_token() -> str:
 UserServiceDep = Annotated[UserService, Depends(new_user_service)]
 
 
-@router.post(
-    "/login", response_model=BaseResponse[UserLoginRespSchema], summary="用户登录"
-)
+@router.post("/login", response_model=BaseResponse[UserLoginRespSchema], summary="用户登录")
 async def login(
     req: UserLoginReqSchema,
     user_service: UserServiceDep,
-):
+) -> ResponsePayload:
     """
     用户登录接口
 
@@ -86,20 +86,20 @@ async def login(
     }
 
     # 存储 token 到 Redis 并加入用户 token 列表
-    await _auth_cache.save_user_session(
-        user.id, token, user_metadata, ex=TOKEN_EXPIRE_MINUTES * 60
-    )
+    await _auth_cache.save_user_session(user.id, token, user_metadata, ex=TOKEN_EXPIRE_MINUTES * 60)
 
     logger.info(f"User {user.id} logged in successfully, token: {token[:10]}...")
 
-    return UserLoginRespSchema(
-        user=UserDetailSchema(id=user.id, name=user.username, phone=user.phone),
-        token=token,
+    return success_response(
+        data=UserLoginRespSchema(
+            user=UserDetailSchema(id=user.id, name=user.username, phone=user.phone),
+            token=token,
+        )
     )
 
 
-@router.post("/logout", summary="用户登出")
-async def logout(authorization: str | None = Header(None)):
+@router.post("/logout", response_model=BaseResponse[UserLogoutRespSchema], summary="用户登出")
+async def logout(authorization: str | None = Header(None)) -> ResponsePayload:
     """
     用户登出接口
 
@@ -128,16 +128,14 @@ async def logout(authorization: str | None = Header(None)):
     else:
         logger.warning(f"Logout failed: token not found, user_id: {user_id}")
 
-    return {"message": "登出成功"}
+    return success_response(data=UserLogoutRespSchema(message="登出成功"))
 
 
-@router.post(
-    "/register", response_model=BaseResponse[UserLoginRespSchema], summary="用户注册"
-)
+@router.post("/register", response_model=BaseResponse[UserLoginRespSchema], summary="用户注册")
 async def register(
     req: UserRegisterReqSchema,
     user_service: UserServiceDep,
-):
+) -> ResponsePayload:
     """
     用户注册接口
 
@@ -166,15 +164,15 @@ async def register(
         }
 
         # 存储 token 到 Redis 并加入用户 token 列表
-        await _auth_cache.save_user_session(
-            user.id, token, user_metadata, ex=TOKEN_EXPIRE_MINUTES * 60
-        )
+        await _auth_cache.save_user_session(user.id, token, user_metadata, ex=TOKEN_EXPIRE_MINUTES * 60)
 
         logger.info(f"User {user.id} registered successfully, token: {token[:10]}...")
 
-        return UserLoginRespSchema(
-            user=UserDetailSchema(id=user.id, name=user.username, phone=user.phone),
-            token=token,
+        return success_response(
+            data=UserLoginRespSchema(
+                user=UserDetailSchema(id=user.id, name=user.username, phone=user.phone),
+                token=token,
+            )
         )
 
     except ValueError as e:
@@ -184,8 +182,8 @@ async def register(
         raise AppException(errors.InternalServerError, message="注册失败，请稍后重试") from e
 
 
-@router.get("/me", response_model=UserDetailSchema, summary="获取当前用户信息")
-async def get_current_user():
+@router.get("/me", response_model=BaseResponse[UserDetailSchema], summary="获取当前用户信息")
+async def get_current_user() -> ResponsePayload:
     """
     根据 token 查询 Redis 缓存的用户元数据
 
@@ -210,7 +208,7 @@ async def get_current_user():
 
     # TODO: 这里应该从数据库或缓存获取完整的用户信息
     # 暂时返回一个基本的响应
-    return UserDetailSchema(id=user_id, name="unknown", phone="")
+    return success_response(data=UserDetailSchema(id=user_id, name="unknown", phone=""))
 
 
 @router.post(
@@ -221,7 +219,7 @@ async def get_current_user():
 async def wechat_login(
     req: WeChatLoginReqSchema,
     user_service: UserServiceDep,
-):
+) -> ResponsePayload:
     """
     微信登录接口
 
@@ -280,9 +278,11 @@ async def wechat_login(
 
         logger.info(f"WeChat user {user.id} logged in successfully, openid: {openid}")
 
-        return UserLoginRespSchema(
-            user=UserDetailSchema(id=user.id, name=user.username, phone=user.phone),
-            token=token,
+        return success_response(
+            data=UserLoginRespSchema(
+                user=UserDetailSchema(id=user.id, name=user.username, phone=user.phone),
+                token=token,
+            )
         )
 
     except ValueError as e:
@@ -290,9 +290,7 @@ async def wechat_login(
         raise AppException(errors.BadRequest, message=str(e)) from e
     except Exception as e:
         logger.error(f"WeChat login unexpected error: {e}")
-        raise AppException(
-            errors.InternalServerError, message="微信登录失败，请稍后重试"
-        ) from e
+        raise AppException(errors.InternalServerError, message="微信登录失败，请稍后重试") from e
     finally:
         # 关闭策略资源
         await strategy.close()

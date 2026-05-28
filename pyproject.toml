@@ -92,19 +92,6 @@ dev = [
     "pytest-twisted>=1.14.3",
 ]
 
-# CI 构建相关工具（可选，按需添加）
-build = [
-    "build", # python -m build
-    "twine", # 上传包（如果你发包）
-]
-
-[build-system]
-requires = [
-    "setuptools>=79.0.1",
-    "wheel>=0.45.1",
-]
-build-backend = "setuptools.build_meta"
-
 [tool.uv]
 package = false
 default-groups = []

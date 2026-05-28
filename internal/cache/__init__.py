@@ -5,8 +5,11 @@
 """
 
 from internal.cache.auth import AuthCache, new_auth_cache
+from internal.cache.endpoint_guard import EndpointGuardCache, new_endpoint_guard_cache
 
 __all__ = [
     "AuthCache",
+    "EndpointGuardCache",
     "new_auth_cache",
+    "new_endpoint_guard_cache",
 ]

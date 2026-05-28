@@ -59,6 +59,11 @@ def register_middleware(app: FastAPI):
 
     app.add_middleware(ASGIAuthMiddleware)
 
+    # 3. Endpoint Guard 中间件：配置化禁用指定 endpoint，避免进入认证和业务处理
+    from internal.middlewares.endpoint_guard import ASGIEndpointGuardMiddleware
+
+    app.add_middleware(ASGIEndpointGuardMiddleware)
+
     # 2. CORS 中间件：处理跨域请求
     if settings.BACKEND_CORS_ORIGINS:
         from starlette.middleware.cors import CORSMiddleware
@@ -84,10 +89,7 @@ async def lifespan(_app: FastAPI):
     init_settings()
 
     # 初始化日志（使用配置中的格式）
-    init_logger(
-        log_format=settings.LOG_FORMAT,
-        base_log_dir=BASE_LOG_DIR
-        )
+    init_logger(log_format=settings.LOG_FORMAT, base_log_dir=BASE_LOG_DIR)
     # 初始化 DB（使用配置中的 echo）
     init_async_db(echo=settings.DB_ECHO)
     # 初始化 Redis

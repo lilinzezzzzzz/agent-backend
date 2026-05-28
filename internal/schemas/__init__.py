@@ -7,6 +7,30 @@ class OrmModel(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class IgnoreExtraModel(BaseModel):
+    """忽略未声明字段的基类。"""
+
+    model_config = ConfigDict(extra="ignore")
+
+
+class ForbidExtraModel(BaseModel):
+    """拒绝未声明字段的基类。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class AllowExtraModel(BaseModel):
+    """保留未声明字段的基类。"""
+
+    model_config = ConfigDict(extra="allow")
+
+
+class OrmIgnoreExtraModel(BaseModel):
+    """支持 ORM 转换并忽略未声明字段的基类。"""
+
+    model_config = ConfigDict(from_attributes=True, extra="ignore")
+
+
 class BaseResponse[T](BaseModel):
     """基础响应模型
 

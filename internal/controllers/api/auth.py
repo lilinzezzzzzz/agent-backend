@@ -9,12 +9,13 @@ from internal.schemas.user import (
     UserDetailSchema,
     UserLoginReqSchema,
     UserLoginRespSchema,
+    UserLogoutRespSchema,
     UserRegisterReqSchema,
     WeChatLoginReqSchema,
 )
 from internal.services.auth import AuthService, new_auth_service
 from pkg.toolkit.context import get_user_id
-from pkg.toolkit.response import CustomORJSONResponse, success_response
+from pkg.toolkit.response import ResponsePayload, success_response
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
 
@@ -34,7 +35,7 @@ def _extract_bearer_token(authorization: str | None) -> str | None:
 async def login(
     req: UserLoginReqSchema,
     auth_service: AuthServiceDep,
-) -> CustomORJSONResponse:
+) -> ResponsePayload:
     """用户登录。
 
     业务摘要:
@@ -59,11 +60,11 @@ async def login(
     return success_response(data=login_data.to_schema())
 
 
-@router.post("/logout", response_model=BaseResponse[None], summary="用户登出")
+@router.post("/logout", response_model=BaseResponse[UserLogoutRespSchema], summary="用户登出")
 async def logout(
     auth_service: AuthServiceDep,
     authorization: str | None = Header(None),
-) -> CustomORJSONResponse:
+) -> ResponsePayload:
     """用户登出。
 
     业务摘要:
@@ -80,21 +81,21 @@ async def logout(
         authorization: `Authorization` 请求头，支持裸 token 或 `Bearer <token>`。
 
     Returns:
-        `BaseResponse[None]`：成功时 data 为 `None`；
+        `BaseResponse[UserLogoutRespSchema]`：成功时返回登出结果；
         缺少 token 或用户上下文无效返回 `errors.Unauthorized`。
     """
     await auth_service.logout(
         user_id=get_user_id(),
         token=_extract_bearer_token(authorization),
     )
-    return success_response()
+    return success_response(data=UserLogoutRespSchema(message="登出成功"))
 
 
 @router.post("/register", response_model=BaseResponse[UserLoginRespSchema], summary="用户注册")
 async def register(
     req: UserRegisterReqSchema,
     auth_service: AuthServiceDep,
-) -> CustomORJSONResponse:
+) -> ResponsePayload:
     """用户注册。
 
     业务摘要:
@@ -123,7 +124,7 @@ async def register(
 
 
 @router.get("/me", response_model=BaseResponse[UserDetailSchema], summary="获取当前用户信息")
-async def get_current_user(auth_service: AuthServiceDep) -> CustomORJSONResponse:
+async def get_current_user(auth_service: AuthServiceDep) -> ResponsePayload:
     """获取当前用户信息。
 
     业务摘要:
@@ -155,7 +156,7 @@ async def get_current_user(auth_service: AuthServiceDep) -> CustomORJSONResponse
 async def wechat_login(
     req: WeChatLoginReqSchema,
     auth_service: AuthServiceDep,
-) -> CustomORJSONResponse:
+) -> ResponsePayload:
     """微信登录。
 
     业务摘要:

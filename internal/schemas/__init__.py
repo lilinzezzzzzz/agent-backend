@@ -1,10 +1,34 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class OrmModel(BaseModel):
     """支持从 ORM 对象转换的基类。"""
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class IgnoreExtraModel(BaseModel):
+    """忽略未声明字段的基类。"""
+
+    model_config = ConfigDict(extra="ignore")
+
+
+class ForbidExtraModel(BaseModel):
+    """拒绝未声明字段的基类。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class AllowExtraModel(BaseModel):
+    """保留未声明字段的基类。"""
+
+    model_config = ConfigDict(extra="allow")
+
+
+class OrmIgnoreExtraModel(BaseModel):
+    """支持 ORM 转换并忽略未声明字段的基类。"""
+
+    model_config = ConfigDict(from_attributes=True, extra="ignore")
 
 
 class BaseResponse[T](BaseModel):
@@ -20,18 +44,27 @@ class BaseResponse[T](BaseModel):
         @router.get("/user", response_model=BaseResponse[UserInfo])
         async def get_user():
             return BaseResponse(
-                code=200,
+                code=20000,
                 message="success",
                 data=UserInfo(id=1, name="张三")
             )
 
         # 错误响应
-        return BaseResponse(code=400, message="参数错误", data=None)
+        return BaseResponse(code=40000, message="参数错误", data=None)
     """
 
-    code: int = 200
+    code: int = 20000
     message: str = ""
     data: T | None = None
+
+
+class PageData[T](BaseModel):
+    """分页数据载荷。"""
+
+    items: list[T] = Field(default_factory=list)
+    page: int = 1
+    limit: int = 10
+    total: int = 0
 
 
 class BaseListResponse[T](BaseModel):
@@ -48,18 +81,12 @@ class BaseListResponse[T](BaseModel):
         async def list_users(page: int = 1, limit: int = 10):
             users = [UserInfo(id=1, name="张三"), UserInfo(id=2, name="李四")]
             return BaseListResponse(
-                code=200,
+                code=20000,
                 message="success",
-                data=users,
-                page=page,
-                limit=limit,
-                total=100
+                data=PageData(items=users, page=page, limit=limit, total=100)
             )
     """
 
-    code: int = 200
+    code: int = 20000
     message: str = ""
-    data: list[T] = []
-    page: int = 1
-    limit: int = 10
-    total: int = 10
+    data: PageData[T] | None = None

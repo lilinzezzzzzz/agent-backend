@@ -1,4 +1,4 @@
-FROM python:3.12.9-slim
+FROM python:3.12.13-slim-trixie AS builder
 
 # 基础环境变量
 ENV TZ=Etc/UTC \
@@ -11,7 +11,7 @@ ENV TZ=Etc/UTC \
 WORKDIR /app
 
 # 安装 uv
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+COPY --from=ghcr.io/astral-sh/uv:0.11.16 /uv /uvx /bin/
 
 # uv 虚拟环境配置
 # UV_INDEX_URL: 使用阿里云 PyPI 镜像源加速包下载
@@ -29,12 +29,31 @@ COPY pyproject.toml uv.lock ./
 # 此时 VIRTUAL_ENV 已经生效，uv 会自动把包安装到 /app/.venv 中
 RUN uv sync --frozen --no-cache --no-default-groups
 
-COPY . .
+FROM python:3.12.13-slim-trixie AS runtime
+
+# 基础环境变量
+ENV TZ=Etc/UTC \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONIOENCODING=utf-8 \
+    VIRTUAL_ENV=/app/.venv \
+    PATH="/app/.venv/bin:$PATH"
+
+WORKDIR /app
+
+RUN groupadd --system app && useradd --system --gid app --home-dir /app --shell /usr/sbin/nologin app
+
+COPY --from=builder --chown=app:app /app/.venv /app/.venv
+COPY --chown=app:app . .
+
+USER app
 
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD ss -lnt | grep -q 8000 || exit 1
+    CMD ["python", "-c", "import socket; s = socket.create_connection(('127.0.0.1', 8000), 2); s.close()"]
 
 # 启动命令
 ENTRYPOINT ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--loop", "uvloop", "--http", "httptools", "--access-log"]

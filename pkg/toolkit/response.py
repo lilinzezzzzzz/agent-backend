@@ -1,10 +1,10 @@
 from dataclasses import dataclass
 from typing import Any
 
-from fastapi.responses import ORJSONResponse
 from pydantic import BaseModel
+from starlette.responses import JSONResponse
 
-from pkg.toolkit.json import orjson_dumps, orjson_dumps_bytes
+from pkg.toolkit.json import orjson_dumps
 
 # =========================================================
 # 1. 定义状态码结构与全局状态码
@@ -40,140 +40,73 @@ class AppError(AppStatus):
 
 
 # =========================================================
-# 2. 高性能 JSON 响应类
+# 2. 响应载荷
 # =========================================================
 
 
-@dataclass
-class _ResponseBody:
+class ResponsePayload(BaseModel):
     """
-    统一响应体结构
+    统一响应体结构。
+
+    正常 Controller 返回该模型或同结构 dict，让 FastAPI 的 response_model
+    负责最终响应校验、字段过滤和 JSON 序列化。
     """
 
     code: int = 20000
     message: str = ""
     data: Any = None
 
-    def to_dict(self) -> dict:
-        """转换为字典，保留 None 值"""
-        return {"code": self.code, "message": self.message, "data": self.data}
-
-
-class CustomORJSONResponse(ORJSONResponse):
-    """
-    基于 orjson 的高性能响应类。
-
-    Architecture Note:
-        序列化逻辑已下沉至 `pkg.toolkit.json`，确保 Worker 任务与 Web 接口
-        使用完全一致的序列化标准（如 Decimal 和 Numpy 的处理）。
-    """
-
-    media_type = "application/json"
-
-    def render(self, content: Any) -> bytes:
-        """
-        覆写 render 方法。
-        直接返回 bytes，避免 Starlette 内部再次进行 .encode('utf-8')。
-        """
-        # 无需 try-catch，工具函数内部已处理并抛出清洗后的 ValueError，
-        # 框架的 ExceptionHandler 会捕获它。
-        return orjson_dumps_bytes(content)
-
 
 # =========================================================
-# 3. 响应工厂
+# 3. 响应构造
 # =========================================================
 
 
-class _ResponseFactory:
-    @staticmethod
-    def _make_response(
-        *, code: int, data: Any = None, message: str = "", http_status: int = 200
-    ) -> CustomORJSONResponse:
-        """基础响应构造器"""
-        response_body = _ResponseBody(code=code, message=message, data=data)
-        return CustomORJSONResponse(
-            status_code=http_status,
-            content=response_body.to_dict(),
-        )
+def _make_payload(*, code: int, data: Any = None, message: str = "") -> ResponsePayload:
+    """基础响应载荷构造器。"""
+    return ResponsePayload(code=code, message=message, data=data)
 
-    @staticmethod
-    def _process_success_data(data: dict | list | BaseModel | None = None) -> dict | list | None:
-        """
-        验证成功响应的数据类型，并将其转换为最优格式（dict）。
 
-        Args:
-            data: 传入的响应数据。
+def _process_success_data(data: dict | list | BaseModel | None = None) -> dict | list | None:
+    """
+    验证成功响应的数据类型，并展开 Pydantic 模型。
 
-        Returns:
-            转换后的 dict、list 或 None。
+    Args:
+        data: 传入的响应数据。
 
-        Raises:
-            TypeError: 如果数据类型不符合要求。
-        """
-        if data is None:
-            return data
+    Returns:
+        处理后的 dict、list 或 None。
 
-        # 1. 🌟 优先处理 Pydantic 模型并转换
-        if isinstance(data, BaseModel):
-            return data.model_dump(mode="json")
+    Raises:
+        TypeError: 如果数据类型不符合要求。
+    """
+    if data is None:
+        return data
 
-        # 2. 处理列表，检查元素是否为 BaseModel
-        if isinstance(data, list):
-            return [item.model_dump(mode="json") if isinstance(item, BaseModel) else item for item in data]
-
-        # 3. 接着检查 Python 原生类型 (dict)
-        if isinstance(data, dict):
-            return data
-
-        # 4. 如果都不是，抛出错误
+    if isinstance(data, BaseModel):
+        data = data.model_dump(mode="python")
+    elif isinstance(data, list):
+        data = [item.model_dump(mode="python") if isinstance(item, BaseModel) else item for item in data]
+    elif not isinstance(data, dict):
         raise TypeError(
             f"Success response data must be a dict, list, a Pydantic model instance, or None, but received type: {type(data)}"
         )
 
-    def success(self, *, data: dict | list | BaseModel | None = None) -> CustomORJSONResponse:
-        """
-        成功响应
-        """
-        data = self._process_success_data(data)
-        return self._make_response(code=success_status.code, data=data)
-
-    def list(self, *, items: list, page: int, limit: int, total: int) -> CustomORJSONResponse:
-        """
-        分页列表响应
-        """
-        if not isinstance(items, list):
-            raise TypeError("Items must be a list")
-
-        processed_items = self._process_success_data(items)
-        return self._make_response(
-            code=success_status.code,
-            data={"items": processed_items, "page": page, "limit": limit, "total": total},
-        )
-
-    def error(self, error: AppError, *, message: str = "", lang: str = "zh") -> CustomORJSONResponse:
-        """
-        通用错误响应。
-
-        Args:
-            error: GlobalCodes 中定义的错误对象
-            message: 自定义详细信息。如果传入，将拼接到默认文案后面。
-            lang: 语言代码 ('zh', 'en')，默认为 'zh'
-        """
-        # 1. 获取预定义的错误信息 (例如 "请求参数错误")
-        base_msg = error.get_message(lang)
-
-        # 2. 拼接逻辑
-        if message:
-            final_message = f"{base_msg}: {message}"
-        else:
-            final_message = base_msg
-
-        return self._make_response(code=error.code, message=final_message)
+    return data
 
 
-# 全局单例
-_response_factory = _ResponseFactory()
+def _build_error_body(error: AppError, *, message: str | None = "", lang: str = "zh") -> ResponsePayload:
+    """
+    构造错误响应载荷。
+
+    Args:
+        error: GlobalCodes 中定义的错误对象
+        message: 自定义详细信息。如果传入，将拼接到默认文案后面。
+        lang: 语言代码 ('zh', 'en')，默认为 'zh'
+    """
+    base_msg = error.get_message(lang)
+    final_message = f"{base_msg}: {message}" if message else base_msg
+    return _make_payload(code=error.code, message=final_message)
 
 
 # =========================================================
@@ -181,25 +114,34 @@ _response_factory = _ResponseFactory()
 # =========================================================
 
 
-def success_response(data: dict | list | BaseModel | None = None) -> CustomORJSONResponse:
+def success_response(data: dict | list | BaseModel | None = None) -> ResponsePayload:
     """
     成功响应
     """
-    return _response_factory.success(data=data)
+    processed_data = _process_success_data(data)
+    return _make_payload(code=success_status.code, data=processed_data)
 
 
-def success_list_response(data: list, page: int, limit: int, total: int) -> CustomORJSONResponse:
+def success_list_response(data: list, page: int, limit: int, total: int) -> ResponsePayload:
     """
     分页列表响应
     """
-    return _response_factory.list(items=data, page=page, limit=limit, total=total)
+    if not isinstance(data, list):
+        raise TypeError("Items must be a list")
+
+    processed_items = _process_success_data(data)
+    return _make_payload(
+        code=success_status.code,
+        data={"items": processed_items, "page": page, "limit": limit, "total": total},
+    )
 
 
-def error_response(error: AppError, *, message: str = "", lang: str = "zh") -> CustomORJSONResponse:
+def error_response(error: AppError, *, message: str | None = "", lang: str = "zh") -> JSONResponse:
     """
-    通用错误响应
+    通用错误 HTTP 响应
     """
-    return _response_factory.error(error, message=message, lang=lang)
+    response_body = _build_error_body(error=error, message=message, lang=lang)
+    return JSONResponse(content=response_body.model_dump(mode="json"))
 
 
 def wrap_sse_data(content: str | dict) -> str:

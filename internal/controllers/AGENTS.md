@@ -15,7 +15,8 @@
 - Controller 保持薄层，不承载业务规则、复杂查询、缓存编排或外部服务编排。
 - 请求体、响应体使用 `internal/schemas/` 中的 Pydantic v2 model。
 - `response_model` 统一使用 `BaseResponse[T]` / `BaseListResponse[T]` 声明响应信封（用于 OpenAPI schema 和响应校验）。
-- 实际返回值使用 `pkg.toolkit.response` 中的工厂函数：成功调用 `success_response(data=...)`，分页调用 `success_list_response(data=..., page=..., limit=..., total=...)`，错误调用 `error_response(error, message=..., lang=...)`，Service 只返回业务数据，不关心 envelope。
+- 实际返回值使用 `pkg.toolkit.response` 中的 payload 工厂函数：成功调用 `success_response(data=...)`，分页调用 `success_list_response(data=..., page=..., limit=..., total=...)`。这些函数返回可被 FastAPI `response_model` 校验和序列化的响应载荷，不要在正常 Controller 中直接返回 HTTP `Response`。
+- `error_response(error, message=..., lang=...)` 仅用于中间件、异常处理器等必须直接构造 HTTP `Response` 的路径；业务错误在 Controller / Service 中抛 `internal.core.AppException`。
 - 当 Service 返回 dataclass / DTO 且该对象提供 `to_schema()` 时，Controller 负责调用
   `dto.to_schema()` 得到对应 response schema，再传给响应工厂函数。
 - Service DTO 定义位置遵循根目录规则，默认来自 `internal/services/dto/<domain>.py`；
@@ -46,7 +47,7 @@ from fastapi import APIRouter, Depends
 from internal.schemas import BaseResponse
 from internal.schemas.user import UserDetailSchema
 from internal.services.user import UserService, new_user_service
-from pkg.toolkit.response import CustomORJSONResponse, success_response
+from pkg.toolkit.response import ResponsePayload, success_response
 
 router = APIRouter(prefix="/user", tags=["api user"])
 
@@ -61,7 +62,7 @@ UserServiceDep = Annotated[UserService, Depends(new_user_service)]
 async def get_user(
     user_id: int,
     user_service: UserServiceDep,
-) -> CustomORJSONResponse:
+) -> ResponsePayload:
     """获取指定用户的详情信息。
 
     业务摘要:
@@ -92,9 +93,9 @@ async def get_user(
 - 只声明路由、参数、依赖和 response model。
 - `response_model` 统一使用 `BaseResponse[T]` 或 `BaseListResponse[T]` 包装业务 schema，保持响应信封一致。
 - 参数名和 schema 字段名与 API contract 一致。
-- 调用一个明确的 Service 方法完成用例，Service 返回业务数据，Controller 负责转换为
-  response schema 并通过 `success_response` / `success_list_response` / `error_response` 包装响应。
-- 直接返回响应工厂函数生成的 `CustomORJSONResponse`，不要手动构造 `BaseResponse` 实例。
+- 调用一个明确的 Service 方法完成用例，Service 返回业务数据；若返回 DTO，Controller 负责转换为
+  response schema，再通过 `success_response` / `success_list_response` 包装正常响应载荷。
+- 正常 Controller 返回 payload，由 FastAPI `response_model` 执行校验、字段过滤和 JSON 序列化；不要手动构造 HTTP `Response`。
 - 需要当前用户时只读取上下文，不自行校验 token。
 - 必须提供完整 docstring，至少包含 **业务摘要 / 权限边界 / 业务边界 / Args / Returns** 五个小节，缺一不可。
 

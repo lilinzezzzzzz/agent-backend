@@ -1,14 +1,25 @@
 import sys
 import uuid
-import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import BaseModel, Field
+from starlette.responses import JSONResponse
+
+from internal.schemas import BaseListResponse, BaseResponse
+from pkg.toolkit.json import orjson_dumps, orjson_dumps_bytes, orjson_loads
+from pkg.toolkit.response import (
+    AppError,
+    ResponsePayload,
+    error_response,
+    success_list_response,
+    success_response,
+    wrap_sse_data,
+)
 
 # 尝试导入 numpy，用于测试科学计算场景的数据兼容性
 try:
@@ -19,17 +30,6 @@ except ImportError:
     np = None  # type: ignore
     HAS_NUMPY = False
 
-from pkg.toolkit.json import orjson_dumps, orjson_dumps_bytes, orjson_loads
-from pkg.toolkit.response import (
-    AppError,
-    AppStatus,
-    CustomORJSONResponse,
-    error_response,
-    success_list_response,
-    success_response,
-    wrap_sse_data,
-)
-
 # =========================================================
 # 0. Fixtures & Setup (测试脚手架)
 # =========================================================
@@ -38,7 +38,7 @@ from pkg.toolkit.response import (
 class UserSchema(BaseModel):
     id: int
     name: str
-    meta: Dict[str, Any] = Field(default_factory=dict)
+    meta: dict[str, Any] = Field(default_factory=dict)
 
 
 @pytest.fixture
@@ -47,12 +47,12 @@ def sample_uuid() -> uuid.UUID:
 
 
 @pytest.fixture
-def complex_nested_data(sample_uuid: uuid.UUID) -> Dict[str, Any]:
+def complex_nested_data(sample_uuid: uuid.UUID) -> dict[str, Any]:
     """生成包含多种类型的嵌套数据"""
     return {
         "meta": {
             "id": sample_uuid,
-            "created_at": datetime(2025, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+            "created_at": datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC),
             "tags": {"a", "b", "c"},  # Set
         },
         "metrics": [
@@ -108,7 +108,7 @@ class TestOrjsonToolkit:
         """验证 Decimal 的智能转换策略：安全范围内转 float，否则转 string 以防精度丢失"""
         res = orjson_loads(orjson_dumps({"d": decimal_val}))
         assert isinstance(res["d"], expected_type)
-        if expected_type == str:
+        if expected_type is str:
             # 字符串比较需考虑科学计数法格式化差异，这里做简单包含或相等检查
             assert str(check_val).lower() in res["d"].lower()
         else:
@@ -117,7 +117,7 @@ class TestOrjsonToolkit:
     def test_datetime_handling(self):
         """验证时区和时间格式"""
         # UTC 时间
-        dt_utc = datetime(2023, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        dt_utc = datetime(2023, 1, 1, 12, 0, 0, tzinfo=UTC)
         parsed = orjson_loads(orjson_dumps({"dt": dt_utc}))
         assert parsed["dt"].endswith("+00:00") or parsed["dt"].endswith("Z")
 
@@ -171,10 +171,8 @@ class TestResponseWrappers:
         data = {"uid": 100}
         resp = success_response(data=data)
 
-        assert isinstance(resp, CustomORJSONResponse)
-        assert resp.status_code == 200
-
-        body = orjson_loads(resp.body)
+        assert isinstance(resp, ResponsePayload)
+        body = resp.model_dump(mode="json")
         assert body == {"code": 20000, "message": "", "data": data}
 
     def test_success_list_response_structure(self):
@@ -182,7 +180,8 @@ class TestResponseWrappers:
         items = [{"id": 1}, {"id": 2}]
         resp = success_list_response(data=items, page=1, limit=10, total=50)
 
-        body = orjson_loads(resp.body)
+        assert isinstance(resp, ResponsePayload)
+        body = resp.model_dump(mode="json")
         assert body["code"] == 20000
         assert body["data"] == {"items": items, "page": 1, "limit": 10, "total": 50}
 
@@ -201,6 +200,7 @@ class TestResponseWrappers:
         error = AppError(40000, {"zh": "请求参数错误", "en": "Bad Request"})
 
         resp = error_response(error, message=message, lang=lang)
+        assert isinstance(resp, JSONResponse)
         body = orjson_loads(resp.body)
 
         assert body["code"] == 40000
@@ -221,7 +221,7 @@ class TestResponseWrappers:
         """验证 Pydantic 模型直接作为响应数据"""
         user = UserSchema(id=1, name="Admin", meta={"role": "root"})
         resp = success_response(data=user)
-        body = orjson_loads(resp.body)
+        body = resp.model_dump(mode="json")
 
         assert body["data"]["id"] == 1
         assert body["data"]["meta"]["role"] == "root"
@@ -232,11 +232,11 @@ class TestResponseWrappers:
 # =========================================================
 
 # 定义测试用 FastAPI 应用
-app_test = FastAPI(default_response_class=CustomORJSONResponse)
+app_test = FastAPI()
 
 
-@app_test.get("/api/types")
-def endpoint_types():
+@app_test.get("/api/types", response_model=BaseResponse[dict[str, Any]])
+def endpoint_types() -> ResponsePayload:
     return success_response(
         {
             "big_int": 2**60,
@@ -247,25 +247,19 @@ def endpoint_types():
     )
 
 
-@app_test.get("/api/list")
-def endpoint_list():
+@app_test.get("/api/list", response_model=BaseListResponse[int])
+def endpoint_list() -> ResponsePayload:
     return success_list_response([1, 2, 3], page=1, limit=10, total=100)
 
 
 @app_test.get("/api/error")
-def endpoint_error(custom_msg: Optional[str] = None):
+def endpoint_error(custom_msg: str | None = None) -> JSONResponse:
     err = AppError(50001, {"zh": "系统繁忙", "en": "System Busy"})
     return error_response(err, message=custom_msg)
 
 
-@app_test.get("/api/nan")
-def endpoint_nan():
-    # 测试非标准 JSON 值的处理（根据 orjson 配置，默认可能报错或处理）
-    # 在本框架中，我们期望它被安全处理（通常 dumps 默认配置不支持 NaN，会抛错，
-    # 除非开启 OPT_NON_STR_KEYS 等，这里测试框架是否捕获异常或能否序列化）
-    # *注意*：标准 JSON 不支持 NaN。orjson 默认会抛出异常。
-    # 这里我们测试应用层是否能捕获并返回 500，或者如果开启了 option 后的行为。
-    # 假设我们只测试 standard behavior:
+@app_test.get("/api/nan", response_model=BaseResponse[dict[str, Any]])
+def endpoint_nan() -> ResponsePayload:
     return success_response({"val": float("nan")})
 
 
@@ -285,7 +279,7 @@ class TestFastAPIIntegration:
         assert data["code"] == 20000
         # 验证大整数未丢失精度（Python client 自动处理，但在 JS 前端需注意）
         assert data["data"]["big_int"] == 2**60
-        assert data["data"]["decimal"] == 100.5  # 小数位安全转换
+        assert data["data"]["decimal"] == "100.50"  # FastAPI/Pydantic 默认保留 Decimal 文本精度
         assert "2025-12-25" in data["data"]["date"]
         assert data["data"]["uuid"] == "550e8400-e29b-41d4-a716-446655440000"
 
@@ -311,8 +305,8 @@ class TestFastAPIIntegration:
         """验证包含 Unicode 字符的响应编码正确"""
 
         # 构造包含中文、Emoji 的响应
-        @app_test.get("/api/unicode")
-        def endpoint_unicode():
+        @app_test.get("/api/unicode", response_model=BaseResponse[dict[str, str]])
+        def endpoint_unicode() -> ResponsePayload:
             return success_response({"msg": "你好", "emoji": "🚀"})
 
         resp = client.get("/api/unicode")
@@ -322,11 +316,6 @@ class TestFastAPIIntegration:
 
     def test_handling_invalid_numbers(self):
         """测试 NaN/Infinity 的处理 (Robustness)"""
-        # 逻辑验证：
-        # 我们在 pkg/toolkit/json.py 中强制将 NaN/Infinity 映射为 None。
-        # 因此，这里必须严格断言结果为 None (JSON null)，
-        # 任何形式的 NaN/Inf 都不应传递给前端。
-
         resp = client.get("/api/nan")
 
         # 1. 确保服务正常响应
@@ -335,9 +324,10 @@ class TestFastAPIIntegration:
         body = resp.json()
         val = body["data"]["val"]
 
-        # 2. 严格断言：必须被转换为 None
-        # 如果这里变成了 float('nan') 或字符串 "NaN"，说明 handler 逻辑未生效，属于 Bug
-        assert val is None, f"Expected invalid number to be converted to None (JSON null), but got type: {type(val)} value: {val}"
+        # 2. 严格断言：必须由 FastAPI/Pydantic 转换为 JSON null
+        assert val is None, (
+            f"Expected invalid number to be converted to None (JSON null), but got type: {type(val)} value: {val}"
+        )
 
 
 if __name__ == "__main__":

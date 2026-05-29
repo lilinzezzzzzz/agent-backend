@@ -29,6 +29,7 @@ from pkg.toolkit.types import lazy_proxy
 
 # 支持的数据库类型
 DBType = Literal["mysql", "postgresql", "oracle"]
+EndpointGuardSource = Literal["settings", "redis", "settings+redis"]
 
 # 数据库驱动映射
 DB_DRIVER_MAP: dict[str, str] = {
@@ -87,6 +88,14 @@ class Settings(BaseSettings):
     REDIS_PORT: int = 6379
     REDIS_PASSWORD: SecretStr = SecretStr("")
     REDIS_DB: int = 0
+
+    # --- Endpoint Guard ---
+    ENDPOINT_GUARD_ENABLED: bool = True
+    ENDPOINT_GUARD_SOURCE: EndpointGuardSource = "settings"
+    ENDPOINT_GUARD_RULES: str = "[]"
+    ENDPOINT_GUARD_REDIS_KEY: str = "endpoint_guard:rules"
+    ENDPOINT_GUARD_CACHE_TTL_SECONDS: int = 10
+    ENDPOINT_GUARD_FAIL_OPEN: bool = True
 
     model_config = SettingsConfigDict(
         case_sensitive=True,

@@ -1,8 +1,9 @@
 """认证模块测试"""
 
-import json
-
 import pytest
+import pytest_asyncio
+from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
 
 from internal.controllers.api import auth as auth_controller
 from internal.schemas.user import (
@@ -47,37 +48,54 @@ class FakeAuthService:
         )
 
 
-def _response_json(response) -> dict:
-    return json.loads(response.body)
+def _response_payload(response) -> dict:
+    return response.model_dump(mode="json")
+
+
+@pytest_asyncio.fixture
+async def auth_client():
+    app = FastAPI()
+    app.include_router(auth_controller.router, prefix="/v1")
+    app.dependency_overrides[auth_controller.new_auth_service] = lambda: FakeAuthService()
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        yield client
+
+    app.dependency_overrides.clear()
 
 
 class TestAuthEndpoints:
     """测试认证 API 端点"""
 
     @pytest.mark.asyncio
-    async def test_login_success(self, client):
+    async def test_login_success(self, auth_client):
         """测试登录成功"""
-        response = await client.post(
+        response = await auth_client.post(
             "/v1/auth/login",
             json={"username": "testuser", "password": "password123"},
         )
-        # 由于数据库中可能没有测试用户，这里只检查响应格式
-        assert response.status_code in [200, 401]
+        assert response.status_code == 200
+        assert response.json()["data"]["token"] == "tk_login"
 
     @pytest.mark.asyncio
-    async def test_get_current_user_authenticated(self, authenticated_client):
+    async def test_get_current_user_authenticated(self, auth_client):
         """测试获取当前用户信息（已认证）"""
-        response = await authenticated_client.get("/v1/auth/me")
+        response = await auth_client.get("/v1/auth/me")
         assert response.status_code == 200
         data = response.json()
-        assert "id" in data
-        assert "name" in data
+        assert data["code"] == 20000
+        assert "id" in data["data"]
+        assert "name" in data["data"]
 
     @pytest.mark.asyncio
-    async def test_logout(self, authenticated_client):
+    async def test_logout(self, auth_client):
         """测试登出"""
-        response = await authenticated_client.post("/v1/auth/logout")
+        response = await auth_client.post("/v1/auth/logout", headers={"Authorization": "Bearer tk_logout"})
         assert response.status_code == 200
+        assert response.json()["code"] == 20000
 
 
 class TestAuthControllerResponseModels:
@@ -90,7 +108,7 @@ class TestAuthControllerResponseModels:
             FakeAuthService(),
         )
 
-        assert _response_json(response) == {
+        assert _response_payload(response) == {
             "code": 20000,
             "message": "",
             "data": {
@@ -110,7 +128,7 @@ class TestAuthControllerResponseModels:
             FakeAuthService(),
         )
 
-        assert _response_json(response)["data"] == {
+        assert _response_payload(response)["data"] == {
             "user": {"id": 2, "name": "newuser", "phone": "13800138001"},
             "token": "tk_register",
         }
@@ -119,13 +137,17 @@ class TestAuthControllerResponseModels:
     async def test_logout_uses_success_envelope(self):
         response = await auth_controller.logout(FakeAuthService(), authorization="Bearer tk_logout")
 
-        assert _response_json(response) == {"code": 20000, "message": "", "data": None}
+        assert _response_payload(response) == {
+            "code": 20000,
+            "message": "",
+            "data": {"message": "登出成功"},
+        }
 
     @pytest.mark.asyncio
     async def test_get_current_user_wraps_service_data_in_response_model(self):
         response = await auth_controller.get_current_user(FakeAuthService())
 
-        assert _response_json(response)["data"] == {
+        assert _response_payload(response)["data"] == {
             "id": 999,
             "name": "current",
             "phone": "13800138002",
@@ -138,7 +160,7 @@ class TestAuthControllerResponseModels:
             FakeAuthService(),
         )
 
-        assert _response_json(response)["data"] == {
+        assert _response_payload(response)["data"] == {
             "user": {"id": 3, "name": "wechat", "phone": ""},
             "token": "tk_wechat",
         }

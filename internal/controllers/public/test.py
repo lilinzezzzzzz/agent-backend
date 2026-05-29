@@ -4,10 +4,11 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from internal.core import AppException, errors
+from internal.schemas import BaseResponse
 from internal.utils.anyio_task import anyio_task_manager
 from internal.utils.stream import stream_with_chunk_control
 from pkg.logger import logger
-from pkg.toolkit.response import success_response
+from pkg.toolkit.response import ResponsePayload, success_response
 
 router = APIRouter(prefix="/test", tags=["public test"])
 
@@ -22,8 +23,12 @@ class TestValidationRequest(BaseModel):
 
 
 # ==================== 测试接口 ====================
-@router.post("/test_validation_error", summary="测试请求验证异常")
-async def test_validation_error(req: TestValidationRequest):
+@router.post(
+    "/test_validation_error",
+    response_model=BaseResponse[TestValidationRequest],
+    summary="测试请求验证异常",
+)
+async def test_validation_error(req: TestValidationRequest) -> ResponsePayload:
     """
     测试 RequestValidationError 在中间件中的处理。
 
@@ -53,8 +58,12 @@ async def async_task():
     await anyio.sleep(10)
 
 
-@router.get("/test_contextvars_on_asyncio_task", summary="测试Contextvars在Asyncio任务")
-async def test_contextvars_on_asyncio_task():
+@router.get(
+    "/test_contextvars_on_asyncio_task",
+    response_model=BaseResponse[None],
+    summary="测试Contextvars在Asyncio任务",
+)
+async def test_contextvars_on_asyncio_task() -> ResponsePayload:
     await anyio_task_manager.add_task("test", coro_func=async_task)
     return success_response()
 
@@ -106,7 +115,5 @@ async def fake_stream_generator():
 
 @router.get("/chat/sse-stream/timeout", summary="测试SSE超时控制")
 async def chat_endpoint(request: Request):
-    wrapped_generator = stream_with_chunk_control(
-        generator=fake_stream_generator(), chunk_timeout=2.0, is_sse=True
-    )
+    wrapped_generator = stream_with_chunk_control(generator=fake_stream_generator(), chunk_timeout=2.0, is_sse=True)
     return StreamingResponse(wrapped_generator, media_type="text/event-stream")

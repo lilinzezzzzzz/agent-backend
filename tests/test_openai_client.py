@@ -5,7 +5,7 @@ import pytest
 
 # 假设您的优化后的代码位于 pkg/openai_client.py
 # 请确保您的文件结构能够正确导入
-from pkg.toolkit.openai_cli import ChatCompletionRes, OpenAIClient
+from pkg.toolkit.openai_cli import OpenAIClient
 
 # --- 测试配置 ---
 BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
@@ -17,20 +17,18 @@ API_KEY = os.environ.get("ALIYUN_API_KEY", "")
 
 # ------------------
 
+
 # 使用 pytest.fixture 来创建 client 实例，供所有测试用例使用
 @pytest.fixture(scope="module")
 def client() -> OpenAIClient:
     """提供一个 OpenAIClient 实例"""
-    return OpenAIClient(
-        base_url=BASE_URL,
-        model=MODEL,
-        api_key=API_KEY
-    )
+    return OpenAIClient(base_url=BASE_URL, model=MODEL, api_key=API_KEY)
 
 
 # 通用的用户消息列表
 MESSAGES: list[dict[str, Any]] = [
-    {"role": "user", "content": "请用一句话介绍一下通义千问模型。"}]
+    {"role": "user", "content": "请用一句话介绍一下通义千问模型。"}
+]
 
 
 @pytest.mark.asyncio
@@ -38,26 +36,17 @@ async def test_chat_completion_success(client: OpenAIClient):
     """测试非流式 chat_completion 方法的成功调用"""
     print(f"\n--- Testing chat_completion with model: {client.model} ---")
 
-    response: ChatCompletionRes = await client.chat_completion(
-        messages=MESSAGES,
-        temperature=0.7,
-        max_tokens=100
+    response = await client.chat_completion(
+        messages=MESSAGES, temperature=0.7, max_tokens=100
     )
 
-    # 1. 断言没有错误发生
-    assert response.error is None, f"chat_completion failed with error: {response.error}"
-
-    # 2. 断言返回了 ChatCompletion 对象
-    assert response.chat_completion is not None, "chat_completion returned None result"
-
-    # 3. 断言响应内容有效
-    content = response.chat_completion.choices[0].message.content
-    assert isinstance(content, str) and len(content) > 10, "Response content is too short or invalid"
+    # 1. 断言响应内容有效
+    content = response.choices[0].message.content
+    assert isinstance(content, str) and len(content) > 10, (
+        "Response content is too short or invalid"
+    )
 
     print(f"Response Content: {content[:50]}...")
-
-    # 4. 断言时间戳有效
-    assert response.start_at > 0 and response.end_at > response.start_at, "Invalid timestamps"
 
 
 @pytest.mark.asyncio
@@ -68,9 +57,7 @@ async def test_chat_completion_stream_success(client: OpenAIClient):
     full_content = ""
     # 调用流式方法
     async_generator = client.chat_completion_stream(
-        messages=MESSAGES,
-        temperature=0.7,
-        max_tokens=100
+        messages=MESSAGES, temperature=0.7, max_tokens=100
     )
 
     chunk_count = 0
@@ -85,7 +72,9 @@ async def test_chat_completion_stream_success(client: OpenAIClient):
     assert chunk_count > 1, "Stream did not yield enough chunks (or failed silently)"
 
     # 2. 断言最终内容有效
-    assert isinstance(full_content, str) and len(full_content) > 10, "Streamed content is too short or invalid"
+    assert isinstance(full_content, str) and len(full_content) > 10, (
+        "Streamed content is too short or invalid"
+    )
 
     print(f"Streamed Content: {full_content[:50]}...")
 
@@ -98,21 +87,8 @@ async def test_chat_completion_error_handling(client: OpenAIClient):
     # 构造一个无效的消息列表 (缺少 role)
     invalid_messages: list[dict[str, Any]] = [{"content": "This message is invalid"}]
 
-    # 预期的行为是 `_convert_messages` 会抛出 ValueError，然后被 `chat_completion` 捕获
-    response: ChatCompletionRes = await client.chat_completion(
-        messages=invalid_messages
-    )
-
-    # 1. 断言发生了错误
-    assert response.error is not None, "Error handling failed, expected an error"
-
-    # 2. 断言没有返回 ChatCompletion 对象
-    assert response.chat_completion is None, "Error handling failed, returned a result when expected an error"
-
-    # 3. 断言错误信息中包含预期的关键字
-    assert "missing role" in str(response.error), "Error message does not contain 'missing role'"
-
-    print(f"Caught expected error: {response.error}")
+    with pytest.raises(ValueError, match="missing role"):
+        await client.chat_completion(messages=invalid_messages)
 
 
 @pytest.mark.asyncio
@@ -120,14 +96,6 @@ async def test_chat_completion_with_empty_messages(client: OpenAIClient):
     """测试空消息列表"""
     print("\n--- Testing chat_completion with Empty Messages ---")
 
-    response: ChatCompletionRes = await client.chat_completion(
-        messages=[]
-    )
-
-    # 客户端在调用 API 之前会将空列表转换为 []，API可能会返回错误或空响应
-    # 如果 API 接受空消息并返回错误，我们捕获它
-    # 如果代码中 _convert_messages 允许空列表，但API拒绝，则应捕获API错误
-    assert response.error is not None, "Expected an error or invalid message response for empty list"
-    assert response.chat_completion is None
-
-    print(f"Caught expected API error for empty messages: {response.error}")
+    # 客户端在调用 API 之前会将空列表转换为 []，API 可能会返回错误。
+    with pytest.raises(Exception):
+        await client.chat_completion(messages=[])

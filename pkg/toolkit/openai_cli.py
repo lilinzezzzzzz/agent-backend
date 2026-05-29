@@ -1,11 +1,10 @@
-import time
-from collections.abc import AsyncGenerator
-from typing import Any, NamedTuple
+from collections.abc import AsyncGenerator, Mapping, Sequence
+from dataclasses import dataclass
+from enum import StrEnum
+from typing import Any
 
 import openai
-
-# 导入所有可能用到的异常类型，以便更精确地捕获
-from openai import NOT_GIVEN, APIError
+from openai import NOT_GIVEN, OpenAIError
 from openai.types.chat import (
     ChatCompletion,
     ChatCompletionAssistantMessageParam,
@@ -17,24 +16,112 @@ from openai.types.chat import (
     ChatCompletionUserMessageParam,
 )
 from openai.types.chat.chat_completion_chunk import ChatCompletionChunk
+from pydantic import BaseModel
 
-from pkg.logger import logger
+
+class ThinkingMode(StrEnum):
+    AUTO = "auto"
+    ENABLED = "enabled"
+    DISABLED = "disabled"
 
 
-class ChatCompletionRes(NamedTuple):
-    """聊天补全结果的封装，包含时间戳和结果/错误信息"""
-    start_at: int  # 毫秒时间戳
-    end_at: int  # 毫秒时间戳
-    chat_completion: ChatCompletion | None = None
-    error: str | dict | None = None
+class StructuredOutputMode(StrEnum):
+    NATIVE = "native"
+    JSON_OBJECT = "json_object"
+    NATIVE_WITH_JSON_OBJECT_FALLBACK = "native_with_json_object_fallback"
+
+
+class ThinkingParamStyle(StrEnum):
+    NONE = "none"
+    REASONING_EFFORT = "reasoning_effort"
+    EXTRA_BODY_THINKING = "extra_body_thinking"
+
+
+class OpenAIClientError(RuntimeError):
+    """Base exception raised by OpenAIClient helper methods."""
+
+
+class StructuredOutputRefusalError(OpenAIClientError):
+    """Raised when a model refuses a structured output request."""
+
+
+class StructuredOutputParseError(OpenAIClientError):
+    """Raised when a structured output response cannot be parsed."""
+
+
+@dataclass(frozen=True)
+class ProviderCapabilities:
+    """OpenAI-compatible provider behavior switches."""
+
+    name: str
+    structured_output_mode: StructuredOutputMode = (
+        StructuredOutputMode.NATIVE_WITH_JSON_OBJECT_FALLBACK
+    )
+    thinking_param_style: ThinkingParamStyle = ThinkingParamStyle.NONE
+    supports_reasoning_effort: bool = False
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "structured_output_mode",
+            StructuredOutputMode(self.structured_output_mode),
+        )
+        object.__setattr__(
+            self,
+            "thinking_param_style",
+            ThinkingParamStyle(self.thinking_param_style),
+        )
+
+
+PROVIDER_CAPABILITIES: dict[str, ProviderCapabilities] = {
+    "openai": ProviderCapabilities(
+        name="openai",
+        structured_output_mode=StructuredOutputMode.NATIVE,
+        thinking_param_style=ThinkingParamStyle.REASONING_EFFORT,
+        supports_reasoning_effort=True,
+    ),
+    "deepseek": ProviderCapabilities(
+        name="deepseek",
+        structured_output_mode=StructuredOutputMode.JSON_OBJECT,
+        thinking_param_style=ThinkingParamStyle.EXTRA_BODY_THINKING,
+        supports_reasoning_effort=True,
+    ),
+    "mimo": ProviderCapabilities(
+        name="mimo",
+        structured_output_mode=StructuredOutputMode.NATIVE_WITH_JSON_OBJECT_FALLBACK,
+        thinking_param_style=ThinkingParamStyle.EXTRA_BODY_THINKING,
+        supports_reasoning_effort=True,
+    ),
+    "xiaomi": ProviderCapabilities(
+        name="xiaomi",
+        structured_output_mode=StructuredOutputMode.NATIVE_WITH_JSON_OBJECT_FALLBACK,
+        thinking_param_style=ThinkingParamStyle.EXTRA_BODY_THINKING,
+        supports_reasoning_effort=True,
+    ),
+    "openai_compatible": ProviderCapabilities(name="openai_compatible"),
+}
 
 
 class OpenAIClient:
-    """封装 OpenAI 客户端，提供非流式和流式聊天补全功能"""
+    """Async OpenAI-compatible chat completion client."""
 
-    def __init__(self, base_url: str, model: str, timeout: int = 180, api_key: str = "password"):
-        # 优化：API key 最好从环境变量或配置中获取，而不是硬编码默认值
+    def __init__(
+        self,
+        base_url: str,
+        model: str,
+        timeout: int = 180,
+        api_key: str = "password",
+        provider: str | None = None,
+        provider_capabilities: ProviderCapabilities | None = None,
+    ):
+        self.base_url = base_url
         self.model = model
+        self.provider = self._normalize_provider(provider) or self._infer_provider(
+            base_url, model
+        )
+        self.provider_capabilities = (
+            provider_capabilities or self._get_provider_capabilities(self.provider)
+        )
         self.client = openai.AsyncOpenAI(
             api_key=api_key,
             base_url=base_url,
@@ -42,12 +129,61 @@ class OpenAIClient:
         )
 
     @staticmethod
+    def _normalize_provider(provider: str | None) -> str | None:
+        if not provider:
+            return None
+        return provider.lower().replace("-", "_")
+
+    @classmethod
+    def _infer_provider(cls, base_url: str, model: str) -> str:
+        value = f"{base_url} {model}".lower()
+        if "deepseek" in value:
+            return "deepseek"
+        if "xiaomimimo" in value or "mimo" in value:
+            return "mimo"
+        if "openai" in value:
+            return "openai"
+        return "openai_compatible"
+
+    @classmethod
+    def _get_provider_capabilities(cls, provider: str) -> ProviderCapabilities:
+        return PROVIDER_CAPABILITIES.get(
+            provider, PROVIDER_CAPABILITIES["openai_compatible"]
+        )
+
+    @staticmethod
+    def _normalize_thinking_mode(
+        thinking: bool | ThinkingMode | str | None,
+    ) -> ThinkingMode | None:
+        if thinking is None:
+            return None
+        if thinking is True:
+            return ThinkingMode.ENABLED
+        if thinking is False:
+            return ThinkingMode.DISABLED
+        if isinstance(thinking, ThinkingMode):
+            return thinking
+        try:
+            return ThinkingMode(thinking)
+        except ValueError as e:
+            raise ValueError(
+                "thinking must be one of True, False, 'auto', 'enabled', or 'disabled'"
+            ) from e
+
+    @staticmethod
     def _convert_messages(
-        messages: list[dict[str, Any]]
+        messages: Sequence[Mapping[str, Any]],
     ) -> list[ChatCompletionMessageParam]:
-        """统一将 messages 转换为符合 OpenAI SDK 的格式，并进行基本校验"""
+        """Convert loose message mappings to OpenAI SDK chat message params."""
         if not messages:
             return []
+
+        def _require_content(role_name: str, message_content: Any, index: int) -> Any:
+            if message_content is None:
+                raise ValueError(
+                    f"{role_name} message[{index}] missing required 'content'"
+                )
+            return message_content
 
         converted: list[ChatCompletionMessageParam] = []
         for i, msg in enumerate(messages):
@@ -55,180 +191,355 @@ class OpenAIClient:
             content = msg.get("content")
 
             if not role:
-                # 优化：使用更具体的异常类型
                 raise ValueError(f"Invalid message[{i}] missing role: {msg}")
 
-            def _require_content(role_name: str) -> Any:
-                if content is None:
-                    raise ValueError(f"{role_name} message[{i}] missing required 'content'")
-                return content
-
-            # 优化：只传递非 None 的可选参数，使消息体更简洁
             if role == "user":
-                converted.append(ChatCompletionUserMessageParam(role="user", content=_require_content("user")))
+                converted.append(
+                    ChatCompletionUserMessageParam(
+                        role="user", content=_require_content("user", content, i)
+                    )
+                )
             elif role == "system":
-                converted.append(ChatCompletionSystemMessageParam(role="system", content=_require_content("system")))
+                converted.append(
+                    ChatCompletionSystemMessageParam(
+                        role="system", content=_require_content("system", content, i)
+                    )
+                )
             elif role == "assistant":
-                assistant_msg: ChatCompletionAssistantMessageParam = {"role": "assistant"}
+                assistant_msg: ChatCompletionAssistantMessageParam = {
+                    "role": "assistant"
+                }
                 if content is not None:
                     assistant_msg["content"] = content
                 if msg.get("tool_calls") is not None:
                     assistant_msg["tool_calls"] = msg["tool_calls"]
                 if msg.get("function_call") is not None:
                     assistant_msg["function_call"] = msg["function_call"]
-                if "content" not in assistant_msg and "tool_calls" not in assistant_msg and "function_call" not in assistant_msg:
+                if (
+                    "content" not in assistant_msg
+                    and "tool_calls" not in assistant_msg
+                    and "function_call" not in assistant_msg
+                ):
                     raise ValueError(
                         f"assistant message[{i}] must provide at least one of content/tool_calls/function_call"
                     )
-                # 忽略不太常用的 refusal/audio 等，除非确定需要支持
                 converted.append(assistant_msg)
             elif role == "developer":
                 developer_msg: ChatCompletionDeveloperMessageParam = {
                     "role": "developer",
-                    "content": _require_content("developer"),
+                    "content": _require_content("developer", content, i),
                 }
                 if msg.get("name") is not None:
                     developer_msg["name"] = msg["name"]
                 converted.append(developer_msg)
             elif role == "tool":
                 if not msg.get("tool_call_id"):
-                    raise ValueError(f"Tool message[{i}] missing required 'tool_call_id'")
-                converted.append(ChatCompletionToolMessageParam(
-                    role="tool",
-                    content=_require_content("tool"),
-                    tool_call_id=msg["tool_call_id"],
-                ))
+                    raise ValueError(
+                        f"Tool message[{i}] missing required 'tool_call_id'"
+                    )
+                converted.append(
+                    ChatCompletionToolMessageParam(
+                        role="tool",
+                        content=_require_content("tool", content, i),
+                        tool_call_id=msg["tool_call_id"],
+                    )
+                )
             elif role == "function":
                 if not msg.get("name"):
                     raise ValueError(f"Function message[{i}] missing required 'name'")
-                converted.append(ChatCompletionFunctionMessageParam(
-                    role="function",
-                    content=content,
-                    name=msg["name"],
-                ))
+                converted.append(
+                    ChatCompletionFunctionMessageParam(
+                        role="function",
+                        content=content,
+                        name=msg["name"],
+                    )
+                )
             else:
                 raise ValueError(f"Invalid role '{role}' at message[{i}]")
 
         return converted
 
-    # 优化：将所有 ChatCompletion 创建参数集中到一个私有方法，便于复用和管理默认值
+    def _get_thinking_params(
+        self,
+        *,
+        thinking: bool | ThinkingMode | str | None = None,
+        reasoning_effort: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Convert normalized thinking options into provider-specific API params."""
+        thinking_mode = self._normalize_thinking_mode(thinking)
+        params: dict[str, Any] = {}
+        body = dict(extra_body or {})
+
+        if (
+            self.provider_capabilities.thinking_param_style
+            == ThinkingParamStyle.EXTRA_BODY_THINKING
+            and thinking_mode in {ThinkingMode.ENABLED, ThinkingMode.DISABLED}
+        ):
+            body["thinking"] = {"type": thinking_mode.value}
+        if (
+            self.provider_capabilities.supports_reasoning_effort
+            and reasoning_effort is not None
+            and thinking_mode != ThinkingMode.DISABLED
+        ):
+            params["reasoning_effort"] = reasoning_effort
+
+        if body:
+            params["extra_body"] = body
+        return params
+
     def _get_completion_params(
         self,
-        messages: list[dict[str, Any]],
+        messages: Sequence[Mapping[str, Any]],
         stream: bool,
         max_tokens: int | None = None,
         temperature: float | None = None,
         top_p: float | None = None,
         n: int | None = None,
         frequency_penalty: float | None = None,
-        **kwargs
+        thinking: bool | ThinkingMode | str | None = None,
+        reasoning_effort: str | None = None,
+        **kwargs: Any,
     ) -> dict[str, Any]:
-        """构建 OpenAI chat.completions.create 的参数字典"""
-        return {
+        """Build chat.completions request params."""
+        extra_body = kwargs.pop("extra_body", None)
+        params = {
             "model": self.model,
             "messages": self._convert_messages(messages),
-            # 使用 `if param is not None else NOT_GIVEN` 模式，确保 None 不会作为参数值传递，
-            # 而是让 API 使用其默认值
             "temperature": temperature if temperature is not None else NOT_GIVEN,
             "max_tokens": max_tokens if max_tokens is not None else NOT_GIVEN,
             "top_p": top_p if top_p is not None else NOT_GIVEN,
-            # n: 流式通常只能是 1，非流式可以 > 1，此处保持灵活
             "n": n if n is not None else NOT_GIVEN,
-            "frequency_penalty": frequency_penalty if frequency_penalty is not None else NOT_GIVEN,
+            "frequency_penalty": frequency_penalty
+            if frequency_penalty is not None
+            else NOT_GIVEN,
             "stream": stream,
-            **kwargs
+            **kwargs,
         }
+        params.update(
+            self._get_thinking_params(
+                thinking=thinking,
+                reasoning_effort=reasoning_effort,
+                extra_body=extra_body,
+            )
+        )
+        return params
 
     async def chat_completion(
         self,
         *,
-        messages: list[dict[str, Any]],
+        messages: Sequence[Mapping[str, Any]],
         max_tokens: int | None = None,
         temperature: float | None = None,
         top_p: float | None = None,
         n: int | None = None,
         frequency_penalty: float | None = None,
-        **kwargs
-    ) -> ChatCompletionRes:
-        """普通非流式响应"""
-        logger.info("OpenAI chat_completion start...")
-        start_at = time.time()
+        thinking: bool | ThinkingMode | str | None = None,
+        reasoning_effort: str | None = None,
+        **kwargs: Any,
+    ) -> ChatCompletion:
+        """Create a non-streaming chat completion."""
+        params = self._get_completion_params(
+            messages,
+            False,
+            max_tokens,
+            temperature,
+            top_p,
+            n,
+            frequency_penalty,
+            thinking,
+            reasoning_effort,
+            **kwargs,
+        )
+        return await self.client.chat.completions.create(**params)
 
-        try:
-            params = self._get_completion_params(
-                messages, False, max_tokens, temperature, top_p, n, frequency_penalty, **kwargs
-            )
-            response: ChatCompletion = await self.client.chat.completions.create(**params)
-
-        # 优化：捕获更具体的 OpenAI 异常，而不仅仅是通用的 Exception
-        except (APIError, TimeoutError, ValueError) as e:
-            # ValueError 来自 _convert_messages
-            err_type = type(e).__name__
-            logger.error(f"OpenAI chat_completion failed ({err_type}), err={e}")
-            end_at = time.time()
-            return ChatCompletionRes(
-                start_at=int(start_at * 1000),
-                end_at=int(end_at * 1000),
-                error=str(e)
-            )
-        else:
-            end_at = time.time()
-            logger.info(f"OpenAI chat_completion cost: {(end_at - start_at):.2f}s, id: {response.id}")
-            return ChatCompletionRes(
-                chat_completion=response,
-                start_at=int(start_at * 1000),
-                end_at=int(end_at * 1000)
-            )
-
-    async def chat_completion_stream(
+    async def chat_completion_structured[StructuredOutputT: BaseModel](
         self,
-        messages: list[dict[str, Any]],
         *,
-        # 优化：使用 Optional[type]
+        messages: Sequence[Mapping[str, Any]],
+        response_model: type[StructuredOutputT],
         max_tokens: int | None = None,
         temperature: float | None = None,
         top_p: float | None = None,
-        n: int | None = None,  # n=1 可以在内部实现，但外部接口保持一致
+        n: int | None = None,
         frequency_penalty: float | None = None,
-        **kwargs
-    ) -> AsyncGenerator[str | None, None]:
-        """流式响应，返回逐块内容，带有错误处理"""
-        start_at = time.time()
-        logger.info("OpenAI chat_completion_stream start...")
+        thinking: bool | ThinkingMode | str | None = None,
+        reasoning_effort: str | None = None,
+        **kwargs: Any,
+    ) -> StructuredOutputT:
+        """Create a structured chat completion and return the parsed Pydantic model."""
+        if "response_format" in kwargs:
+            raise ValueError(
+                "Use response_model instead of response_format for structured completions"
+            )
+        if "stream" in kwargs:
+            raise ValueError("chat_completion_structured does not support stream")
 
-        try:
-            params = self._get_completion_params(
-                messages, True, max_tokens, temperature, top_p, n, frequency_penalty, **kwargs
+        if (
+            self.provider_capabilities.structured_output_mode
+            == StructuredOutputMode.JSON_OBJECT
+        ):
+            return await self._chat_completion_json_object(
+                messages=messages,
+                response_model=response_model,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                top_p=top_p,
+                n=n,
+                frequency_penalty=frequency_penalty,
+                thinking=thinking,
+                reasoning_effort=reasoning_effort,
+                **kwargs,
             )
 
-            # response 的类型是 AsyncStream[ChatCompletionChunk]
-            response = await self.client.chat.completions.create(**params)
+        try:
+            return await self._chat_completion_native_structured(
+                messages=messages,
+                response_model=response_model,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                top_p=top_p,
+                n=n,
+                frequency_penalty=frequency_penalty,
+                thinking=thinking,
+                reasoning_effort=reasoning_effort,
+                **kwargs,
+            )
+        except OpenAIError:
+            if (
+                self.provider_capabilities.structured_output_mode
+                != StructuredOutputMode.NATIVE_WITH_JSON_OBJECT_FALLBACK
+            ):
+                raise
+            return await self._chat_completion_json_object(
+                messages=messages,
+                response_model=response_model,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                top_p=top_p,
+                n=n,
+                frequency_penalty=frequency_penalty,
+                thinking=thinking,
+                reasoning_effort=reasoning_effort,
+                **kwargs,
+            )
 
-            # 优化：迭代流式响应，添加健壮性检查
-            async for chunk in response:
-                if not isinstance(chunk, ChatCompletionChunk):
-                    continue  # 确保是正确的 chunk 类型
+    async def _chat_completion_native_structured[StructuredOutputT: BaseModel](
+        self,
+        *,
+        messages: Sequence[Mapping[str, Any]],
+        response_model: type[StructuredOutputT],
+        max_tokens: int | None,
+        temperature: float | None,
+        top_p: float | None,
+        n: int | None,
+        frequency_penalty: float | None,
+        thinking: bool | ThinkingMode | str | None,
+        reasoning_effort: str | None,
+        **kwargs: Any,
+    ) -> StructuredOutputT:
+        params = {
+            **self._get_completion_params(
+                messages,
+                False,
+                max_tokens,
+                temperature,
+                top_p,
+                n,
+                frequency_penalty,
+                thinking,
+                reasoning_effort,
+                **kwargs,
+            ),
+            "response_format": response_model,
+        }
+        params.pop("stream", None)
 
-                delta = chunk.choices[0].delta
-                # 检查 content 属性是否存在且不为空
-                if hasattr(delta, "content") and delta.content is not None:
-                    yield delta.content
-                # 优化：处理可能的 tool_calls 或 function_call (可选，但推荐)
-                # elif hasattr(delta, "tool_calls") and delta.tool_calls:
-                #     ...
-                # elif hasattr(delta, "function_call") and delta.function_call:
-                #     ...
+        response = await self.client.chat.completions.parse(**params)
+        message = response.choices[0].message
+        if message.refusal:
+            raise StructuredOutputRefusalError(message.refusal)
+        if message.parsed is None:
+            raise StructuredOutputParseError(
+                "OpenAI structured response was not parsed"
+            )
+        return message.parsed
 
-        # 优化：添加 try...except 块捕获流式请求中的错误
-        except (APIError, TimeoutError, ValueError) as e:
-            err_type = type(e).__name__
-            logger.error(f"OpenAI chat_completion_stream failed ({err_type}), err={e}")
-            # 在流式生成器中，通常通过重新抛出异常或 yield 一个错误标记来通知调用者。
-            # 这里选择记录错误并允许生成器停止。如果需要向调用者返回错误，需要修改生成器的返回类型。
-            # 由于原函数返回的是 `AsyncGenerator[str | None, None]`，我们可以 yield 一个 None 来表示结束，
-            # 但最好的做法是让异常冒泡或在外部处理。
-            # 为了兼容性，这里只是记录并退出循环，让生成器自然结束。
-            pass
-        finally:
-            end_at = time.time()
-            logger.info(f"OpenAI chat_completion_stream end, cost: {(end_at - start_at):.2f}s")
+    async def _chat_completion_json_object[StructuredOutputT: BaseModel](
+        self,
+        *,
+        messages: Sequence[Mapping[str, Any]],
+        response_model: type[StructuredOutputT],
+        max_tokens: int | None,
+        temperature: float | None,
+        top_p: float | None,
+        n: int | None,
+        frequency_penalty: float | None,
+        thinking: bool | ThinkingMode | str | None,
+        reasoning_effort: str | None,
+        **kwargs: Any,
+    ) -> StructuredOutputT:
+        params = self._get_completion_params(
+            messages,
+            False,
+            max_tokens,
+            temperature,
+            top_p,
+            n,
+            frequency_penalty,
+            thinking,
+            reasoning_effort,
+            **kwargs,
+        )
+        params["response_format"] = {"type": "json_object"}
+        params.pop("stream", None)
+
+        response = await self.client.chat.completions.create(**params)
+        if not response.choices:
+            raise StructuredOutputParseError(
+                "OpenAI json_object response has no choices"
+            )
+        content = response.choices[0].message.content
+        if not content:
+            raise StructuredOutputParseError(
+                "OpenAI json_object response returned empty content"
+            )
+        return response_model.model_validate_json(content)
+
+    async def chat_completion_stream(
+        self,
+        messages: Sequence[Mapping[str, Any]],
+        *,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        n: int | None = None,
+        frequency_penalty: float | None = None,
+        thinking: bool | ThinkingMode | str | None = None,
+        reasoning_effort: str | None = None,
+        **kwargs: Any,
+    ) -> AsyncGenerator[str, None]:
+        """Create a streaming chat completion and yield text deltas."""
+        params = self._get_completion_params(
+            messages,
+            True,
+            max_tokens,
+            temperature,
+            top_p,
+            n,
+            frequency_penalty,
+            thinking,
+            reasoning_effort,
+            **kwargs,
+        )
+        response = await self.client.chat.completions.create(**params)
+
+        async for chunk in response:
+            if not isinstance(chunk, ChatCompletionChunk):
+                continue
+            if not chunk.choices:
+                continue
+
+            delta = chunk.choices[0].delta
+            if delta.content is not None:
+                yield delta.content

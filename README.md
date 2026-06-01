@@ -70,6 +70,8 @@ cp configs/.secrets.example configs/.secrets
 APP_ENV=local
 AES_SECRET=your_aes_secret_key
 JWT_SECRET=your_jwt_secret_key
+DB_PASSWORD=your_db_password
+REDIS_PASSWORD=
 ```
 
 `configs/.env.local`：
@@ -82,18 +84,18 @@ DB_TYPE=mysql
 DB_HOST=127.0.0.1
 DB_PORT=3306
 DB_USERNAME=root
-DB_PASSWORD=123456
 DB_DATABASE=app_db
 
 REDIS_HOST=127.0.0.1
 REDIS_PORT=6379
-REDIS_PASSWORD=
 REDIS_DB=0
 ```
 
 说明：
 
 - 仓库已经提供 `configs/.env.local`、`configs/.env.dev`、`configs/.env.test`、`configs/.env.prod`
+- 数据库、Redis 等密码类配置放在 `configs/.secrets`，不要写入 `configs/.env.*`
+- 配置优先级为初始化参数 > `configs/.env.{APP_ENV}` / `configs/.secrets` > 外部 shell 环境变量；shell 环境变量只作为缺省兜底，不覆盖配置文件
 - 如果 `configs/.secrets` 缺失，或 `APP_ENV` 对应的 `.env` 文件不存在，应用会在启动阶段直接失败
 - `DB_PASSWORD`、`DB_READ_PASSWORD`、`REDIS_PASSWORD` 支持 `ENC(...)` 格式，运行时会用 `AES_SECRET` 解密
 

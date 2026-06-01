@@ -112,6 +112,8 @@ def mask_string(
     show_prefix: int = 4,
     show_suffix: int = 4,
     min_length: int = 8,
+    mask: str = "...",
+    max_visible: int | None = None,
 ) -> str:
     """字符串脱敏
 
@@ -120,20 +122,32 @@ def mask_string(
         show_prefix: 显示前几位，默认 4
         show_suffix: 显示后几位，默认 4
         min_length: 最小长度阈值，低于此值只显示前 2 位
+        mask: 脱敏占位符，默认 ...
+        max_visible: 最大明文字符数，默认不限制
 
     Returns:
         脱敏后的字符串
 
     Examples:
         >>> mask_string("sk-abc123xyz789")
-        'sk-a...x789'
+        'sk-a...z789'
         >>> mask_string("abc", show_prefix=2)
         'ab...'
     """
     if not text:
         return ""
 
-    if len(text) > min_length:
-        return f"{text[:show_prefix]}...{text[-show_suffix:]}"
-    else:
-        return f"{text[:2]}..."
+    if len(text) <= min_length:
+        prefix_length = min(2, show_prefix, len(text))
+        if max_visible is not None:
+            prefix_length = min(prefix_length, max_visible)
+        return f"{text[:prefix_length]}{mask}"
+
+    prefix_length = min(show_prefix, len(text))
+    suffix_length = min(show_suffix, max(0, len(text) - prefix_length))
+    if max_visible is not None:
+        prefix_length = min(prefix_length, max_visible)
+        suffix_length = min(suffix_length, max(0, max_visible - prefix_length))
+
+    suffix = text[-suffix_length:] if suffix_length else ""
+    return f"{text[:prefix_length]}{mask}{suffix}"

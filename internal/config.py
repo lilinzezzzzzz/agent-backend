@@ -3,8 +3,9 @@
 包含配置类定义、加载逻辑和全局配置实例
 """
 
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from dotenv import dotenv_values
 from loguru import logger
@@ -16,11 +17,16 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import (
+    BaseSettings,
+    PydanticBaseSettingsSource,
+    SettingsConfigDict,
+)
 
 from internal import BASE_DIR
 from pkg.crypter.aes import aes_decrypt
 from pkg.logger import LogFormat
+from pkg.toolkit.string import mask_string
 from pkg.toolkit.types import lazy_proxy
 
 # =========================================================
@@ -37,6 +43,16 @@ DB_DRIVER_MAP: dict[str, str] = {
     "postgresql": "postgresql+asyncpg",
     "oracle": "oracle+oracledb",
 }
+
+SENSITIVE_CONFIG_KEYWORDS = (
+    "SECRET",
+    "PASSWORD",
+    "TOKEN",
+    "API_KEY",
+    "PRIVATE_KEY",
+    "ACCESS_KEY",
+    "CREDENTIAL",
+)
 
 
 class Settings(BaseSettings):
@@ -102,6 +118,18 @@ class Settings(BaseSettings):
         extra="ignore",
         env_file_encoding="utf-8",
     )
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        _settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        """Set config file values ahead of ambient shell environment variables."""
+        return init_settings, dotenv_settings, env_settings, file_secret_settings
 
     @field_validator("DB_TYPE", mode="before")
     def validate_db_type(cls, v: str) -> str:
@@ -325,6 +353,65 @@ def _validate_secrets_file() -> tuple[Path, dict]:
     return secrets_path, secrets_dict
 
 
+def _sensitive_secret_config_keys(secrets: Mapping[str, str | None]) -> set[str]:
+    """Return sensitive config keys declared in configs/.secrets."""
+    return {
+        key
+        for key, value in secrets.items()
+        if value is not None
+        and any(keyword in key.upper() for keyword in SENSITIVE_CONFIG_KEYWORDS)
+    }
+
+
+def _config_echo_value(
+    settings: Settings,
+    key: str,
+    value: Any,
+    *,
+    sensitive_keys: set[str],
+    reveal_sensitive: bool,
+) -> Any:
+    setting_value = getattr(settings, key, value)
+    if hasattr(setting_value, "get_secret_value"):
+        value = setting_value.get_secret_value()
+
+    if reveal_sensitive or key not in sensitive_keys:
+        return value
+
+    if value is None:
+        return None
+    if isinstance(value, str):
+        if len(value) <= 4:
+            return "***"
+        return mask_string(value, show_prefix=2, show_suffix=2, max_visible=4)
+    return "***"
+
+
+def _echo_loaded_config(
+    settings: Settings,
+    secrets: Mapping[str, str | None],
+) -> None:
+    sensitive_keys = _sensitive_secret_config_keys(secrets)
+    reveal_sensitive = settings.ECHO_CONFIG
+    echo_mode = "unmasked" if reveal_sensitive else "masked"
+
+    logger.info("=" * 50)
+    logger.success(
+        f"Configuration Details (ECHO_CONFIG={settings.ECHO_CONFIG}, {echo_mode}):"
+    )
+    for key, value in settings.model_dump().items():
+        echo_value = _config_echo_value(
+            settings,
+            key,
+            value,
+            sensitive_keys=sensitive_keys,
+            reveal_sensitive=reveal_sensitive,
+        )
+        logger.success(f"  {key}: {echo_value}")
+
+    logger.info("=" * 50)
+
+
 def load_config() -> Settings:
     """
     加载应用配置
@@ -362,19 +449,7 @@ def load_config() -> Settings:
         _settings = Settings(_env_file=load_files)  # type: ignore
         _logger.success("Configuration loaded successfully.")
 
-        # 根据 ECHO_CONFIG 决定是否打印配置
-        if _settings.ECHO_CONFIG:
-            _logger.info("=" * 50)
-            _logger.info("Configuration Details (ECHO_CONFIG=true):")
-            for key, value in _settings.model_dump().items():
-                # SecretStr 类型需要获取原始值
-                if hasattr(_settings, key) and hasattr(
-                    getattr(_settings, key), "get_secret_value"
-                ):
-                    value = getattr(_settings, key).get_secret_value()
-                _logger.info(f"  {key}: {value}")
-
-            _logger.info("=" * 50)
+        _echo_loaded_config(_settings, secrets_dict)
 
         return _settings
     except Exception as e:

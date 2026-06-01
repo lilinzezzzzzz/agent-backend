@@ -75,7 +75,7 @@ def test_sensitive_secret_config_keys_only_match_sensitive_names() -> None:
     assert _sensitive_secret_config_keys(
         {
             "APP_ENV": "test",
-            "ECHO_CONFIG": "false",
+            "CONFIG_ECHO_REVEAL_SECRETS": "false",
             "JWT_SECRET": "jwt-secret",
             "DB_PASSWORD": "db-password",
             "LLM_DEFAULT_PROVIDER": "deepseek",

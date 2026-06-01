@@ -53,6 +53,9 @@ SENSITIVE_CONFIG_KEYWORDS = (
     "ACCESS_KEY",
     "CREDENTIAL",
 )
+NON_SENSITIVE_CONFIG_KEYS = {
+    "CONFIG_ECHO_REVEAL_SECRETS",
+}
 
 
 class Settings(BaseSettings):
@@ -72,7 +75,7 @@ class Settings(BaseSettings):
     JWT_SECRET: SecretStr
     JWT_ALGORITHM: str
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
-    ECHO_CONFIG: bool = False  # 是否打印配置信息 (调试用)
+    CONFIG_ECHO_REVEAL_SECRETS: bool = False  # 打印配置时是否显示敏感值
 
     # --- CORS ---
     BACKEND_CORS_ORIGINS: list[str] = ["*"]
@@ -359,6 +362,7 @@ def _sensitive_secret_config_keys(secrets: Mapping[str, str | None]) -> set[str]
         key
         for key, value in secrets.items()
         if value is not None
+        and key not in NON_SENSITIVE_CONFIG_KEYS
         and any(keyword in key.upper() for keyword in SENSITIVE_CONFIG_KEYWORDS)
     }
 
@@ -392,12 +396,12 @@ def _echo_loaded_config(
     secrets: Mapping[str, str | None],
 ) -> None:
     sensitive_keys = _sensitive_secret_config_keys(secrets)
-    reveal_sensitive = settings.ECHO_CONFIG
+    reveal_sensitive = settings.CONFIG_ECHO_REVEAL_SECRETS
     echo_mode = "unmasked" if reveal_sensitive else "masked"
 
     logger.info("=" * 50)
     logger.success(
-        f"Configuration Details (ECHO_CONFIG={settings.ECHO_CONFIG}, {echo_mode}):"
+        f"Configuration Details (CONFIG_ECHO_REVEAL_SECRETS={settings.CONFIG_ECHO_REVEAL_SECRETS}, {echo_mode}):"
     )
     for key, value in settings.model_dump().items():
         echo_value = _config_echo_value(

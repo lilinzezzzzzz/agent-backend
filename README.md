@@ -78,6 +78,8 @@ REDIS_PASSWORD=
 
 ```env
 DEBUG=true
+LOG_FORMAT=text
+CONFIG_ECHO_REVEAL_SECRETS=false
 JWT_ALGORITHM=HS256
 
 DB_TYPE=mysql
@@ -95,6 +97,7 @@ REDIS_DB=0
 
 - 仓库已经提供 `configs/.env.local`、`configs/.env.dev`、`configs/.env.test`、`configs/.env.prod`
 - 数据库、Redis 等密码类配置放在 `configs/.secrets`，不要写入 `configs/.env.*`
+- `CONFIG_ECHO_REVEAL_SECRETS=true` 会在配置回显中显示敏感值，仅限本地诊断临时使用
 - 配置优先级为初始化参数 > `configs/.env.{APP_ENV}` / `configs/.secrets` > 外部 shell 环境变量；shell 环境变量只作为缺省兜底，不覆盖配置文件
 - 如果 `configs/.secrets` 缺失，或 `APP_ENV` 对应的 `.env` 文件不存在，应用会在启动阶段直接失败
 - `DB_PASSWORD`、`DB_READ_PASSWORD`、`REDIS_PASSWORD` 支持 `ENC(...)` 格式，运行时会用 `AES_SECRET` 解密

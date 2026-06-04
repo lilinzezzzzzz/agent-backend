@@ -35,14 +35,6 @@ class AgentReqSchema(BaseModel):
         return self
 
 
-class AgentOrderSupportReqSchema(AgentReqSchema):
-    """订单支持 Agent 请求。"""
-
-
-class AgentChatReqSchema(AgentReqSchema):
-    """统一 Agent 聊天请求。"""
-
-
 class AgentStepSchema(BaseModel):
     """Agent 单步执行记录。"""
 
@@ -65,8 +57,8 @@ class AgentActionConfirmationSchema(BaseModel):
     expires_in_seconds: int = Field(..., description="确认 token 有效期，单位秒")
 
 
-class AgentOrderSupportRespSchema(BaseModel):
-    """订单支持 Agent 响应。"""
+class AgentRunRespSchema(BaseModel):
+    """业务 Agent 运行响应。"""
 
     run_id: str = Field(..., description="本次 Agent 运行 ID")
     status: str = Field(..., description="Agent 运行状态")
@@ -79,8 +71,28 @@ class AgentOrderSupportRespSchema(BaseModel):
     )
 
 
+class AgentOrderSupportReqSchema(AgentReqSchema):
+    """订单支持 Agent 请求。"""
+
+
+class AgentOrderSupportRespSchema(AgentRunRespSchema):
+    """订单支持 Agent 响应。"""
+
+
+class AgentPaymentSupportReqSchema(AgentReqSchema):
+    """支付支持 Agent 请求。"""
+
+
+class AgentPaymentSupportRespSchema(AgentRunRespSchema):
+    """支付支持 Agent 响应。"""
+
+
+class AgentChatReqSchema(AgentReqSchema):
+    """统一 Agent 聊天请求。"""
+
+
 class AgentChatRespSchema(BaseModel):
     """统一 Agent Router 响应。"""
 
     route: str = Field(..., description="Router 选择的业务域")
-    result: AgentOrderSupportRespSchema = Field(..., description="业务 Agent 执行结果")
+    result: AgentRunRespSchema = Field(..., description="业务 Agent 执行结果")

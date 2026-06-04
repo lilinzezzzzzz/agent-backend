@@ -1,0 +1,55 @@
+from __future__ import annotations
+
+from internal.agents.payment import PaymentAgentBuilder
+from internal.core import AppException, errors
+from internal.infra.llm import AgentLLMClient, new_default_llm_client
+from internal.services.dto.agent import AgentRunDTO
+from pkg.logger import logger
+
+
+class PaymentAgentService:
+    def __init__(self, *, llm_client: AgentLLMClient):
+        self._llm_client = llm_client
+
+    async def answer_payment_support_question(
+        self,
+        *,
+        user_id: int,
+        question: str,
+        max_steps: int = 4,
+        confirmation_token: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> AgentRunDTO:
+        """使用 ReActAgent 回答支付支持问题。"""
+        try:
+            if confirmation_token is not None or idempotency_key is not None:
+                raise AppException(
+                    errors.BadRequest, message="支付 Agent 暂不支持确认动作"
+                )
+
+            agent = PaymentAgentBuilder(
+                llm_client=self._llm_client,
+                max_steps=max_steps,
+            ).build()
+            result = await agent.run(user_input=question)
+        except AppException:
+            raise
+        except Exception as exc:
+            logger.warning(f"Payment support agent failed: {type(exc).__name__}")
+            raise AppException(
+                errors.ServiceUnavailable, message="支付支持 Agent 暂不可用"
+            ) from exc
+        return AgentRunDTO.from_agent_result(result)
+
+
+_payment_agent_service: PaymentAgentService | None = None
+
+
+def new_payment_agent_service() -> PaymentAgentService:
+    """依赖注入：获取 PaymentAgentService 单例。"""
+    global _payment_agent_service
+    if _payment_agent_service is None:
+        _payment_agent_service = PaymentAgentService(
+            llm_client=new_default_llm_client(),
+        )
+    return _payment_agent_service

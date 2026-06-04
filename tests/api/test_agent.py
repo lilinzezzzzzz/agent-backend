@@ -8,11 +8,20 @@ from pydantic import ValidationError
 
 from internal.agents import LLMDecisionModel
 from internal.agents.order import ORDER_SUPPORT_SYSTEM_PROMPT, OrderAgentBuilder
+from internal.agents.payment import PAYMENT_SUPPORT_SYSTEM_PROMPT, PaymentAgentBuilder
 from internal.agents.router import AgentRoute, AgentRouterDecisionModel
 from internal.core import AppException, errors
 from internal.controllers.api import agent as agent_controller
-from internal.schemas.agent import AgentChatReqSchema, AgentOrderSupportReqSchema
-from internal.services.agents import AgentRouterService, OrderAgentService
+from internal.schemas.agent import (
+    AgentChatReqSchema,
+    AgentOrderSupportReqSchema,
+    AgentPaymentSupportReqSchema,
+)
+from internal.services.agents import (
+    AgentRouterService,
+    OrderAgentService,
+    PaymentAgentService,
+)
 from internal.services.dto.agent import AgentChatDTO, AgentRunDTO, AgentStepDTO
 from internal.services.order import OrderService
 from pkg.toolkit import context
@@ -74,6 +83,39 @@ class FakeAgentRouterService:
         return AgentChatDTO(route="order", result=result)
 
 
+class FakePaymentAgentService:
+    async def answer_payment_support_question(
+        self,
+        *,
+        user_id: int,
+        question: str,
+        max_steps: int = 4,
+        confirmation_token: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> AgentRunDTO:
+        assert user_id == 999
+        assert question == "支付失败怎么办？"
+        assert max_steps == 3
+        assert confirmation_token is None
+        assert idempotency_key is None
+        return AgentRunDTO(
+            run_id="run_payment_1",
+            status="completed",
+            answer="请检查余额、限额和支付渠道状态。",
+            steps=[
+                AgentStepDTO(
+                    index=0,
+                    status="completed",
+                    decision_type="tool_call",
+                    tool="search_payment_knowledge",
+                    args={"query": "支付失败怎么办？"},
+                    observation={"ok": True, "total": 1},
+                    elapsed_ms=1.1,
+                )
+            ],
+        )
+
+
 class RecordingOrderAgentService:
     def __init__(self):
         self.calls: list[dict[str, Any]] = []
@@ -81,6 +123,15 @@ class RecordingOrderAgentService:
     async def answer_order_support_question(self, **kwargs: Any) -> AgentRunDTO:
         self.calls.append(kwargs)
         return AgentRunDTO.final(answer="订单 Agent 已处理。")
+
+
+class RecordingPaymentAgentService:
+    def __init__(self):
+        self.calls: list[dict[str, Any]] = []
+
+    async def answer_payment_support_question(self, **kwargs: Any) -> AgentRunDTO:
+        self.calls.append(kwargs)
+        return AgentRunDTO.final(answer="支付 Agent 已处理。")
 
 
 class FakeLLMClient:
@@ -166,6 +217,10 @@ def _new_order_agent_service(
     )
 
 
+def _new_payment_agent_service(llm_client: FakeLLMClient) -> PaymentAgentService:
+    return PaymentAgentService(llm_client=llm_client)
+
+
 def _response_payload(response) -> dict[str, Any]:
     return response.model_dump(mode="json")
 
@@ -201,6 +256,31 @@ def test_order_agent_system_prompt_defines_when_tools_are_optional() -> None:
     assert "不得伪造成功结果" in prompt
 
 
+def test_payment_agent_system_prompt_names_all_registered_tools() -> None:
+    builder = PaymentAgentBuilder(
+        llm_client=FakeLLMClient([]),
+        max_steps=3,
+    )
+    registered_tools = builder.build_tools()
+
+    assert [tool.name for tool in registered_tools] == [
+        "get_supported_payment_methods",
+        "search_payment_knowledge",
+        "calculate_payment_total",
+    ]
+    for tool in registered_tools:
+        assert f"`{tool.name}`" in PAYMENT_SUPPORT_SYSTEM_PROMPT
+
+
+def test_payment_agent_system_prompt_rejects_real_payment_side_effects() -> None:
+    prompt = PAYMENT_SUPPORT_SYSTEM_PROMPT
+
+    assert "必须先调用对应工具" in prompt
+    assert "当前不支持发起支付" in prompt
+    assert "不能自行计算" in prompt
+    assert "不要声称已经发起、提交或完成任何支付动作" in prompt
+
+
 def test_agent_request_requires_confirmation_token_and_idempotency_key_together() -> (
     None
 ):
@@ -217,6 +297,9 @@ async def agent_client():
     )
     app.dependency_overrides[agent_controller.new_agent_router_service] = lambda: (
         FakeAgentRouterService()
+    )
+    app.dependency_overrides[agent_controller.new_payment_agent_service] = lambda: (
+        FakePaymentAgentService()
     )
 
     async with AsyncClient(
@@ -273,6 +356,19 @@ async def test_agent_chat_endpoint_routes_to_order_agent(agent_client) -> None:
 
 
 @pytest.mark.asyncio
+async def test_payment_support_agent_endpoint(agent_client) -> None:
+    response = await agent_client.post(
+        "/v1/agent/payment/support",
+        json={"question": "支付失败怎么办？", "max_steps": 3},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["run_id"] == "run_payment_1"
+    assert response.json()["data"]["answer"] == "请检查余额、限额和支付渠道状态。"
+    assert response.json()["data"]["steps"][0]["tool"] == "search_payment_knowledge"
+
+
+@pytest.mark.asyncio
 async def test_agent_chat_controller_wraps_router_dto() -> None:
     response = await agent_controller.agent_chat(
         AgentChatReqSchema(question="订单 1001 到哪了？", max_steps=3),
@@ -287,12 +383,14 @@ async def test_agent_chat_controller_wraps_router_dto() -> None:
 
 
 @pytest.mark.asyncio
-async def test_agent_router_service_routes_order_question() -> None:
-    llm_client = FakeLLMClient([AgentRouterDecisionModel(route=AgentRoute.ORDER)])
+async def test_agent_router_service_routes_order_question_without_llm() -> None:
+    llm_client = FakeLLMClient([])
     order_agent_service = RecordingOrderAgentService()
+    payment_agent_service = RecordingPaymentAgentService()
     service = AgentRouterService(
         llm_client=llm_client,
         order_agent_service=order_agent_service,
+        payment_agent_service=payment_agent_service,
     )
 
     result = await service.chat(user_id=999, question="订单 1001 到哪了？", max_steps=3)
@@ -300,18 +398,60 @@ async def test_agent_router_service_routes_order_question() -> None:
     assert result.route == "order"
     assert result.result.answer == "订单 Agent 已处理。"
     assert order_agent_service.calls[0]["user_id"] == 999
-    assert len(llm_client.calls) == 1
+    assert payment_agent_service.calls == []
+    assert llm_client.calls == []
 
 
 @pytest.mark.asyncio
-async def test_agent_router_service_returns_unsupported_without_calling_order_agent() -> (
-    None
-):
-    llm_client = FakeLLMClient([AgentRouterDecisionModel(route=AgentRoute.UNSUPPORTED)])
+async def test_agent_router_service_falls_back_to_llm_for_ambiguous_question() -> None:
+    llm_client = FakeLLMClient([AgentRouterDecisionModel(route=AgentRoute.ORDER)])
     order_agent_service = RecordingOrderAgentService()
+    payment_agent_service = RecordingPaymentAgentService()
     service = AgentRouterService(
         llm_client=llm_client,
         order_agent_service=order_agent_service,
+        payment_agent_service=payment_agent_service,
+    )
+
+    result = await service.chat(user_id=999, question="我买的东西怎么还没到")
+
+    assert result.route == "order"
+    assert result.result.answer == "订单 Agent 已处理。"
+    assert len(llm_client.calls) == 1
+    assert payment_agent_service.calls == []
+
+
+@pytest.mark.asyncio
+async def test_agent_router_service_routes_payment_question_without_llm() -> None:
+    llm_client = FakeLLMClient([])
+    order_agent_service = RecordingOrderAgentService()
+    payment_agent_service = RecordingPaymentAgentService()
+    service = AgentRouterService(
+        llm_client=llm_client,
+        order_agent_service=order_agent_service,
+        payment_agent_service=payment_agent_service,
+    )
+
+    result = await service.chat(user_id=999, question="支付失败怎么办？", max_steps=3)
+
+    assert result.route == "payment"
+    assert result.result.answer == "支付 Agent 已处理。"
+    assert order_agent_service.calls == []
+    assert payment_agent_service.calls[0]["user_id"] == 999
+    assert llm_client.calls == []
+
+
+@pytest.mark.asyncio
+async def test_agent_router_service_returns_unsupported_without_calling_agents() -> (
+    None
+):
+    llm_client = FakeLLMClient([])
+    order_agent_service = RecordingOrderAgentService()
+    payment_agent_service = RecordingPaymentAgentService()
+    service = AgentRouterService(
+        llm_client=llm_client,
+        order_agent_service=order_agent_service,
+        payment_agent_service=payment_agent_service,
     )
 
     result = await service.chat(user_id=999, question="帮我写一首诗")
@@ -319,15 +459,19 @@ async def test_agent_router_service_returns_unsupported_without_calling_order_ag
     assert result.route == "unsupported"
     assert "当前仅支持订单" in result.result.answer
     assert order_agent_service.calls == []
+    assert payment_agent_service.calls == []
+    assert llm_client.calls == []
 
 
 @pytest.mark.asyncio
 async def test_agent_router_service_bypasses_llm_for_confirmation() -> None:
     llm_client = FakeLLMClient([])
     order_agent_service = RecordingOrderAgentService()
+    payment_agent_service = RecordingPaymentAgentService()
     service = AgentRouterService(
         llm_client=llm_client,
         order_agent_service=order_agent_service,
+        payment_agent_service=payment_agent_service,
     )
 
     result = await service.chat(
@@ -340,6 +484,7 @@ async def test_agent_router_service_bypasses_llm_for_confirmation() -> None:
     assert result.route == "order"
     assert llm_client.calls == []
     assert order_agent_service.calls[0]["confirmation_token"] == "confirmation-token"
+    assert payment_agent_service.calls == []
 
 
 @pytest.mark.asyncio
@@ -351,6 +496,20 @@ async def test_order_support_agent_controller_wraps_service_dto() -> None:
 
     assert _response_payload(response)["data"]["answer"] == "订单 1001 正在运输中。"
     assert _response_payload(response)["data"]["steps"][0]["tool"] == "get_order_status"
+
+
+@pytest.mark.asyncio
+async def test_payment_support_agent_controller_wraps_service_dto() -> None:
+    response = await agent_controller.payment_support_agent(
+        AgentPaymentSupportReqSchema(question="支付失败怎么办？", max_steps=3),
+        FakePaymentAgentService(),
+    )
+
+    assert _response_payload(response)["data"]["answer"] == "请检查余额、限额和支付渠道状态。"
+    assert (
+        _response_payload(response)["data"]["steps"][0]["tool"]
+        == "search_payment_knowledge"
+    )
 
 
 @pytest.mark.asyncio
@@ -385,6 +544,87 @@ async def test_order_agent_service_runs_react_with_tools() -> None:
     }
     assert len(llm_client.calls) == 2
     assert llm_client.calls[0]["response_model"] is LLMDecisionModel
+
+
+@pytest.mark.asyncio
+async def test_payment_agent_service_runs_react_with_tools() -> None:
+    llm_client = FakeLLMClient(
+        decisions=[
+            LLMDecisionModel(
+                type="tool_call",
+                tool="search_payment_knowledge",
+                args={"query": "支付失败怎么办？", "top_k": 2},
+            ),
+            LLMDecisionModel(
+                type="final", answer="请检查余额、银行卡限额、渠道状态和订单是否过期。"
+            ),
+        ]
+    )
+    service = _new_payment_agent_service(llm_client)
+
+    result = await service.answer_payment_support_question(
+        user_id=999, question="支付失败怎么办？", max_steps=3
+    )
+
+    observation = result.steps[0].observation
+    assert result.status == "completed"
+    assert result.answer == "请检查余额、银行卡限额、渠道状态和订单是否过期。"
+    assert result.steps[0].tool == "search_payment_knowledge"
+    assert observation["ok"] is True
+    assert observation["query"] == "支付失败怎么办？"
+    assert observation["total"] == 1
+    assert observation["matches"][0]["id"] == "payment_failed_common_causes"
+    assert len(llm_client.calls) == 2
+    assert llm_client.calls[0]["response_model"] is LLMDecisionModel
+
+
+@pytest.mark.asyncio
+async def test_payment_agent_service_calculates_payment_total() -> None:
+    llm_client = FakeLLMClient(
+        decisions=[
+            LLMDecisionModel(
+                type="tool_call",
+                tool="calculate_payment_total",
+                args={
+                    "item_amount_cents": 12990,
+                    "shipping_fee_cents": 1200,
+                    "discount_cents": 3000,
+                },
+            ),
+            LLMDecisionModel(type="final", answer="应付金额为 111.90 元。"),
+        ]
+    )
+    service = _new_payment_agent_service(llm_client)
+
+    result = await service.answer_payment_support_question(
+        user_id=999,
+        question="商品 129.90 元，加 12 元运费，减 30 元优惠，需要付多少？",
+        max_steps=3,
+    )
+
+    assert result.steps[0].observation == {
+        "ok": True,
+        "item_amount_cents": 12990,
+        "shipping_fee_cents": 1200,
+        "discount_cents": 3000,
+        "payable_amount_cents": 11190,
+        "payable_amount_yuan": "111.90",
+    }
+
+
+@pytest.mark.asyncio
+async def test_payment_agent_service_rejects_confirmation_token() -> None:
+    service = _new_payment_agent_service(FakeLLMClient([]))
+
+    with pytest.raises(AppException) as exc_info:
+        await service.answer_payment_support_question(
+            user_id=999,
+            question="确认支付",
+            confirmation_token="confirmation-token",
+            idempotency_key="payment-request-1001",
+        )
+
+    assert exc_info.value.error == errors.BadRequest
 
 
 @pytest.mark.asyncio

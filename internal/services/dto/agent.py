@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from internal.schemas.agent import (
     AgentActionConfirmationSchema,
     AgentChatRespSchema,
-    AgentOrderSupportRespSchema,
+    AgentRunRespSchema,
     AgentStepSchema,
     JsonValue,
 )
@@ -81,9 +81,9 @@ class AgentRunDTO:
             confirmation=_extract_confirmation(result),
         )
 
-    def to_schema(self) -> AgentOrderSupportRespSchema:
+    def to_schema(self) -> AgentRunRespSchema:
         """转换为 API 响应 schema。"""
-        return AgentOrderSupportRespSchema(
+        return AgentRunRespSchema(
             run_id=self.run_id,
             status=self.status,
             answer=self.answer,

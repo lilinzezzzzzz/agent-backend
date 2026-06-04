@@ -55,10 +55,7 @@ def validate_phone_number(phone: str) -> bool:
     # 正则表达式：以1开头，第二位是3-9之间的数字，后面是9个数字
     pattern = r"^1[3-9]\d{9}$"
 
-    if re.match(pattern, phone):
-        return True
-    else:
-        return False
+    return bool(re.match(pattern, phone))
 
 
 def build_url(

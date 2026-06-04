@@ -84,6 +84,15 @@ class Settings(BaseSettings):
     WECHAT_APP_ID: str = ""
     WECHAT_APP_SECRET: SecretStr = SecretStr("")
 
+    # --- LLM ---
+    LLM_DEFAULT_PROVIDER: str = "mimo"
+    LLM_MIMO_BASE_URL: str = ""
+    LLM_MIMO_MODEL: str = ""
+    LLM_MIMO_API_KEY: SecretStr = SecretStr("")
+    LLM_DEEPSEEK_BASE_URL: str = ""
+    LLM_DEEPSEEK_MODEL: str = ""
+    LLM_DEEPSEEK_API_KEY: SecretStr = SecretStr("")
+
     # --- Database ---
     DB_TYPE: DBType  # 数据库类型: mysql, postgresql, oracle (必填)
     DB_HOST: str

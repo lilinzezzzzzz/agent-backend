@@ -1,0 +1,167 @@
+from typing import Any
+
+import pytest
+import pytest_asyncio
+from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
+
+from internal.controllers.api import agent as agent_controller
+from internal.schemas.agent import AgentOrderSupportReqSchema
+from internal.services.dto.agent import AgentRunDTO, AgentStepDTO
+from internal.services.agent import OrderAgentService
+from internal.utils.agents import LLMDecisionModel
+
+
+class FakeOrderAgentService:
+    async def answer_order_support_question(
+        self, *, question: str, max_steps: int = 4
+    ) -> AgentRunDTO:
+        assert question == "订单 1001 到哪了？"
+        assert max_steps == 3
+        return AgentRunDTO(
+            run_id="run_1",
+            status="completed",
+            answer="订单 1001 正在运输中。",
+            steps=[
+                AgentStepDTO(
+                    index=0,
+                    status="completed",
+                    decision_type="tool_call",
+                    tool="get_order_status",
+                    args={"order_id": "1001"},
+                    observation={"ok": True, "status": "运输中"},
+                    elapsed_ms=1.2,
+                )
+            ],
+        )
+
+
+class FakeLLMClient:
+    def __init__(self, decisions: list[LLMDecisionModel]):
+        self._decisions = decisions
+        self.calls: list[dict[str, Any]] = []
+
+    async def chat_completion_structured(self, **kwargs: Any) -> LLMDecisionModel:
+        self.calls.append(kwargs)
+        return self._decisions.pop(0)
+
+
+def _response_payload(response) -> dict[str, Any]:
+    return response.model_dump(mode="json")
+
+
+@pytest_asyncio.fixture
+async def agent_client():
+    app = FastAPI()
+    app.include_router(agent_controller.router, prefix="/v1")
+    app.dependency_overrides[agent_controller.new_order_agent_service] = lambda: (
+        FakeOrderAgentService()
+    )
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        yield client
+
+    app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_order_support_agent_endpoint(agent_client) -> None:
+    response = await agent_client.post(
+        "/v1/agent/order/support",
+        json={"question": "订单 1001 到哪了？", "max_steps": 3},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "code": 20000,
+        "message": "",
+        "data": {
+            "run_id": "run_1",
+            "status": "completed",
+            "answer": "订单 1001 正在运输中。",
+            "steps": [
+                {
+                    "index": 0,
+                    "status": "completed",
+                    "decision_type": "tool_call",
+                    "tool": "get_order_status",
+                    "args": {"order_id": "1001"},
+                    "observation": {"ok": True, "status": "运输中"},
+                    "error": None,
+                    "elapsed_ms": 1.2,
+                }
+            ],
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_order_support_agent_controller_wraps_service_dto() -> None:
+    response = await agent_controller.order_support_agent(
+        AgentOrderSupportReqSchema(question="订单 1001 到哪了？", max_steps=3),
+        FakeOrderAgentService(),
+    )
+
+    assert _response_payload(response)["data"]["answer"] == "订单 1001 正在运输中。"
+    assert _response_payload(response)["data"]["steps"][0]["tool"] == "get_order_status"
+
+
+@pytest.mark.asyncio
+async def test_order_agent_service_runs_react_with_tools() -> None:
+    llm_client = FakeLLMClient(
+        decisions=[
+            LLMDecisionModel(
+                type="tool_call", tool="get_order_status", args={"order_id": "1001"}
+            ),
+            LLMDecisionModel(
+                type="final", answer="订单 1001 由顺丰速运承运，预计明天 18:00 前送达。"
+            ),
+        ]
+    )
+    service = OrderAgentService(llm_client=llm_client)
+
+    result = await service.answer_order_support_question(
+        question="订单 1001 到哪了？", max_steps=3
+    )
+
+    assert result.status == "completed"
+    assert result.answer == "订单 1001 由顺丰速运承运，预计明天 18:00 前送达。"
+    assert len(result.steps) == 2
+    assert result.steps[0].tool == "get_order_status"
+    assert result.steps[0].observation == {
+        "ok": True,
+        "order_id": "1001",
+        "status": "运输中",
+        "carrier": "顺丰速运",
+        "tracking_no": "SF10010001",
+        "eta": "明天 18:00 前",
+    }
+    assert len(llm_client.calls) == 2
+    assert llm_client.calls[0]["response_model"] is LLMDecisionModel
+
+
+@pytest.mark.asyncio
+async def test_order_agent_service_records_unknown_order_observation() -> None:
+    llm_client = FakeLLMClient(
+        decisions=[
+            LLMDecisionModel(
+                type="tool_call", tool="get_order_status", args={"order_id": "404"}
+            ),
+            LLMDecisionModel(type="final", answer="没有查询到订单 404。"),
+        ]
+    )
+    service = OrderAgentService(llm_client=llm_client)
+
+    result = await service.answer_order_support_question(
+        question="订单 404 到哪了？", max_steps=3
+    )
+
+    assert result.status == "completed"
+    assert result.steps[0].observation == {
+        "ok": False,
+        "error": "not_found",
+        "order_id": "404",
+    }

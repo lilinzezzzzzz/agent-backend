@@ -27,6 +27,7 @@
 
 ## 子目录 AGENTS.md 索引
 
+- `pkg/agents/AGENTS.md`：结构化 ReAct / Tool Calling 执行循环和 Agent 状态契约。
 - `pkg/chars_matcher/AGENTS.md`：中文候选字拼音 / 字形匹配、数据文件约定。
 - `pkg/crypter/AGENTS.md`：加密算法抽象和密文兼容性。
 - `pkg/database/AGENTS.md`：ORM 基类、builder、session provider。

@@ -10,6 +10,7 @@ from internal.schemas.agent import AgentOrderSupportReqSchema
 from internal.services.dto.agent import AgentRunDTO, AgentStepDTO
 from internal.services.agent import OrderAgentService
 from internal.utils.agents import LLMDecisionModel
+from pkg.toolkit import context
 
 
 class FakeOrderAgentService:
@@ -165,3 +166,38 @@ async def test_order_agent_service_records_unknown_order_observation() -> None:
         "error": "not_found",
         "order_id": "404",
     }
+
+
+@pytest.mark.asyncio
+async def test_order_agent_service_queues_invoice_request(monkeypatch) -> None:
+    llm_client = FakeLLMClient(
+        decisions=[
+            LLMDecisionModel(
+                type="tool_call",
+                tool="submit_invoice_request",
+                args={
+                    "order_id": "1001",
+                    "invoice_title": "个人",
+                    "email": "buyer@example.com",
+                },
+            ),
+            LLMDecisionModel(type="final", answer="开票申请已提交，完成后会通知你。"),
+        ]
+    )
+    service = OrderAgentService(llm_client=llm_client)
+    monkeypatch.setattr(context, "get_trace_id", lambda: "trace_invoice_test")
+
+    result = await service.answer_order_support_question(
+        question="帮我给订单 1001 开发票", max_steps=3
+    )
+
+    assert result.status == "completed"
+    assert result.answer == "开票申请已提交，完成后会通知你。"
+    assert result.steps[0].tool == "submit_invoice_request"
+    assert result.steps[0].observation["ok"] is True
+    assert result.steps[0].observation["order_id"] == "1001"
+    assert result.steps[0].observation["invoice_title"] == "个人"
+    assert result.steps[0].observation["email"] == "buyer@example.com"
+    assert result.steps[0].observation["status"] == "queued"
+    assert result.steps[0].observation["trace_id"] == "trace_invoice_test"
+    assert result.steps[0].observation["task_id"].startswith("task_")

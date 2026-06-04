@@ -11,6 +11,7 @@ from dotenv import dotenv_values
 from loguru import logger
 from pydantic import (
     MySQLDsn,
+    PositiveInt,
     PostgresDsn,
     RedisDsn,
     SecretStr,
@@ -92,6 +93,10 @@ class Settings(BaseSettings):
     LLM_DEEPSEEK_BASE_URL: str = ""
     LLM_DEEPSEEK_MODEL: str = ""
     LLM_DEEPSEEK_API_KEY: SecretStr = SecretStr("")
+
+    # --- Agent ---
+    AGENT_ACTION_CONFIRMATION_SECONDS: PositiveInt = 300
+    AGENT_ACTION_IDEMPOTENCY_SECONDS: PositiveInt = 86400
 
     # --- Database ---
     DB_TYPE: DBType  # 数据库类型: mysql, postgresql, oracle (必填)

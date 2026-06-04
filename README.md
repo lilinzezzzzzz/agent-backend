@@ -101,6 +101,8 @@ REDIS_DB=0
 - 配置优先级为初始化参数 > `configs/.env.{APP_ENV}` / `configs/.secrets` > 外部 shell 环境变量；shell 环境变量只作为缺省兜底，不覆盖配置文件
 - 如果 `configs/.secrets` 缺失，或 `APP_ENV` 对应的 `.env` 文件不存在，应用会在启动阶段直接失败
 - `DB_PASSWORD`、`DB_READ_PASSWORD`、`REDIS_PASSWORD` 支持 `ENC(...)` 格式，运行时会用 `AES_SECRET` 解密
+- `AGENT_ACTION_CONFIRMATION_SECONDS` 控制 Agent 副作用动作确认 token 的有效期
+- `AGENT_ACTION_IDEMPOTENCY_SECONDS` 控制已确认动作幂等结果的保留时间
 
 ### 3. 启动 API 服务
 
@@ -160,6 +162,8 @@ uv run celery -A internal.utils.celery.celery_app beat -l info
 - `/v1/auth/me`
 - `/v1/auth/wechat/login`
 - `/v1/user/hello-world`
+- `/v1/agent/chat`
+- `/v1/agent/order/support`
 - `/v1/public/test/*`
 
 认证中间件的默认规则：

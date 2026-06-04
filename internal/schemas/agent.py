@@ -1,17 +1,46 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 type JsonValue = (
     str | int | float | bool | None | list["JsonValue"] | dict[str, "JsonValue"]
 )
 
 
-class AgentOrderSupportReqSchema(BaseModel):
-    """订单支持 Agent 请求。"""
+class AgentReqSchema(BaseModel):
+    """Agent 通用请求。"""
 
     question: str = Field(..., description="用户问题", min_length=1, max_length=500)
     max_steps: int = Field(4, description="Agent 最大执行步数", ge=1, le=8)
+    confirmation_token: str | None = Field(
+        None,
+        description="服务端签发的一次性动作确认 token",
+        min_length=1,
+        max_length=128,
+    )
+    idempotency_key: str | None = Field(
+        None,
+        description="确认副作用动作时必填的客户端幂等键",
+        min_length=8,
+        max_length=128,
+    )
+
+    @model_validator(mode="after")
+    def validate_confirmation_fields(self) -> AgentReqSchema:
+        """确认 token 与幂等键必须同时提供。"""
+        if (self.confirmation_token is None) != (self.idempotency_key is None):
+            raise ValueError(
+                "confirmation_token and idempotency_key must be provided together"
+            )
+        return self
+
+
+class AgentOrderSupportReqSchema(AgentReqSchema):
+    """订单支持 Agent 请求。"""
+
+
+class AgentChatReqSchema(AgentReqSchema):
+    """统一 Agent 聊天请求。"""
 
 
 class AgentStepSchema(BaseModel):
@@ -27,6 +56,15 @@ class AgentStepSchema(BaseModel):
     elapsed_ms: float = Field(..., description="步骤耗时，单位毫秒")
 
 
+class AgentActionConfirmationSchema(BaseModel):
+    """需要客户端显式确认的服务端动作。"""
+
+    token: str = Field(..., description="短期、一次性的服务端确认 token")
+    action: str = Field(..., description="待确认动作名")
+    summary: str = Field(..., description="展示给用户确认的动作摘要")
+    expires_in_seconds: int = Field(..., description="确认 token 有效期，单位秒")
+
+
 class AgentOrderSupportRespSchema(BaseModel):
     """订单支持 Agent 响应。"""
 
@@ -36,3 +74,13 @@ class AgentOrderSupportRespSchema(BaseModel):
     steps: list[AgentStepSchema] = Field(
         default_factory=list, description="执行步骤记录"
     )
+    confirmation: AgentActionConfirmationSchema | None = Field(
+        None, description="存在副作用动作时返回的待确认信息"
+    )
+
+
+class AgentChatRespSchema(BaseModel):
+    """统一 Agent Router 响应。"""
+
+    route: str = Field(..., description="Router 选择的业务域")
+    result: AgentOrderSupportRespSchema = Field(..., description="业务 Agent 执行结果")

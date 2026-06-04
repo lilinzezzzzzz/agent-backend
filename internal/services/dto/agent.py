@@ -4,11 +4,15 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 
 from internal.schemas.agent import (
+    AgentActionConfirmationSchema,
+    AgentChatRespSchema,
     AgentOrderSupportRespSchema,
     AgentStepSchema,
     JsonValue,
 )
+from internal.services.dto.order import AgentActionConfirmationDTO, InvoiceRequestDTO
 from pkg.agents import AgentFinal, AgentRunResult, AgentToolCall
+from pkg.toolkit.string import uuid6_unique_str_id
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +50,7 @@ class AgentRunDTO:
     status: str
     answer: str | None
     steps: Sequence[AgentStepDTO]
+    confirmation: AgentActionConfirmationDTO | None = None
 
     @classmethod
     def from_agent_result(cls, result: AgentRunResult) -> AgentRunDTO:
@@ -73,6 +78,7 @@ class AgentRunDTO:
                 )
                 for step in result.steps
             ],
+            confirmation=_extract_confirmation(result),
         )
 
     def to_schema(self) -> AgentOrderSupportRespSchema:
@@ -82,7 +88,83 @@ class AgentRunDTO:
             status=self.status,
             answer=self.answer,
             steps=[step.to_schema() for step in self.steps],
+            confirmation=AgentActionConfirmationSchema(
+                token=self.confirmation.token,
+                action=self.confirmation.action,
+                summary=self.confirmation.summary,
+                expires_in_seconds=self.confirmation.expires_in_seconds,
+            )
+            if self.confirmation is not None
+            else None,
         )
+
+    @classmethod
+    def from_confirmed_invoice(cls, result: InvoiceRequestDTO) -> AgentRunDTO:
+        """构造确定性确认执行结果。"""
+        return cls(
+            run_id=uuid6_unique_str_id(),
+            status="completed",
+            answer=result.message,
+            steps=[
+                AgentStepDTO(
+                    index=0,
+                    status="completed",
+                    decision_type="tool_call",
+                    tool="confirm_invoice_request",
+                    args={},
+                    observation=to_json_value(result.to_tool_result()),
+                )
+            ],
+        )
+
+    @classmethod
+    def final(cls, *, answer: str) -> AgentRunDTO:
+        """构造无需运行专业 Agent 的最终回答。"""
+        return cls(
+            run_id=uuid6_unique_str_id(),
+            status="completed",
+            answer=answer,
+            steps=[],
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class AgentChatDTO:
+    """统一 Agent Router 结果。"""
+
+    route: str
+    result: AgentRunDTO
+
+    def to_schema(self) -> AgentChatRespSchema:
+        """转换为统一 Agent Router 响应 schema。"""
+        return AgentChatRespSchema(route=self.route, result=self.result.to_schema())
+
+
+def _extract_confirmation(result: AgentRunResult) -> AgentActionConfirmationDTO | None:
+    for step in reversed(result.steps):
+        observation = step.observation
+        if not isinstance(observation, Mapping):
+            continue
+        confirmation = observation.get("confirmation")
+        if not isinstance(confirmation, Mapping):
+            continue
+        token = confirmation.get("token")
+        action = confirmation.get("action")
+        summary = confirmation.get("summary")
+        expires_in_seconds = confirmation.get("expires_in_seconds")
+        if (
+            isinstance(token, str)
+            and isinstance(action, str)
+            and isinstance(summary, str)
+            and isinstance(expires_in_seconds, int)
+        ):
+            return AgentActionConfirmationDTO(
+                token=token,
+                action=action,
+                summary=summary,
+                expires_in_seconds=expires_in_seconds,
+            )
+    return None
 
 
 def to_json_value(value: object) -> JsonValue:

@@ -4,12 +4,15 @@
 - auth: 用户认证 token、会话元数据
 """
 
+from internal.cache.agent_action import AgentActionCache, new_agent_action_cache
 from internal.cache.auth import AuthCache, new_auth_cache
 from internal.cache.endpoint_guard import EndpointGuardCache, new_endpoint_guard_cache
 
 __all__ = [
+    "AgentActionCache",
     "AuthCache",
     "EndpointGuardCache",
+    "new_agent_action_cache",
     "new_auth_cache",
     "new_endpoint_guard_cache",
 ]

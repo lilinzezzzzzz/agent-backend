@@ -4,22 +4,35 @@ import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from pydantic import ValidationError
 
 from internal.agents import LLMDecisionModel
 from internal.agents.order import ORDER_SUPPORT_SYSTEM_PROMPT, OrderAgentBuilder
+from internal.agents.router import AgentRoute, AgentRouterDecisionModel
+from internal.core import AppException, errors
 from internal.controllers.api import agent as agent_controller
-from internal.schemas.agent import AgentOrderSupportReqSchema
-from internal.services.agents import OrderAgentService
-from internal.services.dto.agent import AgentRunDTO, AgentStepDTO
+from internal.schemas.agent import AgentChatReqSchema, AgentOrderSupportReqSchema
+from internal.services.agents import AgentRouterService, OrderAgentService
+from internal.services.dto.agent import AgentChatDTO, AgentRunDTO, AgentStepDTO
+from internal.services.order import OrderService
 from pkg.toolkit import context
 
 
 class FakeOrderAgentService:
     async def answer_order_support_question(
-        self, *, question: str, max_steps: int = 4
+        self,
+        *,
+        user_id: int,
+        question: str,
+        max_steps: int = 4,
+        confirmation_token: str | None = None,
+        idempotency_key: str | None = None,
     ) -> AgentRunDTO:
+        assert user_id == 999
         assert question == "订单 1001 到哪了？"
         assert max_steps == 3
+        assert confirmation_token is None
+        assert idempotency_key is None
         return AgentRunDTO(
             run_id="run_1",
             status="completed",
@@ -38,14 +51,119 @@ class FakeOrderAgentService:
         )
 
 
+class FakeAgentRouterService:
+    async def chat(
+        self,
+        *,
+        user_id: int,
+        question: str,
+        max_steps: int = 4,
+        confirmation_token: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> AgentChatDTO:
+        assert user_id == 999
+        assert question == "订单 1001 到哪了？"
+        assert max_steps == 3
+        assert confirmation_token is None
+        assert idempotency_key is None
+        result = await FakeOrderAgentService().answer_order_support_question(
+            user_id=user_id,
+            question=question,
+            max_steps=max_steps,
+        )
+        return AgentChatDTO(route="order", result=result)
+
+
+class RecordingOrderAgentService:
+    def __init__(self):
+        self.calls: list[dict[str, Any]] = []
+
+    async def answer_order_support_question(self, **kwargs: Any) -> AgentRunDTO:
+        self.calls.append(kwargs)
+        return AgentRunDTO.final(answer="订单 Agent 已处理。")
+
+
 class FakeLLMClient:
-    def __init__(self, decisions: list[LLMDecisionModel]):
+    def __init__(self, decisions: list[Any]):
         self._decisions = decisions
         self.calls: list[dict[str, Any]] = []
 
-    async def chat_completion_structured(self, **kwargs: Any) -> LLMDecisionModel:
+    async def chat_completion_structured(self, **kwargs: Any) -> Any:
         self.calls.append(kwargs)
         return self._decisions.pop(0)
+
+
+class FakeAgentActionStore:
+    def __init__(self):
+        self.pending: dict[str, dict[str, object]] = {}
+        self.confirmation_results: dict[str, dict[str, object]] = {}
+        self.idempotency_results: dict[tuple[int, str], dict[str, object]] = {}
+
+    async def save_pending_action(
+        self, *, token: str, payload: dict[str, object], expires_in_seconds: int
+    ) -> bool:
+        assert expires_in_seconds == 300
+        self.pending[token] = payload
+        return True
+
+    async def get_pending_action(self, *, token: str) -> dict[str, object] | None:
+        return self.pending.get(token)
+
+    async def delete_pending_action(self, *, token: str) -> int:
+        return int(self.pending.pop(token, None) is not None)
+
+    async def save_confirmation_result(
+        self, *, token: str, payload: dict[str, object], expires_in_seconds: int
+    ) -> bool:
+        assert expires_in_seconds == 86400
+        self.confirmation_results[token] = payload
+        return True
+
+    async def get_confirmation_result(self, *, token: str) -> dict[str, object] | None:
+        return self.confirmation_results.get(token)
+
+    async def save_idempotency_result(
+        self,
+        *,
+        user_id: int,
+        idempotency_key: str,
+        payload: dict[str, object],
+        expires_in_seconds: int,
+    ) -> bool:
+        assert expires_in_seconds == 86400
+        self.idempotency_results[(user_id, idempotency_key)] = payload
+        return True
+
+    async def get_idempotency_result(
+        self, *, user_id: int, idempotency_key: str
+    ) -> dict[str, object] | None:
+        return self.idempotency_results.get((user_id, idempotency_key))
+
+    async def acquire_confirmation_lock(self, *, token: str) -> str:
+        return f"lock:{token}"
+
+    async def release_confirmation_lock(self, *, token: str, identifier: str) -> bool:
+        assert identifier == f"lock:{token}"
+        return True
+
+
+def _new_order_service(
+    action_store: FakeAgentActionStore | None = None,
+) -> OrderService:
+    return OrderService(
+        action_store=action_store or FakeAgentActionStore(),
+        confirmation_seconds=300,
+        idempotency_seconds=86400,
+    )
+
+
+def _new_order_agent_service(
+    llm_client: FakeLLMClient, *, action_store: FakeAgentActionStore | None = None
+) -> OrderAgentService:
+    return OrderAgentService(
+        llm_client=llm_client,
+        order_service=_new_order_service(action_store),
+    )
 
 
 def _response_payload(response) -> dict[str, Any]:
@@ -53,7 +171,12 @@ def _response_payload(response) -> dict[str, Any]:
 
 
 def test_order_agent_system_prompt_names_all_registered_tools() -> None:
-    builder = OrderAgentBuilder(llm_client=FakeLLMClient([]), max_steps=3)
+    builder = OrderAgentBuilder(
+        llm_client=FakeLLMClient([]),
+        order_service=_new_order_service(),
+        user_id=999,
+        max_steps=3,
+    )
     registered_tools = builder.build_tools()
 
     assert [tool.name for tool in registered_tools] == [
@@ -61,7 +184,7 @@ def test_order_agent_system_prompt_names_all_registered_tools() -> None:
         "get_return_policy",
         "search_order_knowledge",
         "calculate_refund_amount",
-        "submit_invoice_request",
+        "prepare_invoice_request",
     ]
     for tool in registered_tools:
         assert f"`{tool.name}`" in ORDER_SUPPORT_SYSTEM_PROMPT
@@ -78,12 +201,22 @@ def test_order_agent_system_prompt_defines_when_tools_are_optional() -> None:
     assert "不得伪造成功结果" in prompt
 
 
+def test_agent_request_requires_confirmation_token_and_idempotency_key_together() -> (
+    None
+):
+    with pytest.raises(ValidationError):
+        AgentChatReqSchema(question="确认提交", confirmation_token="token-only")
+
+
 @pytest_asyncio.fixture
 async def agent_client():
     app = FastAPI()
     app.include_router(agent_controller.router, prefix="/v1")
     app.dependency_overrides[agent_controller.new_order_agent_service] = lambda: (
         FakeOrderAgentService()
+    )
+    app.dependency_overrides[agent_controller.new_agent_router_service] = lambda: (
+        FakeAgentRouterService()
     )
 
     async with AsyncClient(
@@ -122,8 +255,91 @@ async def test_order_support_agent_endpoint(agent_client) -> None:
                     "elapsed_ms": 1.2,
                 }
             ],
+            "confirmation": None,
         },
     }
+
+
+@pytest.mark.asyncio
+async def test_agent_chat_endpoint_routes_to_order_agent(agent_client) -> None:
+    response = await agent_client.post(
+        "/v1/agent/chat",
+        json={"question": "订单 1001 到哪了？", "max_steps": 3},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["route"] == "order"
+    assert response.json()["data"]["result"]["answer"] == "订单 1001 正在运输中。"
+
+
+@pytest.mark.asyncio
+async def test_agent_chat_controller_wraps_router_dto() -> None:
+    response = await agent_controller.agent_chat(
+        AgentChatReqSchema(question="订单 1001 到哪了？", max_steps=3),
+        FakeAgentRouterService(),
+    )
+
+    assert _response_payload(response)["data"]["route"] == "order"
+    assert (
+        _response_payload(response)["data"]["result"]["answer"]
+        == "订单 1001 正在运输中。"
+    )
+
+
+@pytest.mark.asyncio
+async def test_agent_router_service_routes_order_question() -> None:
+    llm_client = FakeLLMClient([AgentRouterDecisionModel(route=AgentRoute.ORDER)])
+    order_agent_service = RecordingOrderAgentService()
+    service = AgentRouterService(
+        llm_client=llm_client,
+        order_agent_service=order_agent_service,
+    )
+
+    result = await service.chat(user_id=999, question="订单 1001 到哪了？", max_steps=3)
+
+    assert result.route == "order"
+    assert result.result.answer == "订单 Agent 已处理。"
+    assert order_agent_service.calls[0]["user_id"] == 999
+    assert len(llm_client.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_agent_router_service_returns_unsupported_without_calling_order_agent() -> (
+    None
+):
+    llm_client = FakeLLMClient([AgentRouterDecisionModel(route=AgentRoute.UNSUPPORTED)])
+    order_agent_service = RecordingOrderAgentService()
+    service = AgentRouterService(
+        llm_client=llm_client,
+        order_agent_service=order_agent_service,
+    )
+
+    result = await service.chat(user_id=999, question="帮我写一首诗")
+
+    assert result.route == "unsupported"
+    assert "当前仅支持订单" in result.result.answer
+    assert order_agent_service.calls == []
+
+
+@pytest.mark.asyncio
+async def test_agent_router_service_bypasses_llm_for_confirmation() -> None:
+    llm_client = FakeLLMClient([])
+    order_agent_service = RecordingOrderAgentService()
+    service = AgentRouterService(
+        llm_client=llm_client,
+        order_agent_service=order_agent_service,
+    )
+
+    result = await service.chat(
+        user_id=999,
+        question="确认提交",
+        confirmation_token="confirmation-token",
+        idempotency_key="invoice-request-1001",
+    )
+
+    assert result.route == "order"
+    assert llm_client.calls == []
+    assert order_agent_service.calls[0]["confirmation_token"] == "confirmation-token"
 
 
 @pytest.mark.asyncio
@@ -149,10 +365,10 @@ async def test_order_agent_service_runs_react_with_tools() -> None:
             ),
         ]
     )
-    service = OrderAgentService(llm_client=llm_client)
+    service = _new_order_agent_service(llm_client)
 
     result = await service.answer_order_support_question(
-        question="订单 1001 到哪了？", max_steps=3
+        user_id=999, question="订单 1001 到哪了？", max_steps=3
     )
 
     assert result.status == "completed"
@@ -181,10 +397,10 @@ async def test_order_agent_service_records_unknown_order_observation() -> None:
             LLMDecisionModel(type="final", answer="没有查询到订单 404。"),
         ]
     )
-    service = OrderAgentService(llm_client=llm_client)
+    service = _new_order_agent_service(llm_client)
 
     result = await service.answer_order_support_question(
-        question="订单 404 到哪了？", max_steps=3
+        user_id=999, question="订单 404 到哪了？", max_steps=3
     )
 
     assert result.status == "completed"
@@ -196,38 +412,122 @@ async def test_order_agent_service_records_unknown_order_observation() -> None:
 
 
 @pytest.mark.asyncio
-async def test_order_agent_service_queues_invoice_request(monkeypatch) -> None:
+async def test_order_agent_service_hides_order_owned_by_another_user() -> None:
+    llm_client = FakeLLMClient(
+        decisions=[
+            LLMDecisionModel(
+                type="tool_call", tool="get_order_status", args={"order_id": "1001"}
+            ),
+            LLMDecisionModel(type="final", answer="没有查询到订单 1001。"),
+        ]
+    )
+    service = _new_order_agent_service(llm_client)
+
+    result = await service.answer_order_support_question(
+        user_id=1000, question="订单 1001 到哪了？", max_steps=3
+    )
+
+    assert result.steps[0].observation == {
+        "ok": False,
+        "error": "not_found",
+        "order_id": "1001",
+    }
+
+
+@pytest.mark.asyncio
+async def test_order_agent_service_requires_confirmation_before_invoice_request(
+    monkeypatch,
+) -> None:
+    action_store = FakeAgentActionStore()
     llm_client = FakeLLMClient(
         decisions=[
             LLMDecisionModel(
                 type="tool_call",
-                tool="submit_invoice_request",
+                tool="prepare_invoice_request",
                 args={
                     "order_id": "1001",
                     "invoice_title": "个人",
                     "email": "buyer@example.com",
                 },
             ),
-            LLMDecisionModel(type="final", answer="开票申请已提交，完成后会通知你。"),
+            LLMDecisionModel(type="final", answer="请确认是否提交该开票申请。"),
         ]
     )
-    service = OrderAgentService(llm_client=llm_client)
+    service = _new_order_agent_service(llm_client, action_store=action_store)
     monkeypatch.setattr(context, "get_trace_id", lambda: "trace_invoice_test")
 
-    result = await service.answer_order_support_question(
-        question="帮我给订单 1001 开发票", max_steps=3
+    prepared = await service.answer_order_support_question(
+        user_id=999,
+        question="帮我给订单 1001 开发票",
+        max_steps=3,
     )
 
-    assert result.status == "completed"
-    assert result.answer == "开票申请已提交，完成后会通知你。"
-    assert result.steps[0].tool == "submit_invoice_request"
-    assert result.steps[0].observation["ok"] is True
-    assert result.steps[0].observation["order_id"] == "1001"
-    assert result.steps[0].observation["invoice_title"] == "个人"
-    assert result.steps[0].observation["email"] == "buyer@example.com"
-    assert result.steps[0].observation["status"] == "queued"
-    assert result.steps[0].observation["trace_id"] == "trace_invoice_test"
-    assert result.steps[0].observation["task_id"].startswith("task_")
+    assert prepared.status == "completed"
+    assert prepared.answer == "请确认是否提交该开票申请。"
+    assert prepared.steps[0].tool == "prepare_invoice_request"
+    assert prepared.steps[0].observation["status"] == "confirmation_required"
+    assert prepared.confirmation is not None
+    assert prepared.confirmation.action == "submit_invoice_request"
+    assert len(action_store.pending) == 1
+
+    confirmed = await service.answer_order_support_question(
+        user_id=999,
+        question="确认提交",
+        confirmation_token=prepared.confirmation.token,
+        idempotency_key="invoice-request-1001",
+    )
+    replayed = await service.answer_order_support_question(
+        user_id=999,
+        question="确认提交",
+        confirmation_token=prepared.confirmation.token,
+        idempotency_key="invoice-request-1001",
+    )
+
+    assert confirmed.answer == "开票申请已提交，开具完成后会通知用户"
+    assert confirmed.steps[0].tool == "confirm_invoice_request"
+    assert confirmed.steps[0].observation["order_id"] == "1001"
+    assert confirmed.steps[0].observation["invoice_title"] == "个人"
+    assert confirmed.steps[0].observation["email"] == "buyer@example.com"
+    assert confirmed.steps[0].observation["status"] == "queued"
+    assert confirmed.steps[0].observation["trace_id"] == "trace_invoice_test"
+    assert confirmed.steps[0].observation["task_id"].startswith("task_")
+    assert (
+        replayed.steps[0].observation["task_id"]
+        == confirmed.steps[0].observation["task_id"]
+    )
+    assert action_store.pending == {}
+
+    with pytest.raises(AppException) as exc_info:
+        await service.answer_order_support_question(
+            user_id=999,
+            question="再次确认提交",
+            confirmation_token=prepared.confirmation.token,
+            idempotency_key="different-idempotency-key",
+        )
+
+    assert exc_info.value.error == errors.BadRequest
+
+
+@pytest.mark.asyncio
+async def test_order_service_rejects_confirmation_from_another_user() -> None:
+    action_store = FakeAgentActionStore()
+    order_service = _new_order_service(action_store)
+    confirmation = await order_service.prepare_invoice_request(
+        user_id=999,
+        order_id="1001",
+        invoice_title="个人",
+        tax_no=None,
+        email=None,
+    )
+
+    with pytest.raises(AppException) as exc_info:
+        await order_service.confirm_invoice_request(
+            user_id=1000,
+            confirmation_token=confirmation.token,
+            idempotency_key="another-user-key",
+        )
+
+    assert exc_info.value.error == errors.Forbidden
 
 
 @pytest.mark.asyncio
@@ -245,10 +545,10 @@ async def test_order_agent_service_searches_mock_rag_knowledge() -> None:
             ),
         ]
     )
-    service = OrderAgentService(llm_client=llm_client)
+    service = _new_order_agent_service(llm_client)
 
     result = await service.answer_order_support_question(
-        question="电子发票多久能开好？", max_steps=3
+        user_id=999, question="电子发票多久能开好？", max_steps=3
     )
 
     observation = result.steps[0].observation
@@ -279,9 +579,10 @@ async def test_order_agent_service_calculates_refund_amount() -> None:
             LLMDecisionModel(type="final", answer="预计可退款 241.80 元。"),
         ]
     )
-    service = OrderAgentService(llm_client=llm_client)
+    service = _new_order_agent_service(llm_client)
 
     result = await service.answer_order_support_question(
+        user_id=999,
         question="两件单价 129.90 元的商品，加上 12 元可退运费并扣回 30 元优惠，能退多少钱？",
         max_steps=3,
     )
@@ -319,9 +620,10 @@ async def test_order_agent_service_rejects_excessive_refund_discount() -> None:
             ),
         ]
     )
-    service = OrderAgentService(llm_client=llm_client)
+    service = _new_order_agent_service(llm_client)
 
     result = await service.answer_order_support_question(
+        user_id=999,
         question="商品 10 元，退款时扣回 11 元优惠，能退多少？",
         max_steps=3,
     )
@@ -344,10 +646,10 @@ async def test_order_agent_service_rejects_decimal_refund_amount_input() -> None
             LLMDecisionModel(type="final", answer="金额参数必须使用整数分。"),
         ]
     )
-    service = OrderAgentService(llm_client=llm_client)
+    service = _new_order_agent_service(llm_client)
 
     result = await service.answer_order_support_question(
-        question="按 1000.5 分计算退款", max_steps=3
+        user_id=999, question="按 1000.5 分计算退款", max_steps=3
     )
 
     assert result.steps[0].observation == {

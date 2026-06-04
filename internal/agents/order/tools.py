@@ -3,22 +3,34 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from internal.services.order import OrderService
 from pkg.agents import StructuredTool
-from pkg.toolkit import context
-from pkg.toolkit.string import uuid6_unique_str_id
 
 
-def build_get_order_status_tool() -> StructuredTool:
+def build_get_order_status_tool(
+    *, order_service: OrderService, user_id: int
+) -> StructuredTool:
     """创建订单状态查询工具。"""
+
+    async def get_order_status(args: Mapping[str, Any]) -> dict[str, Any]:
+        order_id = str(args.get("order_id") or "").strip()
+        if not order_id:
+            return {"ok": False, "error": "order_id is required"}
+
+        order = await order_service.get_order_status(user_id=user_id, order_id=order_id)
+        if order is None:
+            return {"ok": False, "error": "not_found", "order_id": order_id}
+        return order.to_tool_result()
+
     return StructuredTool(
         name="get_order_status",
-        description="按订单 ID 查询订单物流和签收状态。",
+        description="按订单 ID 查询当前用户有权访问的订单物流和签收状态。",
         parameters_schema={
             "type": "object",
             "properties": {"order_id": {"type": "string", "description": "订单 ID"}},
             "required": ["order_id"],
         },
-        handler=_get_order_status,
+        handler=get_order_status,
     )
 
 
@@ -100,11 +112,39 @@ def build_calculate_refund_amount_tool() -> StructuredTool:
     )
 
 
-def build_submit_invoice_request_tool() -> StructuredTool:
-    """创建开票申请提交工具。"""
+def build_prepare_invoice_request_tool(
+    *, order_service: OrderService, user_id: int
+) -> StructuredTool:
+    """创建开票申请确认准备工具。"""
+
+    async def prepare_invoice_request(args: Mapping[str, Any]) -> dict[str, Any]:
+        order_id = str(args.get("order_id") or "").strip()
+        if not order_id:
+            return {"ok": False, "error": "order_id is required"}
+
+        order = await order_service.get_order_status(user_id=user_id, order_id=order_id)
+        if order is None:
+            return {"ok": False, "error": "not_found", "order_id": order_id}
+
+        invoice_title = (
+            str(args.get("invoice_title") or "personal").strip() or "personal"
+        )
+        confirmation = await order_service.prepare_invoice_request(
+            user_id=user_id,
+            order_id=order_id,
+            invoice_title=invoice_title,
+            tax_no=str(args.get("tax_no") or "").strip() or None,
+            email=str(args.get("email") or "").strip() or None,
+        )
+        return {
+            "ok": True,
+            "status": "confirmation_required",
+            "confirmation": confirmation.to_tool_result(),
+        }
+
     return StructuredTool(
-        name="submit_invoice_request",
-        description="提交订单开票申请；该工具只负责受理申请并触发异步开票任务，不等待开票完成。",
+        name="prepare_invoice_request",
+        description="准备订单开票申请并返回服务端确认 token；该工具不会提交开票任务。",
         parameters_schema={
             "type": "object",
             "properties": {
@@ -124,35 +164,8 @@ def build_submit_invoice_request_tool() -> StructuredTool:
             },
             "required": ["order_id"],
         },
-        handler=_submit_invoice_request,
+        handler=prepare_invoice_request,
     )
-
-
-def _get_order_status(args: Mapping[str, Any]) -> dict[str, Any]:
-    order_id = str(args.get("order_id") or "").strip()
-    if not order_id:
-        return {"ok": False, "error": "order_id is required"}
-
-    # 模拟数据库查询：真实业务应替换为订单 DAO 或订单 Service 查询。
-    order_fixtures: dict[str, dict[str, str]] = {
-        "1001": {
-            "status": "运输中",
-            "carrier": "顺丰速运",
-            "tracking_no": "SF10010001",
-            "eta": "明天 18:00 前",
-        },
-        "1002": {
-            "status": "已签收",
-            "carrier": "京东物流",
-            "tracking_no": "JD10020002",
-            "eta": "已于今天 10:24 签收",
-        },
-    }
-    order = order_fixtures.get(order_id)
-    if order is None:
-        return {"ok": False, "error": "not_found", "order_id": order_id}
-
-    return {"ok": True, "order_id": order_id, **order}
 
 
 def _get_return_policy(args: Mapping[str, Any]) -> dict[str, Any]:
@@ -303,31 +316,3 @@ def _read_integer_arg(
     if isinstance(value, bool) or not isinstance(value, int):
         return 0, f"{name} must be an integer"
     return value, None
-
-
-def _submit_invoice_request(args: Mapping[str, Any]) -> dict[str, Any]:
-    order_id = str(args.get("order_id") or "").strip()
-    if not order_id:
-        return {"ok": False, "error": "order_id is required"}
-
-    order_status = _get_order_status({"order_id": order_id})
-    if not order_status.get("ok"):
-        return {"ok": False, "error": "order_not_found", "order_id": order_id}
-
-    invoice_title = str(args.get("invoice_title") or "personal").strip() or "personal"
-    tax_no = str(args.get("tax_no") or "").strip()
-    email = str(args.get("email") or "").strip()
-    trace_id = context.get_trace_id()
-
-    # 模拟异步任务入队：真实业务应写入开票申请记录并投递 Celery / MQ 任务。
-    return {
-        "ok": True,
-        "order_id": order_id,
-        "invoice_title": invoice_title,
-        "tax_no": tax_no or None,
-        "email": email or None,
-        "trace_id": trace_id,
-        "task_id": f"task_{uuid6_unique_str_id()}",
-        "status": "queued",
-        "message": "开票申请已提交，开具完成后会通知用户",
-    }

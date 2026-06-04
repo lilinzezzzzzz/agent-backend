@@ -7,6 +7,7 @@ from httpx import ASGITransport, AsyncClient
 
 from internal.controllers.api import agent as agent_controller
 from internal.schemas.agent import AgentOrderSupportReqSchema
+from internal.services.agent import order as order_agent_service
 from internal.services.dto.agent import AgentRunDTO, AgentStepDTO
 from internal.services.agent import OrderAgentService
 from internal.utils.agents import LLMDecisionModel
@@ -49,6 +50,24 @@ class FakeLLMClient:
 
 def _response_payload(response) -> dict[str, Any]:
     return response.model_dump(mode="json")
+
+
+def test_order_agent_system_prompt_names_all_registered_tools() -> None:
+    registered_tools = OrderAgentService._build_tools()
+
+    for tool in registered_tools:
+        assert f"`{tool.name}`" in order_agent_service.ORDER_SUPPORT_SYSTEM_PROMPT
+
+
+def test_order_agent_system_prompt_defines_when_tools_are_optional() -> None:
+    prompt = order_agent_service.ORDER_SUPPORT_SYSTEM_PROMPT
+
+    assert "必须先调用对应工具" in prompt
+    assert "才可以不调用工具并直接返回 final" in prompt
+    assert "每轮只能返回一个决策" in prompt
+    assert "缺少工具必填参数时" in prompt
+    assert "仅当用户明确要求提交开票申请时" in prompt
+    assert "不得伪造成功结果" in prompt
 
 
 @pytest_asyncio.fixture
@@ -201,3 +220,129 @@ async def test_order_agent_service_queues_invoice_request(monkeypatch) -> None:
     assert result.steps[0].observation["status"] == "queued"
     assert result.steps[0].observation["trace_id"] == "trace_invoice_test"
     assert result.steps[0].observation["task_id"].startswith("task_")
+
+
+@pytest.mark.asyncio
+async def test_order_agent_service_searches_mock_rag_knowledge() -> None:
+    llm_client = FakeLLMClient(
+        decisions=[
+            LLMDecisionModel(
+                type="tool_call",
+                tool="search_order_knowledge",
+                args={"query": "电子发票多久能开好？", "top_k": 2},
+            ),
+            LLMDecisionModel(
+                type="final",
+                answer="电子发票通常会在提交申请后的 1-3 个工作日内完成。",
+            ),
+        ]
+    )
+    service = OrderAgentService(llm_client=llm_client)
+
+    result = await service.answer_order_support_question(
+        question="电子发票多久能开好？", max_steps=3
+    )
+
+    observation = result.steps[0].observation
+    assert result.status == "completed"
+    assert result.steps[0].tool == "search_order_knowledge"
+    assert observation["ok"] is True
+    assert observation["query"] == "电子发票多久能开好？"
+    assert observation["total"] == 1
+    assert observation["matches"][0]["id"] == "order_invoice_guide"
+    assert observation["matches"][0]["source"] == "订单帮助中心/发票服务"
+    assert "1-3 个工作日" in observation["matches"][0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_order_agent_service_calculates_refund_amount() -> None:
+    llm_client = FakeLLMClient(
+        decisions=[
+            LLMDecisionModel(
+                type="tool_call",
+                tool="calculate_refund_amount",
+                args={
+                    "unit_price_cents": 12990,
+                    "quantity": 2,
+                    "refundable_shipping_fee_cents": 1200,
+                    "discount_deduction_cents": 3000,
+                },
+            ),
+            LLMDecisionModel(type="final", answer="预计可退款 241.80 元。"),
+        ]
+    )
+    service = OrderAgentService(llm_client=llm_client)
+
+    result = await service.answer_order_support_question(
+        question="两件单价 129.90 元的商品，加上 12 元可退运费并扣回 30 元优惠，能退多少钱？",
+        max_steps=3,
+    )
+
+    observation = result.steps[0].observation
+    assert result.status == "completed"
+    assert result.steps[0].tool == "calculate_refund_amount"
+    assert observation == {
+        "ok": True,
+        "unit_price_cents": 12990,
+        "quantity": 2,
+        "item_subtotal_cents": 25980,
+        "refundable_shipping_fee_cents": 1200,
+        "discount_deduction_cents": 3000,
+        "refund_amount_cents": 24180,
+        "refund_amount_yuan": "241.80",
+    }
+
+
+@pytest.mark.asyncio
+async def test_order_agent_service_rejects_excessive_refund_discount() -> None:
+    llm_client = FakeLLMClient(
+        decisions=[
+            LLMDecisionModel(
+                type="tool_call",
+                tool="calculate_refund_amount",
+                args={
+                    "unit_price_cents": 1000,
+                    "quantity": 1,
+                    "discount_deduction_cents": 1100,
+                },
+            ),
+            LLMDecisionModel(
+                type="final", answer="优惠扣减金额超过可退金额，无法计算退款。"
+            ),
+        ]
+    )
+    service = OrderAgentService(llm_client=llm_client)
+
+    result = await service.answer_order_support_question(
+        question="商品 10 元，退款时扣回 11 元优惠，能退多少？",
+        max_steps=3,
+    )
+
+    assert result.steps[0].observation == {
+        "ok": False,
+        "error": "discount_deduction_cents cannot exceed gross refund amount",
+    }
+
+
+@pytest.mark.asyncio
+async def test_order_agent_service_rejects_decimal_refund_amount_input() -> None:
+    llm_client = FakeLLMClient(
+        decisions=[
+            LLMDecisionModel(
+                type="tool_call",
+                tool="calculate_refund_amount",
+                args={"unit_price_cents": 1000.5, "quantity": 1},
+            ),
+            LLMDecisionModel(type="final", answer="金额参数必须使用整数分。"),
+        ]
+    )
+    service = OrderAgentService(llm_client=llm_client)
+
+    result = await service.answer_order_support_question(
+        question="按 1000.5 分计算退款", max_steps=3
+    )
+
+    assert result.steps[0].observation == {
+        "ok": False,
+        "error": "unit_price_cents must be an integer",
+    }

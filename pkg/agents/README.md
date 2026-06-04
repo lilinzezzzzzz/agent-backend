@@ -126,7 +126,8 @@ submit_order_cancellation
 - `max_steps`：限制最大决策步数，避免无限循环
 
 当前实现只负责通用执行循环，不直接依赖具体 LLM Provider、数据库、消息队列或业务
-Service。业务接入示例见 `internal/services/agent/order.py`。
+Service。业务 Agent 的 prompt、builder 和 tools 示例见 `internal/agents/order/`；
+对 Controller 暴露的业务用例入口见 `internal/services/agents/order.py`。
 
 ## 生产检查清单
 

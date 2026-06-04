@@ -2,7 +2,7 @@ from typing import Any
 
 import pytest
 
-from internal.utils.agents import LLMDecisionModel, LLMReactDecisionMaker
+from internal.agents import LLMDecisionModel, LLMReactDecisionMaker
 from pkg.agents import ReActAgent, StructuredTool
 from pkg.toolkit.json import orjson_loads
 

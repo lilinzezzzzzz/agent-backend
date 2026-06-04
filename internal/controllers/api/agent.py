@@ -7,7 +7,7 @@ from internal.schemas.agent import (
     AgentOrderSupportReqSchema,
     AgentOrderSupportRespSchema,
 )
-from internal.services.agent import OrderAgentService, new_order_agent_service
+from internal.services.agents import OrderAgentService, new_order_agent_service
 from pkg.toolkit.response import ResponsePayload, success_response
 
 router = APIRouter(prefix="/agent", tags=["api agent"])

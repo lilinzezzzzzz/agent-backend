@@ -5,12 +5,12 @@ import pytest_asyncio
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
+from internal.agents import LLMDecisionModel
+from internal.agents.order import ORDER_SUPPORT_SYSTEM_PROMPT, OrderAgentBuilder
 from internal.controllers.api import agent as agent_controller
 from internal.schemas.agent import AgentOrderSupportReqSchema
-from internal.services.agent import order as order_agent_service
+from internal.services.agents import OrderAgentService
 from internal.services.dto.agent import AgentRunDTO, AgentStepDTO
-from internal.services.agent import OrderAgentService
-from internal.utils.agents import LLMDecisionModel
 from pkg.toolkit import context
 
 
@@ -53,14 +53,22 @@ def _response_payload(response) -> dict[str, Any]:
 
 
 def test_order_agent_system_prompt_names_all_registered_tools() -> None:
-    registered_tools = OrderAgentService._build_tools()
+    builder = OrderAgentBuilder(llm_client=FakeLLMClient([]), max_steps=3)
+    registered_tools = builder.build_tools()
 
+    assert [tool.name for tool in registered_tools] == [
+        "get_order_status",
+        "get_return_policy",
+        "search_order_knowledge",
+        "calculate_refund_amount",
+        "submit_invoice_request",
+    ]
     for tool in registered_tools:
-        assert f"`{tool.name}`" in order_agent_service.ORDER_SUPPORT_SYSTEM_PROMPT
+        assert f"`{tool.name}`" in ORDER_SUPPORT_SYSTEM_PROMPT
 
 
 def test_order_agent_system_prompt_defines_when_tools_are_optional() -> None:
-    prompt = order_agent_service.ORDER_SUPPORT_SYSTEM_PROMPT
+    prompt = ORDER_SUPPORT_SYSTEM_PROMPT
 
     assert "必须先调用对应工具" in prompt
     assert "才可以不调用工具并直接返回 final" in prompt

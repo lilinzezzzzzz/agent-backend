@@ -21,7 +21,7 @@
   便于测试替换。
 - Prompt 只表达工具路由、禁止事项、输出契约和回答边界，不承载权限、幂等、事务或状态机规则。
 - Tool 必须使用 `pkg.agents.StructuredTool`，显式声明工具名、描述、参数 schema 和 handler。
-- Tool handler 负责轻量参数读取和错误 observation；复杂校验、权限、幂等和副作用提交必须下沉到
+- Tool handler 负责轻量参数读取和错误工具结果；复杂校验、权限、幂等和副作用提交必须下沉到
   Service / Workflow。
 - Router 只决定业务域，不直接回答用户问题；不确定时选择 unsupported 或等价降级路径。
 - 新增业务域时，同步检查统一路由、Service 入口、API schema、测试和领域 README。

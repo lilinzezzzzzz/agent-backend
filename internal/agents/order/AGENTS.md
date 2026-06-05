@@ -13,7 +13,7 @@
 ## 编码约定
 
 - `builder.py` 只组装订单 Agent，不创建全局 Service 单例，不读取请求上下文。
-- `prompt.py` 必须保持结构化 JSON 决策约束；新增工具时同步更新工具路由、禁止事项和最终回答要求。
+- `prompt.py` 必须保持结构化 JSON 动作约束；新增工具时同步更新工具路由、禁止事项和最终回答要求。
 - `tools.py` 只做工具参数适配和调用 `OrderService`；不要直接访问 ORM、Redis、Celery 或真实开票系统。
 - 订单归属、存在性、开票参数、幂等和确认 token 校验必须由 `OrderService` 强制执行，不能只依赖 prompt。
 - 金额相关工具必须使用整数分；不要让 LLM 自行计算退款金额、运费或优惠扣减。

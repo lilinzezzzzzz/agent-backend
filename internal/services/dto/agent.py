@@ -21,10 +21,10 @@ class AgentStepDTO:
 
     index: int
     status: str
-    decision_type: str
+    action_type: str
     tool: str | None = None
     args: dict[str, JsonValue] = field(default_factory=dict)
-    observation: JsonValue = None
+    action_result: JsonValue = None
     error: str | None = None
     elapsed_ms: float = 0
 
@@ -33,10 +33,10 @@ class AgentStepDTO:
         return AgentStepSchema(
             index=self.index,
             status=self.status,
-            decision_type=self.decision_type,
+            action_type=self.action_type,
             tool=self.tool,
             args=self.args,
-            observation=self.observation,
+            action_result=self.action_result,
             error=self.error,
             elapsed_ms=self.elapsed_ms,
         )
@@ -63,16 +63,16 @@ class AgentRunDTO:
                 AgentStepDTO(
                     index=step.index,
                     status=step.status.value,
-                    decision_type="final"
-                    if isinstance(step.decision, AgentFinal)
+                    action_type="final"
+                    if isinstance(step.action, AgentFinal)
                     else "tool_call",
-                    tool=step.decision.tool
-                    if isinstance(step.decision, AgentToolCall)
+                    tool=step.action.tool
+                    if isinstance(step.action, AgentToolCall)
                     else None,
-                    args=to_json_object(step.decision.args)
-                    if isinstance(step.decision, AgentToolCall)
+                    args=to_json_object(step.action.args)
+                    if isinstance(step.action, AgentToolCall)
                     else {},
-                    observation=to_json_value(step.observation),
+                    action_result=to_json_value(step.action_result),
                     error=step.error,
                     elapsed_ms=step.elapsed_ms,
                 )
@@ -109,10 +109,10 @@ class AgentRunDTO:
                 AgentStepDTO(
                     index=0,
                     status="completed",
-                    decision_type="tool_call",
+                    action_type="tool_call",
                     tool="confirm_invoice_request",
                     args={},
-                    observation=to_json_value(result.to_tool_result()),
+                    action_result=to_json_value(result.to_action_result()),
                 )
             ],
         )
@@ -142,10 +142,10 @@ class AgentChatDTO:
 
 def _extract_confirmation(result: AgentRunResult) -> AgentActionConfirmationDTO | None:
     for step in reversed(result.steps):
-        observation = step.observation
-        if not isinstance(observation, Mapping):
+        action_result = step.action_result
+        if not isinstance(action_result, Mapping):
             continue
-        confirmation = observation.get("confirmation")
+        confirmation = action_result.get("confirmation")
         if not isinstance(confirmation, Mapping):
             continue
         token = confirmation.get("token")
@@ -168,7 +168,7 @@ def _extract_confirmation(result: AgentRunResult) -> AgentActionConfirmationDTO 
 
 
 def to_json_value(value: object) -> JsonValue:
-    """把任意工具结果压缩为可响应的 JSON 值。"""
+    """把任意动作结果压缩为可响应的 JSON 值。"""
     if value is None or isinstance(value, str | int | float | bool):
         return value
     if isinstance(value, Mapping):

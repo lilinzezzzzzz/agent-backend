@@ -20,7 +20,7 @@ def build_get_order_status_tool(
         order = await order_service.get_order_status(user_id=user_id, order_id=order_id)
         if order is None:
             return {"ok": False, "error": "not_found", "order_id": order_id}
-        return order.to_tool_result()
+        return order.to_action_result()
 
     return StructuredTool(
         name="get_order_status",
@@ -139,7 +139,7 @@ def build_prepare_invoice_request_tool(
         return {
             "ok": True,
             "status": "confirmation_required",
-            "confirmation": confirmation.to_tool_result(),
+            "confirmation": confirmation.to_action_result(),
         }
 
     return StructuredTool(

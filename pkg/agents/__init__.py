@@ -1,7 +1,7 @@
 """Reusable agent building blocks."""
 
 from pkg.agents.react import (
-    AgentDecision,
+    AgentAction,
     AgentDecisionContext,
     AgentDecisionMaker,
     AgentFinal,
@@ -21,7 +21,7 @@ from pkg.agents.react import (
 )
 
 __all__ = [
-    "AgentDecision",
+    "AgentAction",
     "AgentDecisionContext",
     "AgentDecisionMaker",
     "AgentFinal",

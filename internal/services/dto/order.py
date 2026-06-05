@@ -13,8 +13,8 @@ class OrderStatusDTO:
     tracking_no: str
     eta: str
 
-    def to_tool_result(self) -> dict[str, object]:
-        """转换为 Agent 工具 observation。"""
+    def to_action_result(self) -> dict[str, object]:
+        """转换为 Agent 工具执行结果。"""
         return {
             "ok": True,
             "order_id": self.order_id,
@@ -34,8 +34,8 @@ class AgentActionConfirmationDTO:
     summary: str
     expires_in_seconds: int
 
-    def to_tool_result(self) -> dict[str, object]:
-        """转换为 Agent 工具 observation。"""
+    def to_action_result(self) -> dict[str, object]:
+        """转换为 Agent 工具执行结果。"""
         return {
             "token": self.token,
             "action": self.action,
@@ -58,8 +58,8 @@ class InvoiceRequestDTO:
     status: str = "queued"
     message: str = "开票申请已提交，开具完成后会通知用户"
 
-    def to_tool_result(self) -> dict[str, object]:
-        """转换为 Agent 执行 observation。"""
+    def to_action_result(self) -> dict[str, object]:
+        """转换为 Agent 执行结果。"""
         return {
             "ok": True,
             "order_id": self.order_id,

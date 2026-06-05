@@ -32,8 +32,8 @@ class OrderDecisionMaker:
         if not context.state.steps:
             return AgentToolCall(tool="search_order", args={"order_id": "123"})
 
-        observation = context.state.steps[-1].observation
-        return AgentFinal(answer=f"查询结果：{observation}")
+        action_result = context.state.steps[-1].action_result
+        return AgentFinal(answer=f"查询结果：{action_result}")
 
 
 agent = ReActAgent(
@@ -74,8 +74,8 @@ from typing import Any, Protocol
 from pkg.toolkit.string import uuid6_unique_str_id
 
 ToolArgs = Mapping[str, Any]
-ToolResult = Any
-ToolHandler = Callable[[ToolArgs], ToolResult | Awaitable[ToolResult]]
+ActionResult = Any
+ToolHandler = Callable[[ToolArgs], ActionResult | Awaitable[ActionResult]]
 
 
 class AgentRunStatus(StrEnum):
@@ -102,12 +102,12 @@ class ToolExecutionError(RuntimeError):
 
 
 class InvalidAgentDecisionError(TypeError):
-    """Decision maker 返回了不受支持的决策对象时抛出。"""
+    """Decision maker 返回了不受支持的动作对象时抛出。"""
 
 
 @dataclass(frozen=True, slots=True)
 class AgentToolCall:
-    """模型给出的结构化工具调用决策。
+    """模型给出的结构化工具调用动作。
 
     Attributes:
         tool: 要调用的工具名，必须匹配已注册的 `StructuredTool.name`。
@@ -122,12 +122,12 @@ class AgentToolCall:
 
 @dataclass(frozen=True, slots=True)
 class AgentFinal:
-    """模型给出的终止决策，表示本轮 Agent 可以直接返回最终答案。"""
+    """模型给出的终止动作，表示本轮 Agent 可以直接返回最终答案。"""
 
     answer: str
 
 
-AgentDecision = AgentToolCall | AgentFinal
+AgentAction = AgentToolCall | AgentFinal
 
 
 @dataclass(frozen=True, slots=True)
@@ -156,15 +156,15 @@ class StructuredTool:
 class AgentStepRecord:
     """单个 ReAct 步骤的状态记录。
 
-    该记录对应一次 decision maker 决策。如果决策是 `AgentToolCall`，则会记录工具
-    observation、错误信息和耗时；如果决策是 `AgentFinal`，则只记录最终决策
+    该记录对应一次 Agent 动作。如果动作是 `AgentToolCall`，则会记录
+    action_result、错误信息和耗时；如果动作是 `AgentFinal`，则只记录最终动作
     和该步耗时。
     """
 
     index: int
-    decision: AgentDecision
+    action: AgentAction
     status: AgentStepStatus
-    observation: ToolResult | None = None
+    action_result: ActionResult | None = None
     error: str | None = None
     elapsed_ms: float = 0
 
@@ -197,7 +197,7 @@ class AgentRunResult:
 
 @dataclass(frozen=True, slots=True)
 class AgentDecisionContext:
-    """Decision maker 每轮决策需要的上下文。"""
+    """Decision maker 每轮选择动作需要的上下文。"""
 
     user_input: str
     state: AgentRunState
@@ -205,18 +205,18 @@ class AgentDecisionContext:
 
 
 class AgentDecisionMaker(Protocol):
-    """Decision maker 协议：把当前上下文转换成 Agent 下一步决策。
+    """Decision maker 协议：把当前上下文转换成 Agent 下一步动作。
 
     实际业务通常会在 `decide_next()` 内部调用 LLM，并把模型返回的 JSON 或
     tool call 转换为 `AgentToolCall` / `AgentFinal`。显式方法名比 `__call__`
     更容易表达“决定下一步”的语义。
     """
 
-    async def decide_next(self, context: AgentDecisionContext) -> AgentDecision: ...
+    async def decide_next(self, context: AgentDecisionContext) -> AgentAction: ...
 
 
-def parse_agent_decision(payload: Mapping[str, Any]) -> AgentDecision:
-    """将结构化 LLM payload 解析为 Agent 决策。
+def parse_agent_decision(payload: Mapping[str, Any]) -> AgentAction:
+    """将结构化 LLM payload 解析为 Agent 动作。
 
     支持两种 payload：
 
@@ -227,30 +227,30 @@ def parse_agent_decision(payload: Mapping[str, Any]) -> AgentDecision:
     业务侧如需严格校验，可以在 decision maker 或工具 handler 内补充 Pydantic/JSON
     Schema 校验。
     """
-    decision_type = payload.get("type")
-    if decision_type == "final":
+    action_type = payload.get("type")
+    if action_type == "final":
         answer = payload.get("answer")
         if not isinstance(answer, str):
-            raise InvalidAgentDecisionError("final decision requires string answer")
+            raise InvalidAgentDecisionError("final action requires string answer")
         return AgentFinal(answer=answer)
 
-    if decision_type == "tool_call":
+    if action_type == "tool_call":
         tool = payload.get("tool")
         args = payload.get("args", {})
         call_id = payload.get("call_id")
         if not isinstance(tool, str) or not tool:
             raise InvalidAgentDecisionError(
-                "tool_call decision requires non-empty string tool"
+                "tool_call action requires non-empty string tool"
             )
         if not isinstance(args, Mapping):
-            raise InvalidAgentDecisionError("tool_call decision requires mapping args")
+            raise InvalidAgentDecisionError("tool_call action requires mapping args")
         if call_id is not None and not isinstance(call_id, str):
             raise InvalidAgentDecisionError(
-                "tool_call decision call_id must be a string"
+                "tool_call action call_id must be a string"
             )
         return AgentToolCall(tool=tool, args=args, call_id=call_id)
 
-    raise InvalidAgentDecisionError(f"unsupported decision type: {decision_type!r}")
+    raise InvalidAgentDecisionError(f"unsupported action type: {action_type!r}")
 
 
 class ReActAgent:
@@ -258,12 +258,12 @@ class ReActAgent:
 
     循环形态为：
 
-    1. 调用 decision maker，让模型基于用户输入和历史状态产出下一步决策。
+    1. 调用 decision maker，让模型基于用户输入和历史状态产出下一步动作。
     2. 如果是 `AgentFinal`，记录最终答案并结束。
-    3. 如果是 `AgentToolCall`，执行对应工具，把结果作为 observation 写入状态。
+    3. 如果是 `AgentToolCall`，执行对应工具，把动作结果写入 action_result。
     4. 未拿到最终答案时继续下一轮，直到达到 `max_steps`。
 
-    默认会把未知工具、非法参数和工具异常记录成 observation，方便 decision maker
+    默认会把未知工具、非法参数和工具异常记录成 action_result，方便 decision maker
     在下一轮根据错误信息自我修正；如果希望工具错误直接中断运行，可以把
     `capture_tool_errors` 设为 `False`。
     """
@@ -293,7 +293,7 @@ class ReActAgent:
     async def run(
         self, *, user_input: str, run_id: str | None = None
     ) -> AgentRunResult:
-        """执行决策/工具迭代，直到得到最终答案或达到步数上限。"""
+        """执行动作/工具迭代，直到得到最终答案或达到步数上限。"""
         state = AgentRunState(
             run_id=run_id or uuid6_unique_str_id(),
             user_input=user_input,
@@ -303,8 +303,8 @@ class ReActAgent:
         for index in range(self._max_steps):
             started_at = monotonic()
 
-            # 每一轮都把当前 state 传给 decision maker，让它基于历史 observation 决策。
-            decision = await self._decision_maker.decide_next(
+            # 每一轮都把当前 state 传给 decision maker，让它基于历史 action_result 选择动作。
+            action = await self._decision_maker.decide_next(
                 AgentDecisionContext(
                     user_input=user_input,
                     state=state,
@@ -313,13 +313,13 @@ class ReActAgent:
             )
 
             # `AgentFinal` 是正常结束路径：记录最终答案并立即返回不可变结果。
-            if isinstance(decision, AgentFinal):
+            if isinstance(action, AgentFinal):
                 state.status = AgentRunStatus.COMPLETED
-                state.final_answer = decision.answer
+                state.final_answer = action.answer
                 state.steps.append(
                     AgentStepRecord(
                         index=index,
-                        decision=decision,
+                        action=action,
                         status=AgentStepStatus.COMPLETED,
                         elapsed_ms=_elapsed_ms(started_at),
                     )
@@ -327,18 +327,18 @@ class ReActAgent:
                 return _build_result(state)
 
             # 除 `AgentFinal` 和 `AgentToolCall` 以外都是 decision maker 编程错误。
-            if not isinstance(decision, AgentToolCall):
-                raise InvalidAgentDecisionError(f"invalid agent decision: {decision!r}")
+            if not isinstance(action, AgentToolCall):
+                raise InvalidAgentDecisionError(f"invalid agent action: {action!r}")
 
-            # 工具返回值或错误都会写入状态，作为下一轮 decision maker 的 observation。
-            observation, error = await self._execute_tool_call(decision)
+            # 工具返回值或错误都会写入状态，作为下一轮 decision maker 的 action_result。
+            action_result, error = await self._execute_tool_call(action)
             step_status = AgentStepStatus.FAILED if error else AgentStepStatus.COMPLETED
             state.steps.append(
                 AgentStepRecord(
                     index=index,
-                    decision=decision,
+                    action=action,
                     status=step_status,
-                    observation=observation,
+                    action_result=action_result,
                     error=error,
                     elapsed_ms=_elapsed_ms(started_at),
                 )
@@ -349,24 +349,24 @@ class ReActAgent:
         return _build_result(state)
 
     async def _execute_tool_call(
-        self, decision: AgentToolCall
-    ) -> tuple[ToolResult | None, str | None]:
+        self, action: AgentToolCall
+    ) -> tuple[ActionResult | None, str | None]:
         """执行一次工具调用，并按配置决定捕获错误还是抛出错误。"""
-        if not isinstance(decision.args, Mapping):
+        if not isinstance(action.args, Mapping):
             error = "tool args must be a mapping"
             if self._capture_tool_errors:
                 return {"error": error}, error
             raise ToolExecutionError(error)
 
-        tool = self._tools.get(decision.tool)
+        tool = self._tools.get(action.tool)
         if tool is None:
-            error = f"unknown tool: {decision.tool}"
+            error = f"unknown tool: {action.tool}"
             if self._capture_tool_errors:
                 return {"error": error}, error
             raise UnknownToolError(error)
 
         try:
-            result = tool.handler(decision.args)
+            result = tool.handler(action.args)
             return await _maybe_await(result), None
         except Exception as exc:
             error = f"{type(exc).__name__}: {exc}"

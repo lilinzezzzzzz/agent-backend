@@ -40,10 +40,10 @@ class AgentStepSchema(BaseModel):
 
     index: int = Field(..., description="步骤序号，从 0 开始")
     status: str = Field(..., description="步骤状态")
-    decision_type: str = Field(..., description="Decision Maker 决策类型")
+    action_type: str = Field(..., description="Agent 动作类型")
     tool: str | None = Field(None, description="被调用的工具名")
     args: dict[str, JsonValue] = Field(default_factory=dict, description="工具调用参数")
-    observation: JsonValue = Field(None, description="工具返回 observation")
+    action_result: JsonValue = Field(None, description="动作执行结果")
     error: str | None = Field(None, description="工具或执行错误")
     elapsed_ms: float = Field(..., description="步骤耗时，单位毫秒")
 

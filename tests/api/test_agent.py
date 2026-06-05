@@ -50,10 +50,10 @@ class FakeOrderAgentService:
                 AgentStepDTO(
                     index=0,
                     status="completed",
-                    decision_type="tool_call",
+                    action_type="tool_call",
                     tool="get_order_status",
                     args={"order_id": "1001"},
-                    observation={"ok": True, "status": "运输中"},
+                    action_result={"ok": True, "status": "运输中"},
                     elapsed_ms=1.2,
                 )
             ],
@@ -106,10 +106,10 @@ class FakePaymentAgentService:
                 AgentStepDTO(
                     index=0,
                     status="completed",
-                    decision_type="tool_call",
+                    action_type="tool_call",
                     tool="search_payment_knowledge",
                     args={"query": "支付失败怎么办？"},
-                    observation={"ok": True, "total": 1},
+                    action_result={"ok": True, "total": 1},
                     elapsed_ms=1.1,
                 )
             ],
@@ -250,7 +250,7 @@ def test_order_agent_system_prompt_defines_when_tools_are_optional() -> None:
 
     assert "必须先调用对应工具" in prompt
     assert "才可以不调用工具并直接返回 final" in prompt
-    assert "每轮只能返回一个决策" in prompt
+    assert "每轮只能返回一个动作" in prompt
     assert "缺少工具必填参数时" in prompt
     assert "仅当用户明确要求提交开票申请时" in prompt
     assert "不得伪造成功结果" in prompt
@@ -330,10 +330,10 @@ async def test_order_support_agent_endpoint(agent_client) -> None:
                 {
                     "index": 0,
                     "status": "completed",
-                    "decision_type": "tool_call",
+                    "action_type": "tool_call",
                     "tool": "get_order_status",
                     "args": {"order_id": "1001"},
-                    "observation": {"ok": True, "status": "运输中"},
+                    "action_result": {"ok": True, "status": "运输中"},
                     "error": None,
                     "elapsed_ms": 1.2,
                 }
@@ -534,7 +534,7 @@ async def test_order_agent_service_runs_react_with_tools() -> None:
     assert result.answer == "订单 1001 由顺丰速运承运，预计明天 18:00 前送达。"
     assert len(result.steps) == 2
     assert result.steps[0].tool == "get_order_status"
-    assert result.steps[0].observation == {
+    assert result.steps[0].action_result == {
         "ok": True,
         "order_id": "1001",
         "status": "运输中",
@@ -566,14 +566,14 @@ async def test_payment_agent_service_runs_react_with_tools() -> None:
         user_id=999, question="支付失败怎么办？", max_steps=3
     )
 
-    observation = result.steps[0].observation
+    action_result = result.steps[0].action_result
     assert result.status == "completed"
     assert result.answer == "请检查余额、银行卡限额、渠道状态和订单是否过期。"
     assert result.steps[0].tool == "search_payment_knowledge"
-    assert observation["ok"] is True
-    assert observation["query"] == "支付失败怎么办？"
-    assert observation["total"] == 1
-    assert observation["matches"][0]["id"] == "payment_failed_common_causes"
+    assert action_result["ok"] is True
+    assert action_result["query"] == "支付失败怎么办？"
+    assert action_result["total"] == 1
+    assert action_result["matches"][0]["id"] == "payment_failed_common_causes"
     assert len(llm_client.calls) == 2
     assert llm_client.calls[0]["response_model"] is LLMDecisionModel
 
@@ -602,7 +602,7 @@ async def test_payment_agent_service_calculates_payment_total() -> None:
         max_steps=3,
     )
 
-    assert result.steps[0].observation == {
+    assert result.steps[0].action_result == {
         "ok": True,
         "item_amount_cents": 12990,
         "shipping_fee_cents": 1200,
@@ -628,7 +628,7 @@ async def test_payment_agent_service_rejects_confirmation_token() -> None:
 
 
 @pytest.mark.asyncio
-async def test_order_agent_service_records_unknown_order_observation() -> None:
+async def test_order_agent_service_records_unknown_order_action_result() -> None:
     llm_client = FakeLLMClient(
         decisions=[
             LLMDecisionModel(
@@ -644,7 +644,7 @@ async def test_order_agent_service_records_unknown_order_observation() -> None:
     )
 
     assert result.status == "completed"
-    assert result.steps[0].observation == {
+    assert result.steps[0].action_result == {
         "ok": False,
         "error": "not_found",
         "order_id": "404",
@@ -667,7 +667,7 @@ async def test_order_agent_service_hides_order_owned_by_another_user() -> None:
         user_id=1000, question="订单 1001 到哪了？", max_steps=3
     )
 
-    assert result.steps[0].observation == {
+    assert result.steps[0].action_result == {
         "ok": False,
         "error": "not_found",
         "order_id": "1001",
@@ -705,7 +705,7 @@ async def test_order_agent_service_requires_confirmation_before_invoice_request(
     assert prepared.status == "completed"
     assert prepared.answer == "请确认是否提交该开票申请。"
     assert prepared.steps[0].tool == "prepare_invoice_request"
-    assert prepared.steps[0].observation["status"] == "confirmation_required"
+    assert prepared.steps[0].action_result["status"] == "confirmation_required"
     assert prepared.confirmation is not None
     assert prepared.confirmation.action == "submit_invoice_request"
     assert len(action_store.pending) == 1
@@ -725,15 +725,15 @@ async def test_order_agent_service_requires_confirmation_before_invoice_request(
 
     assert confirmed.answer == "开票申请已提交，开具完成后会通知用户"
     assert confirmed.steps[0].tool == "confirm_invoice_request"
-    assert confirmed.steps[0].observation["order_id"] == "1001"
-    assert confirmed.steps[0].observation["invoice_title"] == "个人"
-    assert confirmed.steps[0].observation["email"] == "buyer@example.com"
-    assert confirmed.steps[0].observation["status"] == "queued"
-    assert confirmed.steps[0].observation["trace_id"] == "trace_invoice_test"
-    assert confirmed.steps[0].observation["task_id"].startswith("task_")
+    assert confirmed.steps[0].action_result["order_id"] == "1001"
+    assert confirmed.steps[0].action_result["invoice_title"] == "个人"
+    assert confirmed.steps[0].action_result["email"] == "buyer@example.com"
+    assert confirmed.steps[0].action_result["status"] == "queued"
+    assert confirmed.steps[0].action_result["trace_id"] == "trace_invoice_test"
+    assert confirmed.steps[0].action_result["task_id"].startswith("task_")
     assert (
-        replayed.steps[0].observation["task_id"]
-        == confirmed.steps[0].observation["task_id"]
+        replayed.steps[0].action_result["task_id"]
+        == confirmed.steps[0].action_result["task_id"]
     )
     assert action_store.pending == {}
 
@@ -791,15 +791,15 @@ async def test_order_agent_service_searches_mock_rag_knowledge() -> None:
         user_id=999, question="电子发票多久能开好？", max_steps=3
     )
 
-    observation = result.steps[0].observation
+    action_result = result.steps[0].action_result
     assert result.status == "completed"
     assert result.steps[0].tool == "search_order_knowledge"
-    assert observation["ok"] is True
-    assert observation["query"] == "电子发票多久能开好？"
-    assert observation["total"] == 1
-    assert observation["matches"][0]["id"] == "order_invoice_guide"
-    assert observation["matches"][0]["source"] == "订单帮助中心/发票服务"
-    assert "1-3 个工作日" in observation["matches"][0]["content"]
+    assert action_result["ok"] is True
+    assert action_result["query"] == "电子发票多久能开好？"
+    assert action_result["total"] == 1
+    assert action_result["matches"][0]["id"] == "order_invoice_guide"
+    assert action_result["matches"][0]["source"] == "订单帮助中心/发票服务"
+    assert "1-3 个工作日" in action_result["matches"][0]["content"]
 
 
 @pytest.mark.asyncio
@@ -827,10 +827,10 @@ async def test_order_agent_service_calculates_refund_amount() -> None:
         max_steps=3,
     )
 
-    observation = result.steps[0].observation
+    action_result = result.steps[0].action_result
     assert result.status == "completed"
     assert result.steps[0].tool == "calculate_refund_amount"
-    assert observation == {
+    assert action_result == {
         "ok": True,
         "unit_price_cents": 12990,
         "quantity": 2,
@@ -868,7 +868,7 @@ async def test_order_agent_service_rejects_excessive_refund_discount() -> None:
         max_steps=3,
     )
 
-    assert result.steps[0].observation == {
+    assert result.steps[0].action_result == {
         "ok": False,
         "error": "discount_deduction_cents cannot exceed gross refund amount",
     }
@@ -892,7 +892,7 @@ async def test_order_agent_service_rejects_decimal_refund_amount_input() -> None
         user_id=999, question="按 1000.5 分计算退款", max_steps=3
     )
 
-    assert result.steps[0].observation == {
+    assert result.steps[0].action_result == {
         "ok": False,
         "error": "unit_price_cents must be an integer",
     }

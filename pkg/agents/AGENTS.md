@@ -19,15 +19,15 @@ HTTP API、数据库、缓存或消息队列。
 - 保持零业务依赖：不得 import `internal/`，业务侧通过注入 `decision_maker` 和
   `StructuredTool.handler` 接入模型、DAO、缓存或外部服务。
 - Decision Maker 边界使用 `AgentDecisionMaker.decide_next(context)` 协议表达；
-  新增决策 helper 时，输入输出必须仍归一到 `AgentToolCall` / `AgentFinal`。
+  新增动作 helper 时，输入输出必须仍归一到 `AgentToolCall` / `AgentFinal`。
 - Tool 定义保持结构化：工具名、描述、参数 schema、handler 都必须显式；不要让
   runner 解析自然语言动作或依赖脆弱字符串协议。
 - 执行循环必须有明确上限；任何新 runner 或循环扩展都要保留 `max_steps` 类似的
   防无限循环保护。
-- 状态记录应保留决策、observation、错误和耗时等调试字段；新增字段要考虑日志、
+- 状态记录应保留动作、`action_result`、错误和耗时等调试字段；新增字段要考虑日志、
   trace、持久化和测试断言的兼容性。
 - 默认不要在 runner 内吞掉未知编程错误。工具执行错误可以按配置捕获成
-  observation，但 Decision Maker 返回非法决策应显式抛出。
+  `action_result`，但 Decision Maker 返回非法动作应显式抛出。
 - 不在本包内直接调用真实 LLM SDK、网络、数据库或 Redis；需要 provider 适配时，
   放在调用方或单独 adapter，并通过协议/函数注入。
 

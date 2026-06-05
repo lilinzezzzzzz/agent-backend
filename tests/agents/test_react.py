@@ -44,8 +44,8 @@ async def test_react_agent_runs_tool_then_final_answer() -> None:
         if not context.state.steps:
             return AgentToolCall(tool="search_order", args={"order_id": "123"})
 
-        observation = context.state.steps[-1].observation
-        assert observation == {"order_id": "123", "status": "shipped"}
+        action_result = context.state.steps[-1].action_result
+        assert action_result == {"order_id": "123", "status": "shipped"}
         return AgentFinal(answer="订单 123 已发货。")
 
     agent = ReActAgent(
@@ -61,8 +61,8 @@ async def test_react_agent_runs_tool_then_final_answer() -> None:
     assert result.final_answer == "订单 123 已发货。"
     assert len(result.steps) == 2
     assert result.steps[0].status == AgentStepStatus.COMPLETED
-    assert result.steps[0].observation == {"order_id": "123", "status": "shipped"}
-    assert result.steps[1].decision == AgentFinal(answer="订单 123 已发货。")
+    assert result.steps[0].action_result == {"order_id": "123", "status": "shipped"}
+    assert result.steps[1].action == AgentFinal(answer="订单 123 已发货。")
 
 
 @pytest.mark.asyncio
@@ -85,7 +85,7 @@ async def test_react_agent_records_unknown_tool_error_and_continues() -> None:
     assert result.status == AgentRunStatus.COMPLETED
     assert result.final_answer == "没有可用工具处理该请求。"
     assert result.steps[0].status == AgentStepStatus.FAILED
-    assert result.steps[0].observation == {"error": "unknown tool: missing_tool"}
+    assert result.steps[0].action_result == {"error": "unknown tool: missing_tool"}
 
 
 @pytest.mark.asyncio
@@ -117,7 +117,7 @@ async def test_react_agent_records_tool_exception() -> None:
 
     assert result.status == AgentRunStatus.COMPLETED
     assert result.steps[0].status == AgentStepStatus.FAILED
-    assert result.steps[0].observation == {"error": "RuntimeError: backend unavailable"}
+    assert result.steps[0].action_result == {"error": "RuntimeError: backend unavailable"}
 
 
 @pytest.mark.asyncio
@@ -173,7 +173,7 @@ async def test_react_agent_rejects_non_mapping_tool_args() -> None:
 
 
 @pytest.mark.asyncio
-async def test_react_agent_rejects_invalid_decision_maker_decision() -> None:
+async def test_react_agent_rejects_invalid_decision_maker_action() -> None:
     async def decide_next(_context: AgentDecisionContext):
         return None
 
@@ -183,7 +183,7 @@ async def test_react_agent_rejects_invalid_decision_maker_decision() -> None:
         max_steps=1,
     )
 
-    with pytest.raises(InvalidAgentDecisionError, match="invalid agent decision: None"):
+    with pytest.raises(InvalidAgentDecisionError, match="invalid agent action: None"):
         await agent.run(user_input="test")
 
 
@@ -223,13 +223,13 @@ def test_structured_tool_requires_name_and_description() -> None:
 
 
 def test_parse_agent_decision_parses_final_payload() -> None:
-    decision = parse_agent_decision({"type": "final", "answer": "done"})
+    action = parse_agent_decision({"type": "final", "answer": "done"})
 
-    assert decision == AgentFinal(answer="done")
+    assert action == AgentFinal(answer="done")
 
 
 def test_parse_agent_decision_parses_tool_call_payload() -> None:
-    decision = parse_agent_decision(
+    action = parse_agent_decision(
         {
             "type": "tool_call",
             "tool": "search_order",
@@ -238,7 +238,7 @@ def test_parse_agent_decision_parses_tool_call_payload() -> None:
         }
     )
 
-    assert decision == AgentToolCall(
+    assert action == AgentToolCall(
         tool="search_order", args={"order_id": "123"}, call_id="call_1"
     )
 
@@ -246,13 +246,13 @@ def test_parse_agent_decision_parses_tool_call_payload() -> None:
 def test_parse_agent_decision_rejects_invalid_payload() -> None:
     with pytest.raises(
         InvalidAgentDecisionError,
-        match="unsupported decision type: 'unknown'",
+        match="unsupported action type: 'unknown'",
     ):
         parse_agent_decision({"type": "unknown"})
 
     with pytest.raises(
         InvalidAgentDecisionError,
-        match="tool_call decision requires mapping args",
+        match="tool_call action requires mapping args",
     ):
         parse_agent_decision(
             {"type": "tool_call", "tool": "search_order", "args": ["bad"]}

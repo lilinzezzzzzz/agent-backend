@@ -16,9 +16,9 @@ from pkg.toolkit.json import orjson_dumps
 
 
 class LLMDecisionModel(BaseModel):
-    """LLM 返回的结构化 Agent 决策。"""
+    """LLM 返回的结构化 Agent 动作。"""
 
-    type: str = Field(..., description="决策类型，只能是 tool_call 或 final")
+    type: str = Field(..., description="动作类型，只能是 tool_call 或 final")
     tool: str | None = Field(None, description="type=tool_call 时要调用的工具名")
     args: dict[str, Any] = Field(default_factory=dict, description="工具调用参数")
     answer: str | None = Field(None, description="type=final 时的最终回答")
@@ -46,15 +46,15 @@ class LLMReactDecisionMaker:
     async def decide_next(
         self, context: AgentDecisionContext
     ) -> AgentToolCall | AgentFinal:
-        """调用 LLM，并把结构化输出转换为下一步 Agent 决策。"""
-        decision = await self._llm_client.chat_completion_structured(
+        """调用 LLM，并把结构化输出转换为下一步 Agent 动作。"""
+        action = await self._llm_client.chat_completion_structured(
             messages=self._build_decision_messages(context=context),
             response_model=LLMDecisionModel,
             temperature=self._temperature,
             max_tokens=self._max_tokens,
             **self._extra_completion_kwargs,
         )
-        return parse_agent_decision(decision.model_dump(exclude_none=True))
+        return parse_agent_decision(action.model_dump(exclude_none=True))
 
     def _build_decision_messages(
         self, *, context: AgentDecisionContext
@@ -80,8 +80,8 @@ class LLMReactDecisionMaker:
                         "previous_steps": [
                             {
                                 "index": step.index,
-                                "decision": _serialize_decision(step.decision),
-                                "observation": step.observation,
+                                "action": _serialize_action(step.action),
+                                "action_result": step.action_result,
                                 "error": step.error,
                             }
                             for step in context.state.steps
@@ -100,7 +100,7 @@ class LLMReactDecisionMaker:
         ]
 
 
-def _serialize_decision(decision: AgentToolCall | AgentFinal) -> dict[str, Any]:
-    if isinstance(decision, AgentFinal):
-        return {"type": "final", "answer": decision.answer}
-    return {"type": "tool_call", "tool": decision.tool, "args": decision.args}
+def _serialize_action(action: AgentToolCall | AgentFinal) -> dict[str, Any]:
+    if isinstance(action, AgentFinal):
+        return {"type": "final", "answer": action.answer}
+    return {"type": "tool_call", "tool": action.tool, "args": action.args}

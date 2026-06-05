@@ -220,7 +220,7 @@ class OrderService:
                 "user_id": user_id,
                 "idempotency_key": idempotency_key,
                 "confirmation_token": result.confirmation_token,
-                **result.to_tool_result(),
+                **result.to_action_result(),
             }
             saved = await self._action_store.save_confirmation_result(
                 token=confirmation_token,

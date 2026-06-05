@@ -79,12 +79,12 @@ async def test_llm_react_decision_maker_builds_messages_and_parses_decisions() -
     assert second_payload["previous_steps"] == [
         {
             "index": 0,
-            "decision": {
+            "action": {
                 "type": "tool_call",
                 "tool": "get_order_status",
                 "args": {"order_id": "1001"},
             },
-            "observation": {
+            "action_result": {
                 "ok": True,
                 "order_id": "1001",
                 "status": "运输中",

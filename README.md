@@ -234,7 +234,7 @@ uv run celery -A internal.utils.celery.celery_app beat -l info
 - `ReActAgent`：有限循环执行器。
 - `AgentDecisionMaker`：根据上下文决定下一步。
 - `StructuredTool`：声明工具名、描述、参数 schema 和 handler。
-- `AgentRunState` / `AgentStepRecord`：记录工具调用、observation、错误和耗时。
+- `AgentRunState` / `AgentStepRecord`：记录动作、action_result、错误和耗时。
 
 业务 Agent 位于 `internal/agents/`：
 

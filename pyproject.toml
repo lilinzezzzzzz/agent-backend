@@ -108,3 +108,6 @@ python-downloads = false
 markers = [
     "integration: 集成测试，需要完整的 Celery Worker 和 Redis 环境",
 ]
+
+[tool.fastapi]
+entrypoint = "entrypoints.api:app"

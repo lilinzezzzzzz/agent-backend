@@ -19,7 +19,7 @@ from celery import Celery
 from internal.config import init_settings, settings
 from internal.infra.database import close_async_db, init_async_db, reset_async_db
 from internal.infra.redis import close_async_redis, init_async_redis, reset_async_redis
-from internal.tasks import (
+from internal.tasks.scheduler import (
     CELERY_INCLUDE_MODULES,
     CELERY_TASK_ROUTES,
     STATIC_BEAT_SCHEDULE,
@@ -150,13 +150,13 @@ def run_in_async[T](coro_func: Callable[[], Coroutine[None, None, T]], trace_id:
 # =========================================================
 1. 启动任务
 # 开发环境 - 基础启动
-celery -A internal.utils.celery.celery_app worker -l info -c 1 -Q default,celery_queue
+celery -A entrypoints.celery:celery_app worker -l info -c 1 -Q default,celery_queue
 
 # 开发环境 - 指定并发数（容器资源有限时建议限制）
-celery -A internal.utils.celery.celery_app worker -l info -c 2 -Q default,celery_queue
+celery -A entrypoints.celery:celery_app worker -l info -c 2 -Q default,celery_queue
 
 # 生产环境 - 推荐配置
-celery -A internal.utils.celery.celery_app worker \
+celery -A entrypoints.celery:celery_app worker \
     -l info \
     -c 4 \
     --max-tasks-per-child 1000 \
@@ -164,5 +164,5 @@ celery -A internal.utils.celery.celery_app worker \
     -Q default,celery_queue
 
 # 2. 启动 Beat (派发定时任务):
-# celery -A internal.utils.celery.celery_app beat -l info
+# celery -A entrypoints.celery:celery_app beat -l info
 """

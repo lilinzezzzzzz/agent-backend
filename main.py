@@ -1,3 +1,8 @@
-from internal.app import create_app
+"""Backward-compatible ASGI entrypoint.
 
-app = create_app()
+Prefer ``entrypoints.api:app`` for new deployments.
+"""
+
+from entrypoints.api import app
+
+__all__ = ["app"]

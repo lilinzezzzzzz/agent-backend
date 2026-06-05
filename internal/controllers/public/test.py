@@ -42,7 +42,7 @@ async def test_validation_error(req: TestValidationRequest) -> ResponsePayload:
 
 @router.get("/test_raise_exception", summary="测试异常")
 async def test_raise_exception(_: Request):
-    # 如果触发fastapi.HTTPException会有限被main.py的exception_handler捕获，
+    # 如果触发 fastapi.HTTPException 会优先被 FastAPI exception handler 捕获，
     # 如果是Exception会被middleware的exception.py捕获
     raise Exception("test_raise_exception")
 

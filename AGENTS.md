@@ -21,7 +21,11 @@
 
 ## 目录结构
 
-- `main.py`：FastAPI 应用入口，导出 `app`。
+- `entrypoints/`：进程启动入口，放置 API、Celery Worker / Beat 等 composition root。
+- `entrypoints/api.py`：FastAPI 推荐应用入口，导出 `app`。
+- `entrypoints/celery.py`：Celery CLI 推荐入口，导出 `celery_app`。
+- `entrypoints/run_celery_worker.sh`：Celery Worker 启动脚本。
+- `main.py`：兼容旧部署的 FastAPI 应用入口，新配置优先使用 `entrypoints.api:app`。
 - `internal/`：业务应用代码。
 - `internal/app.py`：应用组装、路由注册、中间件注册、lifespan 初始化。
 - `internal/config.py`：配置模型和配置加载逻辑。
@@ -84,19 +88,19 @@ uv sync --group dev
 启动 API：
 
 ```bash
-uv run uvicorn main:app --reload --host 0.0.0.0 --port 8000
+uv run uvicorn entrypoints.api:app --reload --host 0.0.0.0 --port 8000
 ```
 
 启动 Celery Worker：
 
 ```bash
-uv run celery -A internal.utils.celery.celery_app worker -l info -Q default,celery_queue,cron_queue
+uv run celery -A entrypoints.celery:celery_app worker -l info -Q default,celery_queue,cron_queue
 ```
 
 启动 Celery Beat：
 
 ```bash
-uv run celery -A internal.utils.celery.celery_app beat -l info
+uv run celery -A entrypoints.celery:celery_app beat -l info
 ```
 
 运行测试：

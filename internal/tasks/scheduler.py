@@ -14,7 +14,7 @@ from celery.schedules import crontab
 
 # 需要加载的任务模块 (Python 模块路径)
 CELERY_INCLUDE_MODULES = [
-    "internal.tasks.celery_tasks",
+    "internal.tasks.celery",
 ]
 
 # 任务路由配置 (决定任务去哪个队列)

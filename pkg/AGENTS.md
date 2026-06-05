@@ -4,7 +4,7 @@
 
 ## 层职责
 
-`pkg/` 是项目内可复用基础包，提供数据库、日志、工具、OSS、第三方登录、向量检索等通用能力。这里的代码应尽量不依赖 `internal/` 业务层。
+`pkg/` 是项目内可复用基础包，提供并发执行、数据库、日志、工具、OSS、第三方登录、向量检索等通用能力。这里的代码应尽量不依赖 `internal/` 业务层。
 
 ## 编码约定
 
@@ -29,6 +29,7 @@
 
 - `pkg/agents/AGENTS.md`：结构化 ReAct / Tool Calling 执行循环和 Agent 状态契约。
 - `pkg/chars_matcher/AGENTS.md`：中文候选字拼音 / 字形匹配、数据文件约定。
+- `pkg/concurrency/AGENTS.md`：进程内后台任务、同步函数 offload、取消、超时和并发限制。
 - `pkg/crypter/AGENTS.md`：加密算法抽象和密文兼容性。
 - `pkg/database/AGENTS.md`：ORM 基类、builder、session provider。
 - `pkg/decorators/AGENTS.md`：通用装饰器，零业务依赖。

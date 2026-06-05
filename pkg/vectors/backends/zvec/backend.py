@@ -8,7 +8,7 @@ import anyio
 import zvec
 from zvec import Collection, CollectionOption
 
-from pkg.toolkit.async_task import anyio_run_in_thread
+from pkg.concurrency import anyio_run_in_thread
 from pkg.vectors.backends.base import BaseVectorBackend, CollectionSpec
 from pkg.vectors.contracts import FilterCondition, SearchHit, SearchRequest, VectorRecord
 from pkg.vectors.errors import CapabilityNotSupportedError

@@ -50,7 +50,7 @@ from typing import Generic, NamedTuple, TypeVar
 from pypinyin import lazy_pinyin
 
 from pkg.chars_matcher.types import CharMatchType, MatchType, PinyinCharMapping
-from pkg.toolkit.async_utils import anyio_run_in_thread
+from pkg.concurrency import anyio_run_in_thread
 
 _CacheKeyT = TypeVar("_CacheKeyT")
 _CacheValueT = TypeVar("_CacheValueT")
@@ -161,7 +161,7 @@ class PinyinCharsMatcher:
         ['李', '理', '里', '力', ...]
         >>> matcher.match_chars_by_pinyin("zhang", char_type="surname")
         ['张', '章', '彰', ...]
-    """""
+    """
 
     _PINYIN_SPLIT_PATTERN = re.compile(r"[\s,，;；/|]+")
     _NON_ALPHA_PATTERN = re.compile(r"[^a-z]")

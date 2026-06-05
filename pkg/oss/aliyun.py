@@ -3,7 +3,7 @@ from pathlib import Path
 import oss2
 
 from pkg.oss.base import BaseStorage, StorageType, register_storage
-from pkg.toolkit.async_task import anyio_run_in_thread
+from pkg.concurrency import anyio_run_in_thread
 
 
 @register_storage(StorageType.ALIYUN)

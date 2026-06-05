@@ -1,6 +1,6 @@
 import bcrypt
 
-from pkg.toolkit.async_task import anyio_run_in_thread
+from pkg.concurrency import anyio_run_in_thread
 
 
 class Hasher:

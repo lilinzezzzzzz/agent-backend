@@ -1,5 +1,5 @@
 from pkg.logger import logger
-from pkg.toolkit.async_task import AnyioTaskHandler
+from pkg.concurrency import AnyioTaskHandler
 from pkg.toolkit.types import lazy_proxy
 
 _anyio_task_manager: AnyioTaskHandler | None = None

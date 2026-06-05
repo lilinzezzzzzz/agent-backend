@@ -69,6 +69,7 @@ dependencies = [
     "pymilvus>=2.6.10",
     "wordfreq>=3.1.1",
     "mcp>=1,<2",
+    "pypinyin>=0.55.0",
 ]
 
 # 分组依赖 —— 开发环境才需要

@@ -3,7 +3,7 @@ from typing import Any
 
 import pytest
 
-from pkg.toolkit.async_task import asyncio_run_background
+from pkg.concurrency import asyncio_run_background
 
 
 @pytest.mark.asyncio
@@ -100,6 +100,8 @@ async def test_asyncio_run_background_reports_on_error_failure() -> None:
     loop.set_exception_handler(original_handler)
 
     assert handled_contexts
-    assert handled_contexts[0]["message"] == "background task worker error handler failed"
+    assert (
+        handled_contexts[0]["message"] == "background task worker error handler failed"
+    )
     assert isinstance(handled_contexts[0]["exception"], RuntimeError)
     assert isinstance(handled_contexts[0]["source_exception"], ValueError)

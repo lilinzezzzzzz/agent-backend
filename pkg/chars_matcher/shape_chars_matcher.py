@@ -28,7 +28,7 @@ from pathlib import Path
 
 from pkg.chars_matcher.types import CharShapeFeature, ShapeFeatureMapping
 from pkg.chars_matcher.validation import normalize_single_han_char
-from pkg.toolkit.async_task import anyio_run_in_thread
+from pkg.concurrency import anyio_run_in_thread
 
 type ShapeCandidateRank = tuple[int, int, int, int, int]
 

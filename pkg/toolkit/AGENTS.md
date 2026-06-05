@@ -9,7 +9,7 @@
 - 基础类型/字典：`types.py`、`dict.py`、`list.py`、`string.py`、`float.py`
 - 序列化/IO：`json.py`、`file.py`、`response.py`
 - 客户端：`http_cli.py`、`openai_cli.py`、`redis_client.py`、`grpc.py`
-- 时间/任务：`timer.py`、`async_task.py`、`celery.py`、`apscheduler.py`
+- 时间/任务：`timer.py`、`celery.py`、`apscheduler.py`
 - 上下文/签名/认证：`context.py`、`signature.py`、`jwt.py`、`hasher.py`
 - 其他：`config_loader.py`、`exc.py`、`inter.py`、`middleware.py`、`logger.py`
 

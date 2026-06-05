@@ -5,7 +5,7 @@ import boto3
 from botocore.exceptions import ClientError
 
 from pkg.oss.base import BaseStorage, StorageType, register_storage
-from pkg.toolkit.async_task import anyio_run_in_thread
+from pkg.concurrency import anyio_run_in_thread
 
 
 @register_storage(StorageType.S3)

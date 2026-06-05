@@ -3,7 +3,7 @@ from typing import Any
 
 import pytest
 
-from internal.agents import LLMDecisionModel
+from internal.agents import LLMActionModel
 from internal.services.agents.audit import (
     AgentAuditContext,
     AgentAuditService,
@@ -73,9 +73,9 @@ class FakeLLMClient:
     def __init__(self):
         self.calls: list[dict[str, Any]] = []
 
-    async def chat_completion_structured(self, **kwargs: Any) -> LLMDecisionModel:
+    async def chat_completion_structured(self, **kwargs: Any) -> LLMActionModel:
         self.calls.append(kwargs)
-        return LLMDecisionModel(
+        return LLMActionModel(
             type="tool_call",
             tool="send_email",
             args={"email": "buyer@example.com", "order_id": "1001"},
@@ -270,20 +270,20 @@ async def test_audited_agent_llm_client_records_structured_calls() -> None:
         audit_context=audit_context,
     )
 
-    decision = await audited_client.chat_completion_structured(
+    action = await audited_client.chat_completion_structured(
         messages=[{"role": "user", "content": "订单 1001 到哪了？"}],
-        response_model=LLMDecisionModel,
+        response_model=LLMActionModel,
         temperature=0,
         max_tokens=128,
         thinking=False,
     )
 
-    assert decision.tool == "send_email"
+    assert action.tool == "send_email"
     assert len(audit_context.llm_calls) == 1
     call = audit_context.llm_calls[0]
     assert call["provider"] == "fake-provider"
     assert call["model"] == "fake-model"
-    assert call["response_model"] == "LLMDecisionModel"
+    assert call["response_model"] == "LLMActionModel"
     assert call["request"]["max_tokens"] == 128
     assert call["request"]["extra"]["thinking"] is False
     assert call["parsed_response"]["args"]["email"] == "bu....com"

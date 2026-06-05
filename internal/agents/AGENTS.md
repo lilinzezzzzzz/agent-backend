@@ -4,7 +4,7 @@
 
 ## 层职责
 
-本目录承载业务 Agent 的实现侧适配：LLM decision maker、router、prompt、builder 和
+本目录承载业务 Agent 的实现侧适配：LLM action maker、router、prompt、builder 和
 `StructuredTool` 定义。通用 Agent 执行循环、状态记录和工具协议来自 `pkg/agents/`。
 
 业务用例入口仍放在 `internal/services/agents/`，HTTP contract 仍放在
@@ -17,7 +17,7 @@
   Service 或明确协议注入。
 - 业务 Agent 按领域放在 `internal/agents/<domain>/`，领域目录内通常包含
   `builder.py`、`prompt.py`、`tools.py` 和必要 README。
-- Builder 负责组装 `ReActAgent`、decision maker、工具和 `max_steps`；依赖通过构造函数显式注入，
+- Builder 负责组装 `ReActAgent`、action maker、工具和 `max_steps`；依赖通过构造函数显式注入，
   便于测试替换。
 - Prompt 只表达工具路由、禁止事项、输出契约和回答边界，不承载权限、幂等、事务或状态机规则。
 - Tool 必须使用 `pkg.agents.StructuredTool`，显式声明工具名、描述、参数 schema 和 handler。
@@ -40,10 +40,10 @@
 
 ## 验证重点
 
-- 修改通用 LLM decision maker 或 router 时，优先运行：
+- 修改通用 LLM action maker 或 router 时，优先运行：
 
   ```bash
-  uv run pytest tests/agents/test_llm_decision.py tests/agents/test_react.py -q
+  uv run pytest tests/agents/test_llm_action.py tests/agents/test_react.py -q
   uv run ruff check internal/agents tests/agents
   ```
 

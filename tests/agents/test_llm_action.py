@@ -2,19 +2,19 @@ from typing import Any
 
 import pytest
 
-from internal.agents import LLMDecisionModel, LLMReactDecisionMaker
+from internal.agents import LLMActionModel, LLMReactActionMaker
 from pkg.agents import ReActAgent, StructuredTool
 from pkg.toolkit.json import orjson_loads
 
 
 class FakeLLMClient:
-    def __init__(self, decisions: list[LLMDecisionModel]):
-        self._decisions = decisions
+    def __init__(self, actions: list[LLMActionModel]):
+        self._actions = actions
         self.calls: list[dict[str, Any]] = []
 
-    async def chat_completion_structured(self, **kwargs: Any) -> LLMDecisionModel:
+    async def chat_completion_structured(self, **kwargs: Any) -> LLMActionModel:
         self.calls.append(kwargs)
-        return self._decisions.pop(0)
+        return self._actions.pop(0)
 
 
 def build_order_tool() -> StructuredTool:
@@ -35,16 +35,16 @@ def build_order_tool() -> StructuredTool:
 
 
 @pytest.mark.asyncio
-async def test_llm_react_decision_maker_builds_messages_and_parses_decisions() -> None:
+async def test_llm_react_action_maker_builds_messages_and_parses_actions() -> None:
     llm_client = FakeLLMClient(
-        decisions=[
-            LLMDecisionModel(
+        actions=[
+            LLMActionModel(
                 type="tool_call", tool="get_order_status", args={"order_id": "1001"}
             ),
-            LLMDecisionModel(type="final", answer="订单 1001 正在运输中。"),
+            LLMActionModel(type="final", answer="订单 1001 正在运输中。"),
         ]
     )
-    decision_maker = LLMReactDecisionMaker(
+    action_maker = LLMReactActionMaker(
         llm_client=llm_client,
         system_prompt="你是订单助手。",
         max_tokens=256,
@@ -52,7 +52,7 @@ async def test_llm_react_decision_maker_builds_messages_and_parses_decisions() -
         extra_completion_kwargs={"thinking": False},
     )
     agent = ReActAgent(
-        decision_maker=decision_maker,
+        action_maker=action_maker,
         tools=[build_order_tool()],
         max_steps=2,
     )
@@ -61,7 +61,7 @@ async def test_llm_react_decision_maker_builds_messages_and_parses_decisions() -
 
     assert result.final_answer == "订单 1001 正在运输中。"
     assert len(llm_client.calls) == 2
-    assert llm_client.calls[0]["response_model"] is LLMDecisionModel
+    assert llm_client.calls[0]["response_model"] is LLMActionModel
     assert llm_client.calls[0]["max_tokens"] == 256
     assert llm_client.calls[0]["temperature"] == 0
     assert llm_client.calls[0]["thinking"] is False

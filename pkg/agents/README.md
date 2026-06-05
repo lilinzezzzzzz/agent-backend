@@ -33,7 +33,7 @@ ReAct 的基础循环如下：
 
 ```text
 用户输入
-→ Decision Maker 判断下一步
+→ Action Maker 判断下一步
 → AgentToolCall：执行工具并记录 action_result
 → 基于 action_result 继续选择动作
 → AgentFinal：返回最终答案
@@ -147,7 +147,7 @@ submit_business_action
 
 `pkg.agents.ReActAgent` 提供：
 
-- `AgentDecisionMaker`：根据当前上下文决定下一步
+- `AgentActionMaker`：根据当前上下文生成下一步动作
 - `AgentToolCall`：请求调用一个结构化工具
 - `AgentFinal`：返回最终答案并结束运行
 - `StructuredTool`：声明工具名、描述、参数 schema 和 handler

@@ -6,10 +6,10 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from pydantic import ValidationError
 
-from internal.agents import LLMDecisionModel
+from internal.agents import LLMActionModel
 from internal.agents.order import ORDER_SUPPORT_SYSTEM_PROMPT, OrderAgentBuilder
 from internal.agents.payment import PAYMENT_SUPPORT_SYSTEM_PROMPT, PaymentAgentBuilder
-from internal.agents.router import AgentRoute, AgentRouterDecisionModel
+from internal.agents.router import AgentRoute, AgentRouterActionModel
 from internal.core import AppException, errors
 from internal.controllers.api import agent as agent_controller
 from internal.schemas.agent import (
@@ -135,13 +135,13 @@ class RecordingPaymentAgentService:
 
 
 class FakeLLMClient:
-    def __init__(self, decisions: list[Any]):
-        self._decisions = decisions
+    def __init__(self, actions: list[Any]):
+        self._actions = actions
         self.calls: list[dict[str, Any]] = []
 
     async def chat_completion_structured(self, **kwargs: Any) -> Any:
         self.calls.append(kwargs)
-        return self._decisions.pop(0)
+        return self._actions.pop(0)
 
 
 class FakeAgentActionStore:
@@ -417,7 +417,7 @@ async def test_agent_router_service_routes_order_question_without_llm() -> None:
 
 @pytest.mark.asyncio
 async def test_agent_router_service_falls_back_to_llm_for_ambiguous_question() -> None:
-    llm_client = FakeLLMClient([AgentRouterDecisionModel(route=AgentRoute.ORDER)])
+    llm_client = FakeLLMClient([AgentRouterActionModel(route=AgentRoute.ORDER)])
     order_agent_service = RecordingOrderAgentService()
     payment_agent_service = RecordingPaymentAgentService()
     service = AgentRouterService(
@@ -535,11 +535,11 @@ async def test_payment_support_agent_controller_wraps_service_dto() -> None:
 @pytest.mark.asyncio
 async def test_order_agent_service_runs_react_with_tools() -> None:
     llm_client = FakeLLMClient(
-        decisions=[
-            LLMDecisionModel(
+        actions=[
+            LLMActionModel(
                 type="tool_call", tool="get_order_status", args={"order_id": "1001"}
             ),
-            LLMDecisionModel(
+            LLMActionModel(
                 type="final", answer="订单 1001 由顺丰速运承运，预计明天 18:00 前送达。"
             ),
         ]
@@ -563,19 +563,19 @@ async def test_order_agent_service_runs_react_with_tools() -> None:
         "eta": "明天 18:00 前",
     }
     assert len(llm_client.calls) == 2
-    assert llm_client.calls[0]["response_model"] is LLMDecisionModel
+    assert llm_client.calls[0]["response_model"] is LLMActionModel
 
 
 @pytest.mark.asyncio
 async def test_payment_agent_service_runs_react_with_tools() -> None:
     llm_client = FakeLLMClient(
-        decisions=[
-            LLMDecisionModel(
+        actions=[
+            LLMActionModel(
                 type="tool_call",
                 tool="search_payment_knowledge",
                 args={"query": "支付失败怎么办？", "top_k": 2},
             ),
-            LLMDecisionModel(
+            LLMActionModel(
                 type="final", answer="请检查余额、银行卡限额、渠道状态和订单是否过期。"
             ),
         ]
@@ -595,14 +595,14 @@ async def test_payment_agent_service_runs_react_with_tools() -> None:
     assert action_result["total"] == 1
     assert action_result["matches"][0]["id"] == "payment_failed_common_causes"
     assert len(llm_client.calls) == 2
-    assert llm_client.calls[0]["response_model"] is LLMDecisionModel
+    assert llm_client.calls[0]["response_model"] is LLMActionModel
 
 
 @pytest.mark.asyncio
 async def test_payment_agent_service_calculates_payment_total() -> None:
     llm_client = FakeLLMClient(
-        decisions=[
-            LLMDecisionModel(
+        actions=[
+            LLMActionModel(
                 type="tool_call",
                 tool="calculate_payment_total",
                 args={
@@ -611,7 +611,7 @@ async def test_payment_agent_service_calculates_payment_total() -> None:
                     "discount_cents": 3000,
                 },
             ),
-            LLMDecisionModel(type="final", answer="应付金额为 111.90 元。"),
+            LLMActionModel(type="final", answer="应付金额为 111.90 元。"),
         ]
     )
     service = _new_payment_agent_service(llm_client)
@@ -650,11 +650,11 @@ async def test_payment_agent_service_rejects_confirmation_token() -> None:
 @pytest.mark.asyncio
 async def test_order_agent_service_records_unknown_order_action_result() -> None:
     llm_client = FakeLLMClient(
-        decisions=[
-            LLMDecisionModel(
+        actions=[
+            LLMActionModel(
                 type="tool_call", tool="get_order_status", args={"order_id": "404"}
             ),
-            LLMDecisionModel(type="final", answer="没有查询到订单 404。"),
+            LLMActionModel(type="final", answer="没有查询到订单 404。"),
         ]
     )
     service = _new_order_agent_service(llm_client)
@@ -674,11 +674,11 @@ async def test_order_agent_service_records_unknown_order_action_result() -> None
 @pytest.mark.asyncio
 async def test_order_agent_service_hides_order_owned_by_another_user() -> None:
     llm_client = FakeLLMClient(
-        decisions=[
-            LLMDecisionModel(
+        actions=[
+            LLMActionModel(
                 type="tool_call", tool="get_order_status", args={"order_id": "1001"}
             ),
-            LLMDecisionModel(type="final", answer="没有查询到订单 1001。"),
+            LLMActionModel(type="final", answer="没有查询到订单 1001。"),
         ]
     )
     service = _new_order_agent_service(llm_client)
@@ -700,8 +700,8 @@ async def test_order_agent_service_requires_confirmation_before_invoice_request(
 ) -> None:
     action_store = FakeAgentActionStore()
     llm_client = FakeLLMClient(
-        decisions=[
-            LLMDecisionModel(
+        actions=[
+            LLMActionModel(
                 type="tool_call",
                 tool="prepare_invoice_request",
                 args={
@@ -710,7 +710,7 @@ async def test_order_agent_service_requires_confirmation_before_invoice_request(
                     "email": "buyer@example.com",
                 },
             ),
-            LLMDecisionModel(type="final", answer="请确认是否提交该开票申请。"),
+            LLMActionModel(type="final", answer="请确认是否提交该开票申请。"),
         ]
     )
     service = _new_order_agent_service(llm_client, action_store=action_store)
@@ -793,13 +793,13 @@ async def test_order_service_rejects_confirmation_from_another_user() -> None:
 @pytest.mark.asyncio
 async def test_order_agent_service_searches_mock_rag_knowledge() -> None:
     llm_client = FakeLLMClient(
-        decisions=[
-            LLMDecisionModel(
+        actions=[
+            LLMActionModel(
                 type="tool_call",
                 tool="search_order_knowledge",
                 args={"query": "电子发票多久能开好？", "top_k": 2},
             ),
-            LLMDecisionModel(
+            LLMActionModel(
                 type="final",
                 answer="电子发票通常会在提交申请后的 1-3 个工作日内完成。",
             ),
@@ -825,8 +825,8 @@ async def test_order_agent_service_searches_mock_rag_knowledge() -> None:
 @pytest.mark.asyncio
 async def test_order_agent_service_calculates_refund_amount() -> None:
     llm_client = FakeLLMClient(
-        decisions=[
-            LLMDecisionModel(
+        actions=[
+            LLMActionModel(
                 type="tool_call",
                 tool="calculate_refund_amount",
                 args={
@@ -836,7 +836,7 @@ async def test_order_agent_service_calculates_refund_amount() -> None:
                     "discount_deduction_cents": 3000,
                 },
             ),
-            LLMDecisionModel(type="final", answer="预计可退款 241.80 元。"),
+            LLMActionModel(type="final", answer="预计可退款 241.80 元。"),
         ]
     )
     service = _new_order_agent_service(llm_client)
@@ -865,8 +865,8 @@ async def test_order_agent_service_calculates_refund_amount() -> None:
 @pytest.mark.asyncio
 async def test_order_agent_service_rejects_excessive_refund_discount() -> None:
     llm_client = FakeLLMClient(
-        decisions=[
-            LLMDecisionModel(
+        actions=[
+            LLMActionModel(
                 type="tool_call",
                 tool="calculate_refund_amount",
                 args={
@@ -875,7 +875,7 @@ async def test_order_agent_service_rejects_excessive_refund_discount() -> None:
                     "discount_deduction_cents": 1100,
                 },
             ),
-            LLMDecisionModel(
+            LLMActionModel(
                 type="final", answer="优惠扣减金额超过可退金额，无法计算退款。"
             ),
         ]
@@ -897,13 +897,13 @@ async def test_order_agent_service_rejects_excessive_refund_discount() -> None:
 @pytest.mark.asyncio
 async def test_order_agent_service_rejects_decimal_refund_amount_input() -> None:
     llm_client = FakeLLMClient(
-        decisions=[
-            LLMDecisionModel(
+        actions=[
+            LLMActionModel(
                 type="tool_call",
                 tool="calculate_refund_amount",
                 args={"unit_price_cents": 1000.5, "quantity": 1},
             ),
-            LLMDecisionModel(type="final", answer="金额参数必须使用整数分。"),
+            LLMActionModel(type="final", answer="金额参数必须使用整数分。"),
         ]
     )
     service = _new_order_agent_service(llm_client)

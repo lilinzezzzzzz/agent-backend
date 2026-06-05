@@ -7,15 +7,15 @@ from pydantic import BaseModel, Field
 
 from internal.infra.llm import AgentLLMClient
 from pkg.agents import (
-    AgentDecisionContext,
+    AgentActionContext,
     AgentFinal,
     AgentToolCall,
-    parse_agent_decision,
+    parse_agent_action,
 )
 from pkg.toolkit.json import orjson_dumps
 
 
-class LLMDecisionModel(BaseModel):
+class LLMActionModel(BaseModel):
     """LLM 返回的结构化 Agent 动作。"""
 
     type: str = Field(..., description="动作类型，只能是 tool_call 或 final")
@@ -25,8 +25,15 @@ class LLMDecisionModel(BaseModel):
     call_id: str | None = Field(None, description="可选工具调用 ID")
 
 
-class LLMReactDecisionMaker:
-    """基于 LLM 结构化输出的通用 ReAct decision maker。"""
+class LLMReactActionMaker:
+    """基于 LLM 结构化输出的通用 ReAct action maker。
+
+    当前设计是 structured-output ReAct，而不是原生 function calling ReAct：
+    可用工具会被序列化进消息内容，模型按 `LLMActionModel` 输出 tool_call/final
+    动作，再由本地 `ReActAgent` 执行 `StructuredTool.handler`。这样可以降低模型厂商
+    耦合，不依赖 OpenAI、Claude、Gemini 等各自不同的原生 function/tool calling
+    协议。
+    """
 
     def __init__(
         self,
@@ -43,21 +50,21 @@ class LLMReactDecisionMaker:
         self._temperature = temperature
         self._extra_completion_kwargs = dict(extra_completion_kwargs or {})
 
-    async def decide_next(
-        self, context: AgentDecisionContext
+    async def make_next_action(
+        self, context: AgentActionContext
     ) -> AgentToolCall | AgentFinal:
         """调用 LLM，并把结构化输出转换为下一步 Agent 动作。"""
         action = await self._llm_client.chat_completion_structured(
-            messages=self._build_decision_messages(context=context),
-            response_model=LLMDecisionModel,
+            messages=self._build_action_messages(context=context),
+            response_model=LLMActionModel,
             temperature=self._temperature,
             max_tokens=self._max_tokens,
             **self._extra_completion_kwargs,
         )
-        return parse_agent_decision(action.model_dump(exclude_none=True))
+        return parse_agent_action(action.model_dump(exclude_none=True))
 
-    def _build_decision_messages(
-        self, *, context: AgentDecisionContext
+    def _build_action_messages(
+        self, *, context: AgentActionContext
     ) -> list[dict[str, Any]]:
         return [
             {

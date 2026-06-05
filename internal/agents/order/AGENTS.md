@@ -34,7 +34,7 @@
 - 修改订单 prompt、builder 或 tools 时，优先运行：
 
   ```bash
-  uv run pytest tests/agents/test_llm_decision.py tests/agents/test_react.py -q
+  uv run pytest tests/agents/test_llm_action.py tests/agents/test_react.py -q
   uv run pytest tests/api/test_agent.py -q -k 'not endpoint'
   uv run ruff check internal/agents/order internal/services/agents/order.py tests/agents tests/api/test_agent.py
   ```

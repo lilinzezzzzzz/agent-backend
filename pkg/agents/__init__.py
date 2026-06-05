@@ -2,8 +2,8 @@
 
 from pkg.agents.react import (
     AgentAction,
-    AgentDecisionContext,
-    AgentDecisionMaker,
+    AgentActionContext,
+    AgentActionMaker,
     AgentFinal,
     AgentRunResult,
     AgentRunState,
@@ -11,19 +11,19 @@ from pkg.agents.react import (
     AgentStepRecord,
     AgentStepStatus,
     AgentToolCall,
-    InvalidAgentDecisionError,
+    InvalidAgentActionError,
     ReActAgent,
     StructuredTool,
     ToolExecutionError,
     ToolHandler,
     UnknownToolError,
-    parse_agent_decision,
+    parse_agent_action,
 )
 
 __all__ = [
     "AgentAction",
-    "AgentDecisionContext",
-    "AgentDecisionMaker",
+    "AgentActionContext",
+    "AgentActionMaker",
     "AgentFinal",
     "AgentRunResult",
     "AgentRunState",
@@ -31,11 +31,11 @@ __all__ = [
     "AgentStepRecord",
     "AgentStepStatus",
     "AgentToolCall",
-    "InvalidAgentDecisionError",
+    "InvalidAgentActionError",
     "ReActAgent",
     "StructuredTool",
     "ToolExecutionError",
     "ToolHandler",
     "UnknownToolError",
-    "parse_agent_decision",
+    "parse_agent_action",
 ]

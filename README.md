@@ -232,7 +232,7 @@ uv run celery -A internal.utils.celery.celery_app beat -l info
 通用 Agent 基础设施位于 `pkg/agents/`，当前核心是结构化 ReAct / Tool Calling：
 
 - `ReActAgent`：有限循环执行器。
-- `AgentDecisionMaker`：根据上下文决定下一步。
+- `AgentActionMaker`：根据上下文生成下一步动作。
 - `StructuredTool`：声明工具名、描述、参数 schema 和 handler。
 - `AgentRunState` / `AgentStepRecord`：记录动作、action_result、错误和耗时。
 

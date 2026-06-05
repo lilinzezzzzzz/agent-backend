@@ -4,18 +4,18 @@
 
 1. 定义一个或多个 `StructuredTool`，每个工具提供名称、描述、参数 schema 和
    handler。handler 接收 `Mapping[str, Any]`，可以是同步函数或异步函数。
-2. 定义一个 decision maker 对象，实现 `decide_next(context)`。decision maker 每轮
+2. 定义一个 action maker 对象，实现 `make_next_action(context)`。action maker 每轮
    都会收到用户输入、当前运行状态和工具列表，然后返回：
    - `AgentToolCall(tool="...", args={...})`：继续调用工具；
    - `AgentFinal(answer="...")`：结束循环并返回最终答案。
-3. 创建 `ReActAgent(decision_maker=..., tools=[...], max_steps=...)`，然后调用
+3. 创建 `ReActAgent(action_maker=..., tools=[...], max_steps=...)`，然后调用
    `await agent.run(user_input="...")`。
 
 示例：
 
 ```python
 from pkg.agents import (
-    AgentDecisionContext,
+    AgentActionContext,
     AgentFinal,
     AgentToolCall,
     ReActAgent,
@@ -27,8 +27,8 @@ def search_order(args):
     return {"order_id": args["order_id"], "status": "shipped"}
 
 
-class OrderDecisionMaker:
-    async def decide_next(self, context: AgentDecisionContext):
+class OrderActionMaker:
+    async def make_next_action(self, context: AgentActionContext):
         if not context.state.steps:
             return AgentToolCall(tool="search_order", args={"order_id": "123"})
 
@@ -37,7 +37,7 @@ class OrderDecisionMaker:
 
 
 agent = ReActAgent(
-    decision_maker=OrderDecisionMaker(),
+    action_maker=OrderActionMaker(),
     tools=[
         StructuredTool(
             name="search_order",
@@ -56,10 +56,10 @@ agent = ReActAgent(
 result = await agent.run(user_input="查询订单 123")
 ```
 
-接入真实 LLM 时，decision maker 通常负责调用模型，并把模型返回的结构化 JSON
+接入真实 LLM 时，action maker 通常负责调用模型，并把模型返回的结构化 JSON
 或 tool/function call 转成 `AgentToolCall` / `AgentFinal`。如果模型已经返回形如
 `{"type": "tool_call", "tool": "...", "args": {...}}` 的字典，可以直接使用
-`parse_agent_decision()` 解析。
+`parse_agent_action()` 解析。
 """
 
 from __future__ import annotations
@@ -94,15 +94,15 @@ class AgentStepStatus(StrEnum):
 
 
 class UnknownToolError(ValueError):
-    """Decision maker 请求了未注册工具时抛出。"""
+    """Action maker 请求了未注册工具时抛出。"""
 
 
 class ToolExecutionError(RuntimeError):
     """工具执行失败且未启用错误捕获时抛出。"""
 
 
-class InvalidAgentDecisionError(TypeError):
-    """Decision maker 返回了不受支持的动作对象时抛出。"""
+class InvalidAgentActionError(TypeError):
+    """Action maker 返回了不受支持的动作对象时抛出。"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,7 +132,7 @@ AgentAction = AgentToolCall | AgentFinal
 
 @dataclass(frozen=True, slots=True)
 class StructuredTool:
-    """暴露给 decision maker 的结构化工具定义。
+    """暴露给 action maker 的结构化工具定义。
 
     `parameters_schema` 推荐使用 JSON Schema 形态，方便直接转给 OpenAI、
     Qwen 等支持 tool/function calling 的模型。`handler` 可以是同步函数，
@@ -173,7 +173,7 @@ class AgentStepRecord:
 class AgentRunState:
     """单次 Agent 运行期间维护的可变状态。
 
-    Decision maker 每一轮都会收到该对象，因此可以根据历史 `steps` 判断下一步应该
+    Action maker 每一轮都会收到该对象，因此可以根据历史 `steps` 判断下一步应该
     继续调用工具、修正参数，还是返回 `AgentFinal`。
     """
 
@@ -196,26 +196,26 @@ class AgentRunResult:
 
 
 @dataclass(frozen=True, slots=True)
-class AgentDecisionContext:
-    """Decision maker 每轮选择动作需要的上下文。"""
+class AgentActionContext:
+    """Action maker 每轮选择动作需要的上下文。"""
 
     user_input: str
     state: AgentRunState
     tools: Sequence[StructuredTool]
 
 
-class AgentDecisionMaker(Protocol):
-    """Decision maker 协议：把当前上下文转换成 Agent 下一步动作。
+class AgentActionMaker(Protocol):
+    """Action maker 协议：把当前上下文转换成 Agent 下一步动作。
 
-    实际业务通常会在 `decide_next()` 内部调用 LLM，并把模型返回的 JSON 或
+    实际业务通常会在 `make_next_action()` 内部调用 LLM，并把模型返回的 JSON 或
     tool call 转换为 `AgentToolCall` / `AgentFinal`。显式方法名比 `__call__`
-    更容易表达“决定下一步”的语义。
+    更容易表达“生成下一步动作”的语义。
     """
 
-    async def decide_next(self, context: AgentDecisionContext) -> AgentAction: ...
+    async def make_next_action(self, context: AgentActionContext) -> AgentAction: ...
 
 
-def parse_agent_decision(payload: Mapping[str, Any]) -> AgentAction:
+def parse_agent_action(payload: Mapping[str, Any]) -> AgentAction:
     """将结构化 LLM payload 解析为 Agent 动作。
 
     支持两种 payload：
@@ -224,14 +224,14 @@ def parse_agent_decision(payload: Mapping[str, Any]) -> AgentAction:
     - `{"type": "tool_call", "tool": "...", "args": {...}}`
 
     该函数只做轻量结构校验，不按 `parameters_schema` 深度校验工具参数；
-    业务侧如需严格校验，可以在 decision maker 或工具 handler 内补充 Pydantic/JSON
+    业务侧如需严格校验，可以在 action maker 或工具 handler 内补充 Pydantic/JSON
     Schema 校验。
     """
     action_type = payload.get("type")
     if action_type == "final":
         answer = payload.get("answer")
         if not isinstance(answer, str):
-            raise InvalidAgentDecisionError("final action requires string answer")
+            raise InvalidAgentActionError("final action requires string answer")
         return AgentFinal(answer=answer)
 
     if action_type == "tool_call":
@@ -239,18 +239,18 @@ def parse_agent_decision(payload: Mapping[str, Any]) -> AgentAction:
         args = payload.get("args", {})
         call_id = payload.get("call_id")
         if not isinstance(tool, str) or not tool:
-            raise InvalidAgentDecisionError(
+            raise InvalidAgentActionError(
                 "tool_call action requires non-empty string tool"
             )
         if not isinstance(args, Mapping):
-            raise InvalidAgentDecisionError("tool_call action requires mapping args")
+            raise InvalidAgentActionError("tool_call action requires mapping args")
         if call_id is not None and not isinstance(call_id, str):
-            raise InvalidAgentDecisionError(
+            raise InvalidAgentActionError(
                 "tool_call action call_id must be a string"
             )
         return AgentToolCall(tool=tool, args=args, call_id=call_id)
 
-    raise InvalidAgentDecisionError(f"unsupported action type: {action_type!r}")
+    raise InvalidAgentActionError(f"unsupported action type: {action_type!r}")
 
 
 class ReActAgent:
@@ -258,12 +258,12 @@ class ReActAgent:
 
     循环形态为：
 
-    1. 调用 decision maker，让模型基于用户输入和历史状态产出下一步动作。
+    1. 调用 action maker，让模型基于用户输入和历史状态产出下一步动作。
     2. 如果是 `AgentFinal`，记录最终答案并结束。
     3. 如果是 `AgentToolCall`，执行对应工具，把动作结果写入 action_result。
     4. 未拿到最终答案时继续下一轮，直到达到 `max_steps`。
 
-    默认会把未知工具、非法参数和工具异常记录成 action_result，方便 decision maker
+    默认会把未知工具、非法参数和工具异常记录成 action_result，方便 action maker
     在下一轮根据错误信息自我修正；如果希望工具错误直接中断运行，可以把
     `capture_tool_errors` 设为 `False`。
     """
@@ -271,7 +271,7 @@ class ReActAgent:
     def __init__(
         self,
         *,
-        decision_maker: AgentDecisionMaker,
+        action_maker: AgentActionMaker,
         tools: Sequence[StructuredTool],
         max_steps: int = 8,
         capture_tool_errors: bool = True,
@@ -280,12 +280,12 @@ class ReActAgent:
         if max_steps < 1:
             raise ValueError("max_steps must be greater than 0")
 
-        # 工具名是 decision maker 调用工具的唯一索引，重复会导致后注册工具覆盖前者。
+        # 工具名是 action maker 调用工具的唯一索引，重复会导致后注册工具覆盖前者。
         duplicate_tools = _find_duplicates(tool.name for tool in tools)
         if duplicate_tools:
             raise ValueError(f"duplicate tool names: {', '.join(duplicate_tools)}")
 
-        self._decision_maker = decision_maker
+        self._action_maker = action_maker
         self._tools = {tool.name: tool for tool in tools}
         self._max_steps = max_steps
         self._capture_tool_errors = capture_tool_errors
@@ -303,9 +303,9 @@ class ReActAgent:
         for index in range(self._max_steps):
             started_at = monotonic()
 
-            # 每一轮都把当前 state 传给 decision maker，让它基于历史 action_result 选择动作。
-            action = await self._decision_maker.decide_next(
-                AgentDecisionContext(
+            # 每一轮都把当前 state 传给 action maker，让它基于历史 action_result 选择动作。
+            action = await self._action_maker.make_next_action(
+                AgentActionContext(
                     user_input=user_input,
                     state=state,
                     tools=tuple(self._tools.values()),
@@ -326,11 +326,11 @@ class ReActAgent:
                 )
                 return _build_result(state)
 
-            # 除 `AgentFinal` 和 `AgentToolCall` 以外都是 decision maker 编程错误。
+            # 除 `AgentFinal` 和 `AgentToolCall` 以外都是 action maker 编程错误。
             if not isinstance(action, AgentToolCall):
-                raise InvalidAgentDecisionError(f"invalid agent action: {action!r}")
+                raise InvalidAgentActionError(f"invalid agent action: {action!r}")
 
-            # 工具返回值或错误都会写入状态，作为下一轮 decision maker 的 action_result。
+            # 工具返回值或错误都会写入状态，作为下一轮 action maker 的 action_result。
             action_result, error = await self._execute_tool_call(action)
             step_status = AgentStepStatus.FAILED if error else AgentStepStatus.COMPLETED
             state.steps.append(

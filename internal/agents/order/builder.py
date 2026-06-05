@@ -1,4 +1,4 @@
-from internal.agents import LLMReactDecisionMaker
+from internal.agents import LLMReactActionMaker
 from internal.agents.order.prompt import ORDER_SUPPORT_SYSTEM_PROMPT
 from internal.agents.order.tools import (
     build_calculate_refund_amount_tool,
@@ -31,7 +31,7 @@ class OrderAgentBuilder:
     def build(self) -> ReActAgent:
         """创建可运行的订单售后 ReActAgent。"""
         return ReActAgent(
-            decision_maker=LLMReactDecisionMaker(
+            action_maker=LLMReactActionMaker(
                 llm_client=self._llm_client,
                 system_prompt=ORDER_SUPPORT_SYSTEM_PROMPT,
                 extra_completion_kwargs={"thinking": False},

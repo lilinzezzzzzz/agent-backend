@@ -26,8 +26,8 @@ class AgentRoute(StrEnum):
     UNSUPPORTED = "unsupported"
 
 
-class AgentRouterDecisionModel(BaseModel):
-    """LLM 返回的 Agent Router 决策。"""
+class AgentRouterActionModel(BaseModel):
+    """LLM 返回的 Agent Router 路由动作。"""
 
     route: AgentRoute = Field(..., description="目标业务域")
 
@@ -40,17 +40,17 @@ class LLMAgentRouter:
 
     async def route(self, *, question: str) -> AgentRoute:
         """识别问题所属业务域。"""
-        decision = await self._llm_client.chat_completion_structured(
+        action = await self._llm_client.chat_completion_structured(
             messages=[
                 {"role": "system", "content": AGENT_ROUTER_SYSTEM_PROMPT},
                 {"role": "user", "content": question},
             ],
-            response_model=AgentRouterDecisionModel,
+            response_model=AgentRouterActionModel,
             temperature=0,
             max_tokens=64,
             thinking=False,
         )
-        return decision.route
+        return action.route
 
 
 class RuleBasedAgentRouter:

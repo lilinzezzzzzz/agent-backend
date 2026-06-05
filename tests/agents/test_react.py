@@ -1,26 +1,26 @@
 import pytest
 
 from pkg.agents import (
-    AgentDecisionContext,
+    AgentActionContext,
     AgentFinal,
     AgentRunStatus,
     AgentStepStatus,
     AgentToolCall,
-    InvalidAgentDecisionError,
+    InvalidAgentActionError,
     ReActAgent,
     StructuredTool,
     ToolExecutionError,
     UnknownToolError,
-    parse_agent_decision,
+    parse_agent_action,
 )
 
 
-class FunctionDecisionMaker:
-    def __init__(self, decide_next):
-        self._decide_next = decide_next
+class FunctionActionMaker:
+    def __init__(self, make_next_action):
+        self._make_next_action = make_next_action
 
-    async def decide_next(self, context: AgentDecisionContext):
-        return await self._decide_next(context)
+    async def make_next_action(self, context: AgentActionContext):
+        return await self._make_next_action(context)
 
 
 def build_search_tool() -> StructuredTool:
@@ -38,7 +38,7 @@ def build_search_tool() -> StructuredTool:
 
 @pytest.mark.asyncio
 async def test_react_agent_runs_tool_then_final_answer() -> None:
-    async def decide_next(context: AgentDecisionContext):
+    async def make_next_action(context: AgentActionContext):
         assert context.user_input == "查询订单 123"
         assert context.tools[0].name == "search_order"
         if not context.state.steps:
@@ -49,7 +49,7 @@ async def test_react_agent_runs_tool_then_final_answer() -> None:
         return AgentFinal(answer="订单 123 已发货。")
 
     agent = ReActAgent(
-        decision_maker=FunctionDecisionMaker(decide_next),
+        action_maker=FunctionActionMaker(make_next_action),
         tools=[build_search_tool()],
         max_steps=3,
     )
@@ -67,7 +67,7 @@ async def test_react_agent_runs_tool_then_final_answer() -> None:
 
 @pytest.mark.asyncio
 async def test_react_agent_records_unknown_tool_error_and_continues() -> None:
-    async def decide_next(context: AgentDecisionContext):
+    async def make_next_action(context: AgentActionContext):
         if not context.state.steps:
             return AgentToolCall(tool="missing_tool", args={})
 
@@ -75,7 +75,7 @@ async def test_react_agent_records_unknown_tool_error_and_continues() -> None:
         return AgentFinal(answer="没有可用工具处理该请求。")
 
     agent = ReActAgent(
-        decision_maker=FunctionDecisionMaker(decide_next),
+        action_maker=FunctionActionMaker(make_next_action),
         tools=[build_search_tool()],
         max_steps=2,
     )
@@ -93,7 +93,7 @@ async def test_react_agent_records_tool_exception() -> None:
     def broken_tool(_args):
         raise RuntimeError("backend unavailable")
 
-    async def decide_next(context: AgentDecisionContext):
+    async def make_next_action(context: AgentActionContext):
         if not context.state.steps:
             return AgentToolCall(tool="broken_tool", args={})
 
@@ -101,7 +101,7 @@ async def test_react_agent_records_tool_exception() -> None:
         return AgentFinal(answer="工具暂不可用。")
 
     agent = ReActAgent(
-        decision_maker=FunctionDecisionMaker(decide_next),
+        action_maker=FunctionActionMaker(make_next_action),
         tools=[
             StructuredTool(
                 name="broken_tool",
@@ -122,11 +122,11 @@ async def test_react_agent_records_tool_exception() -> None:
 
 @pytest.mark.asyncio
 async def test_react_agent_stops_when_max_steps_reached() -> None:
-    async def decide_next(_context: AgentDecisionContext):
+    async def make_next_action(_context: AgentActionContext):
         return AgentToolCall(tool="search_order", args={"order_id": "123"})
 
     agent = ReActAgent(
-        decision_maker=FunctionDecisionMaker(decide_next),
+        action_maker=FunctionActionMaker(make_next_action),
         tools=[build_search_tool()],
         max_steps=2,
     )
@@ -140,11 +140,11 @@ async def test_react_agent_stops_when_max_steps_reached() -> None:
 
 @pytest.mark.asyncio
 async def test_react_agent_raises_when_error_capture_disabled() -> None:
-    async def decide_next(_context: AgentDecisionContext):
+    async def make_next_action(_context: AgentActionContext):
         return AgentToolCall(tool="missing_tool", args={})
 
     agent = ReActAgent(
-        decision_maker=FunctionDecisionMaker(decide_next),
+        action_maker=FunctionActionMaker(make_next_action),
         tools=[build_search_tool()],
         max_steps=1,
         capture_tool_errors=False,
@@ -156,11 +156,11 @@ async def test_react_agent_raises_when_error_capture_disabled() -> None:
 
 @pytest.mark.asyncio
 async def test_react_agent_rejects_non_mapping_tool_args() -> None:
-    async def decide_next(_context: AgentDecisionContext):
+    async def make_next_action(_context: AgentActionContext):
         return AgentToolCall(tool="search_order", args=["bad"])
 
     agent = ReActAgent(
-        decision_maker=FunctionDecisionMaker(decide_next),
+        action_maker=FunctionActionMaker(make_next_action),
         tools=[build_search_tool()],
         max_steps=1,
     )
@@ -173,17 +173,17 @@ async def test_react_agent_rejects_non_mapping_tool_args() -> None:
 
 
 @pytest.mark.asyncio
-async def test_react_agent_rejects_invalid_decision_maker_action() -> None:
-    async def decide_next(_context: AgentDecisionContext):
+async def test_react_agent_rejects_invalid_action_maker_action() -> None:
+    async def make_next_action(_context: AgentActionContext):
         return None
 
     agent = ReActAgent(
-        decision_maker=FunctionDecisionMaker(decide_next),
+        action_maker=FunctionActionMaker(make_next_action),
         tools=[build_search_tool()],
         max_steps=1,
     )
 
-    with pytest.raises(InvalidAgentDecisionError, match="invalid agent action: None"):
+    with pytest.raises(InvalidAgentActionError, match="invalid agent action: None"):
         await agent.run(user_input="test")
 
 
@@ -192,7 +192,7 @@ def test_react_agent_rejects_duplicate_tool_names() -> None:
 
     with pytest.raises(ValueError, match="duplicate tool names: search_order"):
         ReActAgent(
-            decision_maker=FunctionDecisionMaker(
+            action_maker=FunctionActionMaker(
                 lambda _context: AgentFinal(answer="done")
             ),
             tools=[tool, tool],
@@ -202,7 +202,7 @@ def test_react_agent_rejects_duplicate_tool_names() -> None:
 def test_react_agent_rejects_invalid_max_steps() -> None:
     with pytest.raises(ValueError, match="max_steps must be greater than 0"):
         ReActAgent(
-            decision_maker=FunctionDecisionMaker(
+            action_maker=FunctionActionMaker(
                 lambda _context: AgentFinal(answer="done")
             ),
             tools=[],
@@ -222,14 +222,14 @@ def test_structured_tool_requires_name_and_description() -> None:
         )
 
 
-def test_parse_agent_decision_parses_final_payload() -> None:
-    action = parse_agent_decision({"type": "final", "answer": "done"})
+def test_parse_agent_action_parses_final_payload() -> None:
+    action = parse_agent_action({"type": "final", "answer": "done"})
 
     assert action == AgentFinal(answer="done")
 
 
-def test_parse_agent_decision_parses_tool_call_payload() -> None:
-    action = parse_agent_decision(
+def test_parse_agent_action_parses_tool_call_payload() -> None:
+    action = parse_agent_action(
         {
             "type": "tool_call",
             "tool": "search_order",
@@ -243,18 +243,18 @@ def test_parse_agent_decision_parses_tool_call_payload() -> None:
     )
 
 
-def test_parse_agent_decision_rejects_invalid_payload() -> None:
+def test_parse_agent_action_rejects_invalid_payload() -> None:
     with pytest.raises(
-        InvalidAgentDecisionError,
+        InvalidAgentActionError,
         match="unsupported action type: 'unknown'",
     ):
-        parse_agent_decision({"type": "unknown"})
+        parse_agent_action({"type": "unknown"})
 
     with pytest.raises(
-        InvalidAgentDecisionError,
+        InvalidAgentActionError,
         match="tool_call action requires mapping args",
     ):
-        parse_agent_decision(
+        parse_agent_action(
             {"type": "tool_call", "tool": "search_order", "args": ["bad"]}
         )
 
@@ -264,11 +264,11 @@ async def test_react_agent_wraps_tool_exception_when_error_capture_disabled() ->
     def broken_tool(_args):
         raise ValueError("bad input")
 
-    async def decide_next(_context: AgentDecisionContext):
+    async def make_next_action(_context: AgentActionContext):
         return AgentToolCall(tool="broken_tool", args={})
 
     agent = ReActAgent(
-        decision_maker=FunctionDecisionMaker(decide_next),
+        action_maker=FunctionActionMaker(make_next_action),
         tools=[
             StructuredTool(
                 name="broken_tool",

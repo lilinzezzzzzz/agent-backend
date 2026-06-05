@@ -1,4 +1,4 @@
-from internal.agents import LLMReactDecisionMaker
+from internal.agents import LLMReactActionMaker
 from internal.agents.payment.prompt import PAYMENT_SUPPORT_SYSTEM_PROMPT
 from internal.agents.payment.tools import (
     build_calculate_payment_total_tool,
@@ -24,7 +24,7 @@ class PaymentAgentBuilder:
     def build(self) -> ReActAgent:
         """创建可运行的支付支持 ReActAgent。"""
         return ReActAgent(
-            decision_maker=LLMReactDecisionMaker(
+            action_maker=LLMReactActionMaker(
                 llm_client=self._llm_client,
                 system_prompt=PAYMENT_SUPPORT_SYSTEM_PROMPT,
                 extra_completion_kwargs={"thinking": False},

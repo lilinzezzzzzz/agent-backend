@@ -48,6 +48,8 @@
 - `pkg/toolkit/`：通用工具。
 - `pkg/logger/`：Loguru 日志封装和 span 工具。
 - `pkg/vectors/`：向量检索抽象、repository、backend。
+- `examples/`：可运行示例代码，不作为生产运行时基础包。
+- `examples/llm/`：LLM function call、MCP SSE 等演示脚本。
 - `configs/`：环境配置与密钥文件。
 - `tests/`：pytest 测试。
 - `docs/`：补充文档。

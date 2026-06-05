@@ -283,6 +283,8 @@ uv run celery -A entrypoints.celery:celery_app beat -l info
 │   ├── third_party_auth/       # 第三方登录策略
 │   ├── toolkit/                # 通用工具集
 │   └── vectors/                # 向量检索抽象与 backend
+├── examples/                   # 可运行示例代码，不作为生产运行时基础包
+│   └── llm/                    # LLM function call、MCP SSE 示例
 ├── configs/                    # 环境配置模板与密钥模板
 ├── docs/                       # 补充文档
 ├── tests/                      # pytest 测试

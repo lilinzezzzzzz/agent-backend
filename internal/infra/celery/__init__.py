@@ -11,7 +11,6 @@
 
 from collections.abc import Callable, Coroutine
 from pathlib import Path
-from typing import TypeVar
 
 import anyio
 from celery import Celery
@@ -34,8 +33,6 @@ __all__ = [
     "run_in_async",
     "check_celery_health",
 ]
-
-T = TypeVar("T")
 
 
 # =========================================================

@@ -1,4 +1,4 @@
-from collections.abc import AsyncGenerator, Mapping, Sequence
+from collections.abc import AsyncGenerator, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
@@ -310,9 +310,9 @@ class OpenAIClient:
             "max_tokens": max_tokens if max_tokens is not None else NOT_GIVEN,
             "top_p": top_p if top_p is not None else NOT_GIVEN,
             "n": n if n is not None else NOT_GIVEN,
-            "frequency_penalty": frequency_penalty
-            if frequency_penalty is not None
-            else NOT_GIVEN,
+            "frequency_penalty": (
+                frequency_penalty if frequency_penalty is not None else NOT_GIVEN
+            ),
             "stream": stream,
             **kwargs,
         }
@@ -368,6 +368,7 @@ class OpenAIClient:
         **kwargs: Any,
     ) -> StructuredOutputT:
         """Create a structured chat completion and return the parsed Pydantic model."""
+        audit_hook = kwargs.pop("_audit_hook", None)
         if "response_format" in kwargs:
             raise ValueError(
                 "Use response_model instead of response_format for structured completions"
@@ -389,6 +390,7 @@ class OpenAIClient:
                 frequency_penalty=frequency_penalty,
                 thinking=thinking,
                 reasoning_effort=reasoning_effort,
+                audit_hook=audit_hook,
                 **kwargs,
             )
 
@@ -403,6 +405,7 @@ class OpenAIClient:
                 frequency_penalty=frequency_penalty,
                 thinking=thinking,
                 reasoning_effort=reasoning_effort,
+                audit_hook=audit_hook,
                 **kwargs,
             )
         except OpenAIError:
@@ -421,6 +424,7 @@ class OpenAIClient:
                 frequency_penalty=frequency_penalty,
                 thinking=thinking,
                 reasoning_effort=reasoning_effort,
+                audit_hook=audit_hook,
                 **kwargs,
             )
 
@@ -436,6 +440,7 @@ class OpenAIClient:
         frequency_penalty: float | None,
         thinking: bool | ThinkingMode | str | None,
         reasoning_effort: str | None,
+        audit_hook: Callable[[Any], None] | None = None,
         **kwargs: Any,
     ) -> StructuredOutputT:
         params = {
@@ -456,6 +461,8 @@ class OpenAIClient:
         params.pop("stream", None)
 
         response = await self.client.chat.completions.parse(**params)
+        if audit_hook is not None:
+            audit_hook(response)
         message = response.choices[0].message
         if message.refusal:
             raise StructuredOutputRefusalError(message.refusal)
@@ -477,6 +484,7 @@ class OpenAIClient:
         frequency_penalty: float | None,
         thinking: bool | ThinkingMode | str | None,
         reasoning_effort: str | None,
+        audit_hook: Callable[[Any], None] | None = None,
         **kwargs: Any,
     ) -> StructuredOutputT:
         params = self._get_completion_params(
@@ -495,6 +503,8 @@ class OpenAIClient:
         params.pop("stream", None)
 
         response = await self.client.chat.completions.create(**params)
+        if audit_hook is not None:
+            audit_hook(response)
         if not response.choices:
             raise StructuredOutputParseError(
                 "OpenAI json_object response has no choices"

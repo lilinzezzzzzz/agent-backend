@@ -21,6 +21,14 @@ from anyio.abc import TaskGroup
 
 from pkg.logger import logger
 
+CPU = max(1, multiprocessing.cpu_count())
+GLOBAL_MAX_DEFAULT = min(max(32, 4 * CPU), 256)
+THREAD_MAX_DEFAULT = min(max(16, (2 * GLOBAL_MAX_DEFAULT) // 3), 128)
+PROCESS_MAX_DEFAULT = max(1, min(CPU, 8))
+
+DEFAULT_TIMEOUT = 180
+ANYIO_TM_MAX_QUEUE = 10_000
+
 
 # ---------- anyio wrapper functions ----------
 def _format_callable_name(
@@ -159,15 +167,6 @@ async def anyio_run_in_process(
     """
     bound = partial(func, *args, **kwargs)
     return await to_process.run_sync(bound, cancellable=cancellable, limiter=limiter)  # type: ignore
-
-
-CPU = max(1, multiprocessing.cpu_count())
-GLOBAL_MAX_DEFAULT = min(max(32, 4 * CPU), 256)
-THREAD_MAX_DEFAULT = min(max(16, (2 * GLOBAL_MAX_DEFAULT) // 3), 128)
-PROCESS_MAX_DEFAULT = max(1, min(CPU, 8))
-
-DEFAULT_TIMEOUT = 180
-ANYIO_TM_MAX_QUEUE = 10_000
 
 
 @dataclass

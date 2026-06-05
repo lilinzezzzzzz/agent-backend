@@ -51,6 +51,7 @@ class AgentRunDTO:
     answer: str | None
     steps: Sequence[AgentStepDTO]
     confirmation: AgentActionConfirmationDTO | None = None
+    audit_metadata: dict[str, JsonValue] | None = None
 
     @classmethod
     def from_agent_result(cls, result: AgentRunResult) -> AgentRunDTO:
@@ -63,15 +64,19 @@ class AgentRunDTO:
                 AgentStepDTO(
                     index=step.index,
                     status=step.status.value,
-                    action_type="final"
-                    if isinstance(step.action, AgentFinal)
-                    else "tool_call",
-                    tool=step.action.tool
-                    if isinstance(step.action, AgentToolCall)
-                    else None,
-                    args=to_json_object(step.action.args)
-                    if isinstance(step.action, AgentToolCall)
-                    else {},
+                    action_type=(
+                        "final" if isinstance(step.action, AgentFinal) else "tool_call"
+                    ),
+                    tool=(
+                        step.action.tool
+                        if isinstance(step.action, AgentToolCall)
+                        else None
+                    ),
+                    args=(
+                        to_json_object(step.action.args)
+                        if isinstance(step.action, AgentToolCall)
+                        else {}
+                    ),
                     action_result=to_json_value(step.action_result),
                     error=step.error,
                     elapsed_ms=step.elapsed_ms,
@@ -88,14 +93,16 @@ class AgentRunDTO:
             status=self.status,
             answer=self.answer,
             steps=[step.to_schema() for step in self.steps],
-            confirmation=AgentActionConfirmationSchema(
-                token=self.confirmation.token,
-                action=self.confirmation.action,
-                summary=self.confirmation.summary,
-                expires_in_seconds=self.confirmation.expires_in_seconds,
-            )
-            if self.confirmation is not None
-            else None,
+            confirmation=(
+                AgentActionConfirmationSchema(
+                    token=self.confirmation.token,
+                    action=self.confirmation.action,
+                    summary=self.confirmation.summary,
+                    expires_in_seconds=self.confirmation.expires_in_seconds,
+                )
+                if self.confirmation is not None
+                else None
+            ),
         )
 
     @classmethod

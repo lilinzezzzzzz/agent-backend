@@ -198,6 +198,15 @@ class FakeAgentActionStore:
         return True
 
 
+class FakeAgentAuditService:
+    def __init__(self):
+        self.records: list[dict[str, Any]] = []
+
+    async def record_agent_run(self, **kwargs: Any) -> bool:
+        self.records.append(kwargs)
+        return True
+
+
 def _new_order_service(
     action_store: FakeAgentActionStore | None = None,
 ) -> OrderService:
@@ -214,11 +223,14 @@ def _new_order_agent_service(
     return OrderAgentService(
         llm_client=llm_client,
         order_service=_new_order_service(action_store),
+        audit_service=FakeAgentAuditService(),
     )
 
 
 def _new_payment_agent_service(llm_client: FakeLLMClient) -> PaymentAgentService:
-    return PaymentAgentService(llm_client=llm_client)
+    return PaymentAgentService(
+        llm_client=llm_client, audit_service=FakeAgentAuditService()
+    )
 
 
 def _response_payload(response) -> dict[str, Any]:
@@ -391,6 +403,7 @@ async def test_agent_router_service_routes_order_question_without_llm() -> None:
         llm_client=llm_client,
         order_agent_service=order_agent_service,
         payment_agent_service=payment_agent_service,
+        audit_service=FakeAgentAuditService(),
     )
 
     result = await service.chat(user_id=999, question="订单 1001 到哪了？", max_steps=3)
@@ -411,6 +424,7 @@ async def test_agent_router_service_falls_back_to_llm_for_ambiguous_question() -
         llm_client=llm_client,
         order_agent_service=order_agent_service,
         payment_agent_service=payment_agent_service,
+        audit_service=FakeAgentAuditService(),
     )
 
     result = await service.chat(user_id=999, question="我买的东西怎么还没到")
@@ -430,6 +444,7 @@ async def test_agent_router_service_routes_payment_question_without_llm() -> Non
         llm_client=llm_client,
         order_agent_service=order_agent_service,
         payment_agent_service=payment_agent_service,
+        audit_service=FakeAgentAuditService(),
     )
 
     result = await service.chat(user_id=999, question="支付失败怎么办？", max_steps=3)
@@ -452,6 +467,7 @@ async def test_agent_router_service_returns_unsupported_without_calling_agents()
         llm_client=llm_client,
         order_agent_service=order_agent_service,
         payment_agent_service=payment_agent_service,
+        audit_service=FakeAgentAuditService(),
     )
 
     result = await service.chat(user_id=999, question="帮我写一首诗")
@@ -472,6 +488,7 @@ async def test_agent_router_service_bypasses_llm_for_confirmation() -> None:
         llm_client=llm_client,
         order_agent_service=order_agent_service,
         payment_agent_service=payment_agent_service,
+        audit_service=FakeAgentAuditService(),
     )
 
     result = await service.chat(
@@ -505,7 +522,10 @@ async def test_payment_support_agent_controller_wraps_service_dto() -> None:
         FakePaymentAgentService(),
     )
 
-    assert _response_payload(response)["data"]["answer"] == "请检查余额、限额和支付渠道状态。"
+    assert (
+        _response_payload(response)["data"]["answer"]
+        == "请检查余额、限额和支付渠道状态。"
+    )
     assert (
         _response_payload(response)["data"]["steps"][0]["tool"]
         == "search_payment_knowledge"

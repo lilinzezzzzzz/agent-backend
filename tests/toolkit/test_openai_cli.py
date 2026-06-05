@@ -239,20 +239,24 @@ async def test_chat_completion_structured_success(mock_client: OpenAIClient):
     )
     parse_mock = AsyncMock(return_value=completion)
     mock_client.client.chat.completions.parse = parse_mock
+    audited_responses = []
 
     response = await mock_client.chat_completion_structured(
         messages=[{"role": "user", "content": "提取标题和标签"}],
         response_model=SummaryModel,
         temperature=0.1,
+        _audit_hook=audited_responses.append,
     )
 
     assert response == parsed
+    assert audited_responses == [completion]
 
     parse_mock.assert_awaited_once()
     kwargs = parse_mock.await_args.kwargs
     assert kwargs["model"] == "test-model"
     assert kwargs["response_format"] is SummaryModel
     assert kwargs["messages"][0]["role"] == "user"
+    assert "_audit_hook" not in kwargs
 
 
 @pytest.mark.asyncio

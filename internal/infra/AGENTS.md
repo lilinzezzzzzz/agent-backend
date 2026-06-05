@@ -4,11 +4,13 @@
 
 ## 层职责
 
-本层负责数据库、Redis、LLM 等基础设施连接生命周期和 provider。它提供连接能力，不承载业务规则。
+本层负责数据库、Redis、LLM、Celery、调度器等基础设施连接生命周期和 provider。它提供连接能力，不承载业务规则。
 
 - 数据库连接初始化在 `internal/infra/database/`。
 - Redis 连接初始化在 `internal/infra/redis/`。
 - LLM 客户端 provider 在 `internal/infra/llm/`。
+- Celery app、client、worker hook 和同步任务运行异步逻辑的辅助入口在 `internal/infra/celery/`。
+- APScheduler manager 初始化和任务注册在 `internal/infra/scheduler/`。
 
 ## 编码约定
 

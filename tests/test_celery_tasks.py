@@ -9,7 +9,7 @@ import pytest
 from celery.result import AsyncResult
 
 from internal.tasks.celery import number_sum
-from internal.utils.celery import celery_app, celery_client
+from internal.infra.celery import celery_app, celery_client
 from pkg.logger import init_logger
 
 # 初始化日志系统（测试环境必须）

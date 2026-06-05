@@ -265,7 +265,7 @@ uv run celery -A entrypoints.celery:celery_app beat -l info
 │   │   ├── public/             # /v1/public
 │   │   └── internal/           # /v1/internal
 │   ├── middlewares/            # 请求日志、认证、Endpoint Guard 等中间件
-│   ├── infra/                  # DB、Redis、LLM client 等基础设施
+│   ├── infra/                  # DB、Redis、LLM client、Celery、调度器等基础设施
 │   ├── services/               # 业务用例与跨 DAO / 缓存 / 外部服务编排
 │   ├── agents/                 # 业务 Agent prompt、builder、tools
 │   ├── dao/                    # ORM 数据访问层

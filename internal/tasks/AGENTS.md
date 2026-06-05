@@ -8,7 +8,7 @@
 
 ## 编码约定
 
-- Celery app 在 `internal/utils/celery/__init__.py` 暴露，任务模块统一放在本目录下，供 Worker 和 Beat 调用。
+- Celery app 在 `internal/infra/celery/__init__.py` 暴露，任务模块统一放在本目录下，供 Worker 和 Beat 调用。
 - task name 必须稳定，避免影响已投递消息、监控和定时任务。
 - 新任务要明确队列、参数 schema、重试策略、幂等键、超时和日志上下文。
 - 异步业务逻辑通过项目已有 `run_in_async` 或 Celery 工具封装调用。

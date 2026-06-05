@@ -2,7 +2,7 @@
 
 from celery import Celery
 
-from internal.utils.celery import celery_app
+from internal.infra.celery import celery_app
 
 app: Celery = celery_app
 

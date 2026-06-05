@@ -9,7 +9,7 @@
 """
 
 
-from internal.utils.celery import celery_client, run_in_async
+from internal.infra.celery import celery_client, run_in_async
 from pkg.logger import logger
 
 # =========================================================

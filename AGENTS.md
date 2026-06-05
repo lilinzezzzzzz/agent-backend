@@ -34,7 +34,7 @@
 - `internal/controllers/public/`：`/v1/public` 公共接口。
 - `internal/controllers/internal/`：`/v1/internal` 内部接口。
 - `internal/middlewares/`：认证、请求记录等 ASGI 中间件。
-- `internal/infra/`：数据库、Redis 等基础设施连接。
+- `internal/infra/`：数据库、Redis、Celery、调度器等基础设施连接与进程级 provider。
 - `internal/services/`：业务逻辑。
 - `internal/services/dto/`：Service 对外返回给 Controller 的业务 DTO。
 - `internal/dao/`：ORM 数据访问层。
@@ -177,7 +177,7 @@ Controller / Service / DAO / Schema 分层细则见各子目录 `AGENTS.md`：
 
 - 业务缓存访问见 `internal/cache/AGENTS.md`（依照业务域划分，如 `internal/cache/auth.py`）。
 - Celery 任务、队列、定时调度细则见 `internal/tasks/AGENTS.md`。
-- Redis / DB 连接生命周期见 `internal/infra/AGENTS.md`。
+- Redis / DB / Celery / 调度器生命周期见 `internal/infra/AGENTS.md`。
 
 ## 向量检索约定
 

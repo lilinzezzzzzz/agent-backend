@@ -6,7 +6,7 @@
 - 异步代码执行辅助（run_in_async）
 - 健康检查（check_celery_health）
 
-任务定义在 internal/tasks/ 目录，此处仅负责调度配置。
+任务定义在 internal/tasks/ 目录，此处仅负责 Celery 基础设施集成。
 """
 
 from collections.abc import Callable, Coroutine

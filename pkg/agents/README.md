@@ -152,6 +152,9 @@ submit_business_action
 - `AgentFinal`：返回最终答案并结束运行
 - `StructuredTool`：声明工具名、描述、参数 schema 和 handler
 - `AgentRunState` / `AgentStepRecord`：记录动作、action_result、错误和耗时
+- `run()`：一次性执行完整 ReAct 循环并返回 `AgentRunResult`
+- `run_events()`：以异步事件流返回 `run_started`、`step_completed` 和
+  `run_completed`，适合上层 API 包装为 SSE 或消息推送
 - `max_steps`：限制最大动作步数，避免无限循环
 
 当前实现只负责通用执行循环，不直接依赖具体 LLM Provider、数据库、消息队列或业务

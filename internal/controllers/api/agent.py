@@ -1,6 +1,8 @@
+from collections.abc import AsyncIterable, AsyncIterator
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
+from fastapi.responses import StreamingResponse
 
 from internal.schemas import BaseResponse
 from internal.schemas.agent import (
@@ -19,10 +21,18 @@ from internal.services.agents import (
     new_order_agent_service,
     new_payment_agent_service,
 )
+from internal.services.dto.agent import AgentStreamEventDTO
+from internal.utils.stream import stream_with_chunk_control
 from pkg.toolkit.context import get_user_id
-from pkg.toolkit.response import ResponsePayload, success_response
+from pkg.toolkit.response import ResponsePayload, success_response, wrap_sse_event
 
 router = APIRouter(prefix="/agent", tags=["api agent"])
+_AGENT_STREAM_CHUNK_TIMEOUT_SECONDS = 70.0
+_SSE_MEDIA_TYPE = "text/event-stream"
+_SSE_HEADERS = {
+    "Cache-Control": "no-cache",
+    "X-Accel-Buffering": "no",
+}
 
 OrderAgentServiceDep = Annotated[OrderAgentService, Depends(new_order_agent_service)]
 PaymentAgentServiceDep = Annotated[
@@ -73,6 +83,48 @@ async def agent_chat(
 
 
 @router.post(
+    "/chat/stream",
+    response_class=StreamingResponse,
+    summary="统一 Agent 聊天流式入口",
+)
+async def agent_chat_stream(
+    req: AgentChatReqSchema,
+    agent_router_service: AgentRouterServiceDep,
+) -> StreamingResponse:
+    """流式路由统一 Agent 聊天请求。
+
+    业务摘要:
+        识别用户问题所属业务域，并以 SSE 事件流转发专业 Agent 的执行过程和最终结果。
+
+    权限边界:
+        需要有效的用户 token（`/v1` 前缀默认认证）；专业 Service 会校验资源归属，
+        确认 token 只能由签发该 token 的用户使用。
+
+    业务边界:
+        新增流式 API，不替代现有 JSON 接口；响应为 `text/event-stream`，
+        不使用 `BaseResponse[T]` 信封。事件名包括 `route`、`run_started`、
+        `step_completed`、`run_completed` 和 `error`，每条 `data` 都是 JSON object。
+
+    Args:
+        req: 请求体，包含问题、最大执行步数，以及可选的确认 token 与幂等键。
+        agent_router_service: 通过依赖注入获取的 `AgentRouterService` 实例。
+
+    Returns:
+        `StreamingResponse`：持续返回 Agent 路由和执行事件；业务错误以 `error`
+        SSE 事件携带稳定错误码，流式超时由 `errors.StreamTimeout` 语义的数据块表示。
+    """
+    return _agent_streaming_response(
+        agent_router_service.stream_chat(
+            user_id=get_user_id(),
+            question=req.question,
+            max_steps=req.max_steps,
+            confirmation_token=req.confirmation_token,
+            idempotency_key=req.idempotency_key,
+        )
+    )
+
+
+@router.post(
     "/order/support",
     response_model=BaseResponse[AgentOrderSupportRespSchema],
     summary="订单支持 Agent",
@@ -116,6 +168,48 @@ async def order_support_agent(
 
 
 @router.post(
+    "/order/support/stream",
+    response_class=StreamingResponse,
+    summary="订单支持 Agent 流式接口",
+)
+async def order_support_agent_stream(
+    req: AgentOrderSupportReqSchema,
+    order_agent_service: OrderAgentServiceDep,
+) -> StreamingResponse:
+    """流式执行订单支持 Agent。
+
+    业务摘要:
+        使用 SSE 事件流返回订单、物流、售后、退款和发票 Agent 的执行过程与最终回答。
+
+    权限边界:
+        需要有效的用户 token（`/v1` 前缀默认认证）；订单查询和开票确认均由
+        Service 校验订单归属，确认 token 只能由签发该 token 的用户使用。
+
+    业务边界:
+        新增流式 API，不替代现有 JSON 接口；普通请求会流式输出 ReAct step，
+        确认请求仍由确定性 Service 执行后映射为事件序列。响应为 `text/event-stream`，
+        不使用 `BaseResponse[T]` 信封。
+
+    Args:
+        req: 请求体，包含用户问题、最大执行步数，以及可选的确认 token 与幂等键。
+        order_agent_service: 通过依赖注入获取的 `OrderAgentService` 实例。
+
+    Returns:
+        `StreamingResponse`：事件名包括 `run_started`、`step_completed`、
+        `run_completed` 和 `error`；业务错误以 `error` SSE 事件携带稳定错误码。
+    """
+    return _agent_streaming_response(
+        order_agent_service.stream_order_support_question(
+            user_id=get_user_id(),
+            question=req.question,
+            max_steps=req.max_steps,
+            confirmation_token=req.confirmation_token,
+            idempotency_key=req.idempotency_key,
+        )
+    )
+
+
+@router.post(
     "/payment/support",
     response_model=BaseResponse[AgentPaymentSupportRespSchema],
     summary="支付支持 Agent",
@@ -155,3 +249,67 @@ async def payment_support_agent(
         idempotency_key=req.idempotency_key,
     )
     return success_response(data=result.to_schema())
+
+
+@router.post(
+    "/payment/support/stream",
+    response_class=StreamingResponse,
+    summary="支付支持 Agent 流式接口",
+)
+async def payment_support_agent_stream(
+    req: AgentPaymentSupportReqSchema,
+    payment_agent_service: PaymentAgentServiceDep,
+) -> StreamingResponse:
+    """流式执行支付支持 Agent。
+
+    业务摘要:
+        使用 SSE 事件流返回支付方式、付款失败、扣款异常、账单和分期 Agent 的执行过程与最终回答。
+
+    权限边界:
+        需要有效的用户 token（`/v1` 前缀默认认证）；当前支付 Agent 不读取用户支付资产，
+        后续接入支付事实查询时必须由 Service 校验资源归属。
+
+    业务边界:
+        新增流式 API，不替代现有 JSON 接口；当前只提供支付咨询和纯金额计算，
+        不发起真实支付、扣款、退款、解绑银行卡或账单修改，也不接受确认 token 执行副作用动作。
+        响应为 `text/event-stream`，不使用 `BaseResponse[T]` 信封。
+
+    Args:
+        req: 请求体，包含问题、最大执行步数，以及当前不支持的确认 token 与幂等键字段。
+        payment_agent_service: 通过依赖注入获取的 `PaymentAgentService` 实例。
+
+    Returns:
+        `StreamingResponse`：事件名包括 `run_started`、`step_completed`、
+        `run_completed` 和 `error`；业务错误以 `error` SSE 事件携带稳定错误码。
+    """
+    return _agent_streaming_response(
+        payment_agent_service.stream_payment_support_question(
+            user_id=get_user_id(),
+            question=req.question,
+            max_steps=req.max_steps,
+            confirmation_token=req.confirmation_token,
+            idempotency_key=req.idempotency_key,
+        )
+    )
+
+
+def _agent_streaming_response(
+    events: AsyncIterable[AgentStreamEventDTO],
+) -> StreamingResponse:
+    generator = stream_with_chunk_control(
+        generator=_serialize_agent_events(events),
+        chunk_timeout=_AGENT_STREAM_CHUNK_TIMEOUT_SECONDS,
+        is_sse=True,
+    )
+    return StreamingResponse(
+        generator,
+        media_type=_SSE_MEDIA_TYPE,
+        headers=_SSE_HEADERS,
+    )
+
+
+async def _serialize_agent_events(
+    events: AsyncIterable[AgentStreamEventDTO],
+) -> AsyncIterator[str]:
+    async for event in events:
+        yield wrap_sse_event(event.event.value, event.data)

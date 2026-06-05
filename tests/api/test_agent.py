@@ -1,3 +1,5 @@
+import json
+from collections.abc import AsyncIterator
 from typing import Any
 
 import pytest
@@ -22,7 +24,13 @@ from internal.services.agents import (
     OrderAgentService,
     PaymentAgentService,
 )
-from internal.services.dto.agent import AgentChatDTO, AgentRunDTO, AgentStepDTO
+from internal.services.dto.agent import (
+    AgentChatDTO,
+    AgentRunDTO,
+    AgentStepDTO,
+    AgentStreamEventDTO,
+    AgentStreamEventName,
+)
 from internal.services.order import OrderService
 from pkg.toolkit import context
 
@@ -59,6 +67,27 @@ class FakeOrderAgentService:
             ],
         )
 
+    async def stream_order_support_question(
+        self,
+        *,
+        user_id: int,
+        question: str,
+        max_steps: int = 4,
+        confirmation_token: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> AsyncIterator[AgentStreamEventDTO]:
+        result = await self.answer_order_support_question(
+            user_id=user_id,
+            question=question,
+            max_steps=max_steps,
+            confirmation_token=confirmation_token,
+            idempotency_key=idempotency_key,
+        )
+        yield AgentStreamEventDTO.run_started(run_id=result.run_id)
+        for step in result.steps:
+            yield AgentStreamEventDTO.step_completed(run_id=result.run_id, step=step)
+        yield AgentStreamEventDTO.run_completed(result=result)
+
 
 class FakeAgentRouterService:
     async def chat(
@@ -81,6 +110,25 @@ class FakeAgentRouterService:
             max_steps=max_steps,
         )
         return AgentChatDTO(route="order", result=result)
+
+    async def stream_chat(
+        self,
+        *,
+        user_id: int,
+        question: str,
+        max_steps: int = 4,
+        confirmation_token: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> AsyncIterator[AgentStreamEventDTO]:
+        yield AgentStreamEventDTO.route(route="order")
+        async for event in FakeOrderAgentService().stream_order_support_question(
+            user_id=user_id,
+            question=question,
+            max_steps=max_steps,
+            confirmation_token=confirmation_token,
+            idempotency_key=idempotency_key,
+        ):
+            yield event.with_route("order")
 
 
 class FakePaymentAgentService:
@@ -115,6 +163,27 @@ class FakePaymentAgentService:
             ],
         )
 
+    async def stream_payment_support_question(
+        self,
+        *,
+        user_id: int,
+        question: str,
+        max_steps: int = 4,
+        confirmation_token: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> AsyncIterator[AgentStreamEventDTO]:
+        result = await self.answer_payment_support_question(
+            user_id=user_id,
+            question=question,
+            max_steps=max_steps,
+            confirmation_token=confirmation_token,
+            idempotency_key=idempotency_key,
+        )
+        yield AgentStreamEventDTO.run_started(run_id=result.run_id)
+        for step in result.steps:
+            yield AgentStreamEventDTO.step_completed(run_id=result.run_id, step=step)
+        yield AgentStreamEventDTO.run_completed(result=result)
+
 
 class RecordingOrderAgentService:
     def __init__(self):
@@ -124,6 +193,12 @@ class RecordingOrderAgentService:
         self.calls.append(kwargs)
         return AgentRunDTO.final(answer="订单 Agent 已处理。")
 
+    async def stream_order_support_question(
+        self, **kwargs: Any
+    ) -> AsyncIterator[AgentStreamEventDTO]:
+        result = await self.answer_order_support_question(**kwargs)
+        yield AgentStreamEventDTO.run_completed(result=result)
+
 
 class RecordingPaymentAgentService:
     def __init__(self):
@@ -132,6 +207,12 @@ class RecordingPaymentAgentService:
     async def answer_payment_support_question(self, **kwargs: Any) -> AgentRunDTO:
         self.calls.append(kwargs)
         return AgentRunDTO.final(answer="支付 Agent 已处理。")
+
+    async def stream_payment_support_question(
+        self, **kwargs: Any
+    ) -> AsyncIterator[AgentStreamEventDTO]:
+        result = await self.answer_payment_support_question(**kwargs)
+        yield AgentStreamEventDTO.run_completed(result=result)
 
 
 class FakeLLMClient:
@@ -235,6 +316,21 @@ def _new_payment_agent_service(llm_client: FakeLLMClient) -> PaymentAgentService
 
 def _response_payload(response) -> dict[str, Any]:
     return response.model_dump(mode="json")
+
+
+def _parse_sse_events(body: str) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    for block in body.strip().split("\n\n"):
+        event_name: str | None = None
+        data: dict[str, Any] | None = None
+        for line in block.splitlines():
+            if line.startswith("event: "):
+                event_name = line.removeprefix("event: ")
+            elif line.startswith("data: "):
+                data = json.loads(line.removeprefix("data: "))
+        if event_name is not None and data is not None:
+            events.append({"event": event_name, "data": data})
+    return events
 
 
 def test_order_agent_system_prompt_names_all_registered_tools() -> None:
@@ -368,6 +464,29 @@ async def test_agent_chat_endpoint_routes_to_order_agent(agent_client) -> None:
 
 
 @pytest.mark.asyncio
+async def test_agent_chat_stream_endpoint_routes_to_order_agent(agent_client) -> None:
+    response = await agent_client.post(
+        "/v1/agent/chat/stream",
+        json={"question": "订单 1001 到哪了？", "max_steps": 3},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    events = _parse_sse_events(response.text)
+
+    assert [event["event"] for event in events] == [
+        AgentStreamEventName.ROUTE.value,
+        AgentStreamEventName.RUN_STARTED.value,
+        AgentStreamEventName.STEP_COMPLETED.value,
+        AgentStreamEventName.RUN_COMPLETED.value,
+    ]
+    assert events[0]["data"]["route"] == "order"
+    assert events[1]["data"]["route"] == "order"
+    assert events[2]["data"]["step"]["tool"] == "get_order_status"
+    assert events[3]["data"]["result"]["answer"] == "订单 1001 正在运输中。"
+
+
+@pytest.mark.asyncio
 async def test_payment_support_agent_endpoint(agent_client) -> None:
     response = await agent_client.post(
         "/v1/agent/payment/support",
@@ -378,6 +497,42 @@ async def test_payment_support_agent_endpoint(agent_client) -> None:
     assert response.json()["data"]["run_id"] == "run_payment_1"
     assert response.json()["data"]["answer"] == "请检查余额、限额和支付渠道状态。"
     assert response.json()["data"]["steps"][0]["tool"] == "search_payment_knowledge"
+
+
+@pytest.mark.asyncio
+async def test_order_support_agent_stream_endpoint(agent_client) -> None:
+    response = await agent_client.post(
+        "/v1/agent/order/support/stream",
+        json={"question": "订单 1001 到哪了？", "max_steps": 3},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    events = _parse_sse_events(response.text)
+
+    assert [event["event"] for event in events] == [
+        AgentStreamEventName.RUN_STARTED.value,
+        AgentStreamEventName.STEP_COMPLETED.value,
+        AgentStreamEventName.RUN_COMPLETED.value,
+    ]
+    assert events[0]["data"]["run_id"] == "run_1"
+    assert events[1]["data"]["step"]["action_result"]["status"] == "运输中"
+    assert events[2]["data"]["result"]["confirmation"] is None
+
+
+@pytest.mark.asyncio
+async def test_payment_support_agent_stream_endpoint(agent_client) -> None:
+    response = await agent_client.post(
+        "/v1/agent/payment/support/stream",
+        json={"question": "支付失败怎么办？", "max_steps": 3},
+    )
+
+    assert response.status_code == 200
+    events = _parse_sse_events(response.text)
+
+    assert events[0]["event"] == AgentStreamEventName.RUN_STARTED.value
+    assert events[1]["data"]["step"]["tool"] == "search_payment_knowledge"
+    assert events[2]["data"]["result"]["answer"] == "请检查余额、限额和支付渠道状态。"
 
 
 @pytest.mark.asyncio
@@ -413,6 +568,37 @@ async def test_agent_router_service_routes_order_question_without_llm() -> None:
     assert order_agent_service.calls[0]["user_id"] == 999
     assert payment_agent_service.calls == []
     assert llm_client.calls == []
+
+
+@pytest.mark.asyncio
+async def test_agent_router_service_streams_route_and_agent_events() -> None:
+    llm_client = FakeLLMClient([])
+    order_agent_service = RecordingOrderAgentService()
+    payment_agent_service = RecordingPaymentAgentService()
+    service = AgentRouterService(
+        llm_client=llm_client,
+        order_agent_service=order_agent_service,
+        payment_agent_service=payment_agent_service,
+        audit_service=FakeAgentAuditService(),
+    )
+
+    events = [
+        event
+        async for event in service.stream_chat(
+            user_id=999,
+            question="订单 1001 到哪了？",
+            max_steps=3,
+        )
+    ]
+
+    assert events[0].event is AgentStreamEventName.ROUTE
+    assert events[0].data["route"] == "order"
+    assert events[1].event is AgentStreamEventName.RUN_COMPLETED
+    assert events[1].data["route"] == "order"
+    assert events[1].result is not None
+    assert events[1].result.answer == "订单 Agent 已处理。"
+    assert order_agent_service.calls[0]["user_id"] == 999
+    assert payment_agent_service.calls == []
 
 
 @pytest.mark.asyncio
@@ -564,6 +750,42 @@ async def test_order_agent_service_runs_react_with_tools() -> None:
     }
     assert len(llm_client.calls) == 2
     assert llm_client.calls[0]["response_model"] is LLMActionModel
+
+
+@pytest.mark.asyncio
+async def test_order_agent_service_streams_react_events() -> None:
+    llm_client = FakeLLMClient(
+        actions=[
+            LLMActionModel(
+                type="tool_call", tool="get_order_status", args={"order_id": "1001"}
+            ),
+            LLMActionModel(
+                type="final", answer="订单 1001 由顺丰速运承运，预计明天 18:00 前送达。"
+            ),
+        ]
+    )
+    service = _new_order_agent_service(llm_client)
+
+    events = [
+        event
+        async for event in service.stream_order_support_question(
+            user_id=999,
+            question="订单 1001 到哪了？",
+            max_steps=3,
+        )
+    ]
+
+    assert [event.event for event in events] == [
+        AgentStreamEventName.RUN_STARTED,
+        AgentStreamEventName.STEP_COMPLETED,
+        AgentStreamEventName.STEP_COMPLETED,
+        AgentStreamEventName.RUN_COMPLETED,
+    ]
+    assert events[1].data["step"]["tool"] == "get_order_status"
+    assert events[-1].result is not None
+    assert (
+        events[-1].result.answer == "订单 1001 由顺丰速运承运，预计明天 18:00 前送达。"
+    )
 
 
 @pytest.mark.asyncio

@@ -67,7 +67,9 @@ def _make_payload(*, code: int, data: Any = None, message: str = "") -> Response
     return ResponsePayload(code=code, message=message, data=data)
 
 
-def _process_success_data(data: dict | list | BaseModel | None = None) -> dict | list | None:
+def _process_success_data(
+    data: dict | list | BaseModel | None = None,
+) -> dict | list | None:
     """
     验证成功响应的数据类型，并展开 Pydantic 模型。
 
@@ -86,7 +88,10 @@ def _process_success_data(data: dict | list | BaseModel | None = None) -> dict |
     if isinstance(data, BaseModel):
         data = data.model_dump(mode="python")
     elif isinstance(data, list):
-        data = [item.model_dump(mode="python") if isinstance(item, BaseModel) else item for item in data]
+        data = [
+            item.model_dump(mode="python") if isinstance(item, BaseModel) else item
+            for item in data
+        ]
     elif not isinstance(data, dict):
         raise TypeError(
             f"Success response data must be a dict, list, a Pydantic model instance, or None, but received type: {type(data)}"
@@ -95,7 +100,9 @@ def _process_success_data(data: dict | list | BaseModel | None = None) -> dict |
     return data
 
 
-def _build_error_body(error: AppError, *, message: str | None = "", lang: str = "zh") -> ResponsePayload:
+def _build_error_body(
+    error: AppError, *, message: str | None = "", lang: str = "zh"
+) -> ResponsePayload:
     """
     构造错误响应载荷。
 
@@ -122,7 +129,9 @@ def success_response(data: dict | list | BaseModel | None = None) -> ResponsePay
     return _make_payload(code=success_status.code, data=processed_data)
 
 
-def success_list_response(data: list, page: int, limit: int, total: int) -> ResponsePayload:
+def success_list_response(
+    data: list, page: int, limit: int, total: int
+) -> ResponsePayload:
     """
     分页列表响应
     """
@@ -136,7 +145,9 @@ def success_list_response(data: list, page: int, limit: int, total: int) -> Resp
     )
 
 
-def error_response(error: AppError, *, message: str | None = "", lang: str = "zh") -> JSONResponse:
+def error_response(
+    error: AppError, *, message: str | None = "", lang: str = "zh"
+) -> JSONResponse:
     """
     通用错误 HTTP 响应
     """
@@ -152,6 +163,15 @@ def wrap_sse_data(content: str | dict) -> str:
         # 序列化并确保是 utf-8 字符串
         content = orjson_dumps(content)
     return f"data: {content}\n\n"
+
+
+def wrap_sse_event(event: str, data: str | dict) -> str:
+    """
+    将事件名和内容包装为 SSE (Server-Sent Events) 格式。
+    """
+    if isinstance(data, dict):
+        data = orjson_dumps(data)
+    return f"event: {event}\ndata: {data}\n\n"
 
 
 '''

@@ -19,6 +19,7 @@ from pkg.toolkit.response import (
     success_list_response,
     success_response,
     wrap_sse_data,
+    wrap_sse_event,
 )
 
 # 尝试导入 numpy，用于测试科学计算场景的数据兼容性
@@ -81,7 +82,10 @@ class TestOrjsonToolkit:
             (3.14159, 3.14159),  # 浮点数
             (True, True),  # 布尔值
             (None, None),  # None
-            ({"a", "b"}, ["a", "b"]),  # Set -> List (无序，需特殊断言，此处仅作示例结构)
+            (
+                {"a", "b"},
+                ["a", "b"],
+            ),  # Set -> List (无序，需特殊断言，此处仅作示例结构)
             (b"test_bytes", "test_bytes"),  # Bytes -> Str
         ],
     )
@@ -100,11 +104,17 @@ class TestOrjsonToolkit:
         [
             (Decimal("999.99"), float, 999.99),
             (Decimal("0.0"), float, 0.0),
-            (Decimal("0.12345678901234567890"), str, "0.12345678901234567890"),  # 高精度 -> 字符串
+            (
+                Decimal("0.12345678901234567890"),
+                str,
+                "0.12345678901234567890",
+            ),  # 高精度 -> 字符串
             (Decimal("1E+20"), str, "1E+20"),  # 大范围 -> 字符串
         ],
     )
-    def test_decimal_strategy(self, decimal_val: Decimal, expected_type: type, check_val: Any):
+    def test_decimal_strategy(
+        self, decimal_val: Decimal, expected_type: type, check_val: Any
+    ):
         """验证 Decimal 的智能转换策略：安全范围内转 float，否则转 string 以防精度丢失"""
         res = orjson_loads(orjson_dumps({"d": decimal_val}))
         assert isinstance(res["d"], expected_type)
@@ -131,7 +141,11 @@ class TestOrjsonToolkit:
         if not HAS_NUMPY:
             pytest.skip("Numpy not installed")
 
-        data = {"arr": np.array([1, 2, 3]), "int64": np.int64(9223372036854775807), "float32": np.float32(1.5)}
+        data = {
+            "arr": np.array([1, 2, 3]),
+            "int64": np.int64(9223372036854775807),
+            "float32": np.float32(1.5),
+        }
         parsed = orjson_loads(orjson_dumps(data))
         assert parsed["arr"] == [1, 2, 3]
         assert parsed["int64"] == 9223372036854775807
@@ -217,6 +231,11 @@ class TestResponseWrappers:
         sse_msg = wrap_sse_data({"msg": "测试"})
         assert "测试" in sse_msg
 
+    def test_sse_event_wrapper(self):
+        """验证带事件名的 SSE 数据格式化"""
+        assert wrap_sse_event("message", "ping") == "event: message\ndata: ping\n\n"
+        assert wrap_sse_event("step", {"a": 1}) == 'event: step\ndata: {"a":1}\n\n'
+
     def test_pydantic_integration(self):
         """验证 Pydantic 模型直接作为响应数据"""
         user = UserSchema(id=1, name="Admin", meta={"role": "root"})
@@ -279,7 +298,9 @@ class TestFastAPIIntegration:
         assert data["code"] == 20000
         # 验证大整数未丢失精度（Python client 自动处理，但在 JS 前端需注意）
         assert data["data"]["big_int"] == 2**60
-        assert data["data"]["decimal"] == "100.50"  # FastAPI/Pydantic 默认保留 Decimal 文本精度
+        assert (
+            data["data"]["decimal"] == "100.50"
+        )  # FastAPI/Pydantic 默认保留 Decimal 文本精度
         assert "2025-12-25" in data["data"]["date"]
         assert data["data"]["uuid"] == "550e8400-e29b-41d4-a716-446655440000"
 

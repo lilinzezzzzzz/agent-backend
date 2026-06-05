@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from enum import StrEnum
 
 from internal.schemas.agent import (
     AgentActionConfirmationSchema,
@@ -11,7 +12,7 @@ from internal.schemas.agent import (
     JsonValue,
 )
 from internal.services.dto.order import AgentActionConfirmationDTO, InvoiceRequestDTO
-from pkg.agents import AgentFinal, AgentRunResult, AgentToolCall
+from pkg.agents import AgentFinal, AgentRunResult, AgentStepRecord, AgentToolCall
 from pkg.toolkit.string import uuid6_unique_str_id
 
 
@@ -27,6 +28,26 @@ class AgentStepDTO:
     action_result: JsonValue = None
     error: str | None = None
     elapsed_ms: float = 0
+
+    @classmethod
+    def from_step_record(cls, step: AgentStepRecord) -> AgentStepDTO:
+        """从通用 Agent step record 构造业务 DTO。"""
+        return cls(
+            index=step.index,
+            status=step.status.value,
+            action_type=(
+                "final" if isinstance(step.action, AgentFinal) else "tool_call"
+            ),
+            tool=(step.action.tool if isinstance(step.action, AgentToolCall) else None),
+            args=(
+                to_json_object(step.action.args)
+                if isinstance(step.action, AgentToolCall)
+                else {}
+            ),
+            action_result=to_json_value(step.action_result),
+            error=step.error,
+            elapsed_ms=step.elapsed_ms,
+        )
 
     def to_schema(self) -> AgentStepSchema:
         """转换为 API 响应 schema。"""
@@ -60,29 +81,7 @@ class AgentRunDTO:
             run_id=result.run_id,
             status=result.status.value,
             answer=result.final_answer,
-            steps=[
-                AgentStepDTO(
-                    index=step.index,
-                    status=step.status.value,
-                    action_type=(
-                        "final" if isinstance(step.action, AgentFinal) else "tool_call"
-                    ),
-                    tool=(
-                        step.action.tool
-                        if isinstance(step.action, AgentToolCall)
-                        else None
-                    ),
-                    args=(
-                        to_json_object(step.action.args)
-                        if isinstance(step.action, AgentToolCall)
-                        else {}
-                    ),
-                    action_result=to_json_value(step.action_result),
-                    error=step.error,
-                    elapsed_ms=step.elapsed_ms,
-                )
-                for step in result.steps
-            ],
+            steps=[AgentStepDTO.from_step_record(step) for step in result.steps],
             confirmation=_extract_confirmation(result),
         )
 
@@ -147,6 +146,115 @@ class AgentChatDTO:
         return AgentChatRespSchema(route=self.route, result=self.result.to_schema())
 
 
+class AgentStreamEventName(StrEnum):
+    """Agent SSE 事件名。"""
+
+    ROUTE = "route"
+    RUN_STARTED = "run_started"
+    STEP_COMPLETED = "step_completed"
+    RUN_COMPLETED = "run_completed"
+    ERROR = "error"
+
+
+@dataclass(frozen=True, slots=True)
+class AgentStreamEventDTO:
+    """Service 输出给 Controller 的 Agent 流式事件。"""
+
+    event: AgentStreamEventName
+    data: dict[str, JsonValue] = field(default_factory=dict)
+    result: AgentRunDTO | None = field(default=None, compare=False, repr=False)
+
+    @classmethod
+    def route(cls, *, route: str) -> AgentStreamEventDTO:
+        """构造路由选择事件。"""
+        return cls(event=AgentStreamEventName.ROUTE, data={"route": route})
+
+    @classmethod
+    def run_started(
+        cls,
+        *,
+        run_id: str,
+        status: str = "running",
+        route: str | None = None,
+    ) -> AgentStreamEventDTO:
+        """构造 Agent 运行开始事件。"""
+        return cls(
+            event=AgentStreamEventName.RUN_STARTED,
+            data=_with_optional_fields(
+                {"run_id": run_id, "status": status},
+                route=route,
+            ),
+        )
+
+    @classmethod
+    def step_completed(
+        cls,
+        *,
+        run_id: str,
+        step: AgentStepDTO,
+        route: str | None = None,
+    ) -> AgentStreamEventDTO:
+        """构造单步完成事件。"""
+        return cls(
+            event=AgentStreamEventName.STEP_COMPLETED,
+            data=_with_optional_fields(
+                {
+                    "run_id": run_id,
+                    "step": to_json_object(step.to_schema().model_dump(mode="json")),
+                },
+                route=route,
+            ),
+        )
+
+    @classmethod
+    def run_completed(
+        cls,
+        *,
+        result: AgentRunDTO,
+        route: str | None = None,
+    ) -> AgentStreamEventDTO:
+        """构造 Agent 运行完成事件。"""
+        return cls(
+            event=AgentStreamEventName.RUN_COMPLETED,
+            data=_with_optional_fields(
+                {
+                    "run_id": result.run_id,
+                    "status": result.status,
+                    "result": to_json_object(
+                        result.to_schema().model_dump(mode="json")
+                    ),
+                },
+                route=route,
+            ),
+            result=result,
+        )
+
+    @classmethod
+    def error(
+        cls,
+        *,
+        code: int,
+        message: str,
+        run_id: str | None = None,
+        route: str | None = None,
+    ) -> AgentStreamEventDTO:
+        """构造 Agent 流式错误事件。"""
+        return cls(
+            event=AgentStreamEventName.ERROR,
+            data=_with_optional_fields(
+                {"code": code, "message": message},
+                run_id=run_id,
+                route=route,
+            ),
+        )
+
+    def with_route(self, route: str) -> AgentStreamEventDTO:
+        """返回带业务路由字段的新事件。"""
+        data = dict(self.data)
+        data["route"] = route
+        return AgentStreamEventDTO(event=self.event, data=data, result=self.result)
+
+
 def _extract_confirmation(result: AgentRunResult) -> AgentActionConfirmationDTO | None:
     for step in reversed(result.steps):
         action_result = step.action_result
@@ -190,3 +298,12 @@ def to_json_object(value: object) -> dict[str, JsonValue]:
     if not isinstance(value, Mapping):
         return {}
     return {str(key): to_json_value(item) for key, item in value.items()}
+
+
+def _with_optional_fields(
+    data: dict[str, JsonValue], **fields: str | None
+) -> dict[str, JsonValue]:
+    for key, value in fields.items():
+        if value is not None:
+            data[key] = value
+    return data

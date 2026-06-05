@@ -64,7 +64,14 @@ result = await agent.run(user_input="查询订单 123")
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
+from collections.abc import (
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Iterable,
+    Mapping,
+    Sequence,
+)
 from dataclasses import dataclass, field
 from enum import StrEnum
 from inspect import isawaitable
@@ -195,6 +202,25 @@ class AgentRunResult:
     steps: Sequence[AgentStepRecord]
 
 
+class AgentRunEventType(StrEnum):
+    """Agent 运行事件类型。"""
+
+    RUN_STARTED = "run_started"
+    STEP_COMPLETED = "step_completed"
+    RUN_COMPLETED = "run_completed"
+
+
+@dataclass(frozen=True, slots=True)
+class AgentRunEvent:
+    """单次 Agent 运行期间产生的结构化事件。"""
+
+    type: AgentRunEventType
+    run_id: str
+    status: AgentRunStatus
+    step: AgentStepRecord | None = None
+    result: AgentRunResult | None = None
+
+
 @dataclass(frozen=True, slots=True)
 class AgentActionContext:
     """Action maker 每轮选择动作需要的上下文。"""
@@ -245,9 +271,7 @@ def parse_agent_action(payload: Mapping[str, Any]) -> AgentAction:
         if not isinstance(args, Mapping):
             raise InvalidAgentActionError("tool_call action requires mapping args")
         if call_id is not None and not isinstance(call_id, str):
-            raise InvalidAgentActionError(
-                "tool_call action call_id must be a string"
-            )
+            raise InvalidAgentActionError("tool_call action call_id must be a string")
         return AgentToolCall(tool=tool, args=args, call_id=call_id)
 
     raise InvalidAgentActionError(f"unsupported action type: {action_type!r}")
@@ -294,10 +318,28 @@ class ReActAgent:
         self, *, user_input: str, run_id: str | None = None
     ) -> AgentRunResult:
         """执行动作/工具迭代，直到得到最终答案或达到步数上限。"""
+        result: AgentRunResult | None = None
+        async for event in self.run_events(user_input=user_input, run_id=run_id):
+            if event.type is AgentRunEventType.RUN_COMPLETED:
+                result = event.result
+
+        if result is None:
+            raise RuntimeError("agent run completed without result event")
+        return result
+
+    async def run_events(
+        self, *, user_input: str, run_id: str | None = None
+    ) -> AsyncIterator[AgentRunEvent]:
+        """执行动作/工具迭代，并在运行开始、每步完成和运行结束时产出事件。"""
         state = AgentRunState(
             run_id=run_id or uuid6_unique_str_id(),
             user_input=user_input,
             max_steps=self._max_steps,
+        )
+        yield AgentRunEvent(
+            type=AgentRunEventType.RUN_STARTED,
+            run_id=state.run_id,
+            status=state.status,
         )
 
         for index in range(self._max_steps):
@@ -324,7 +366,20 @@ class ReActAgent:
                         elapsed_ms=_elapsed_ms(started_at),
                     )
                 )
-                return _build_result(state)
+                yield AgentRunEvent(
+                    type=AgentRunEventType.STEP_COMPLETED,
+                    run_id=state.run_id,
+                    status=state.status,
+                    step=state.steps[-1],
+                )
+                result = _build_result(state)
+                yield AgentRunEvent(
+                    type=AgentRunEventType.RUN_COMPLETED,
+                    run_id=state.run_id,
+                    status=result.status,
+                    result=result,
+                )
+                return
 
             # 除 `AgentFinal` 和 `AgentToolCall` 以外都是 action maker 编程错误。
             if not isinstance(action, AgentToolCall):
@@ -343,10 +398,22 @@ class ReActAgent:
                     elapsed_ms=_elapsed_ms(started_at),
                 )
             )
+            yield AgentRunEvent(
+                type=AgentRunEventType.STEP_COMPLETED,
+                run_id=state.run_id,
+                status=state.status,
+                step=state.steps[-1],
+            )
 
         # 达到最大步数时不伪造答案，调用方可以根据 status 决定重试或降级回复。
         state.status = AgentRunStatus.MAX_STEPS_REACHED
-        return _build_result(state)
+        result = _build_result(state)
+        yield AgentRunEvent(
+            type=AgentRunEventType.RUN_COMPLETED,
+            run_id=state.run_id,
+            status=result.status,
+            result=result,
+        )
 
     async def _execute_tool_call(
         self, action: AgentToolCall

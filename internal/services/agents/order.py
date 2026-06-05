@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+
 from internal.agents.order import OrderAgentBuilder
 from internal.core import AppException, errors
 from internal.infra.llm import AgentLLMClient, new_default_llm_client
@@ -11,7 +13,14 @@ from internal.services.agents.audit import (
     new_agent_audit_service,
     record_agent_audit,
 )
+from internal.services.agents.stream import (
+    app_exception_stream_event,
+    service_unavailable_stream_event,
+    stream_event_from_run_event,
+    stream_events_from_result,
+)
 from internal.services.dto.agent import AgentRunDTO
+from internal.services.dto.agent import AgentStreamEventDTO
 from internal.services.order import OrderService, new_order_service
 from pkg.logger import logger
 from pkg.toolkit.string import uuid6_unique_str_id
@@ -105,6 +114,90 @@ class OrderAgentService:
             raise AppException(
                 errors.ServiceUnavailable, message="订单支持 Agent 暂不可用"
             ) from exc
+
+    async def stream_order_support_question(
+        self,
+        *,
+        user_id: int,
+        question: str,
+        max_steps: int = 4,
+        confirmation_token: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> AsyncIterator[AgentStreamEventDTO]:
+        """流式回答订单支持问题。"""
+        audit_context = AgentAuditContext.start(
+            agent_name="order_support",
+            user_id=user_id,
+            user_input=question,
+            max_steps=max_steps,
+        )
+        run_id: str | None = None
+        try:
+            if confirmation_token is not None:
+                if idempotency_key is None:
+                    raise AppException(errors.BadRequest, message="确认动作缺少幂等键")
+                confirmed = await self._order_service.confirm_invoice_request(
+                    user_id=user_id,
+                    confirmation_token=confirmation_token,
+                    idempotency_key=idempotency_key,
+                )
+                confirmation_result = AgentRunDTO.from_confirmed_invoice(confirmed)
+                run_id = confirmation_result.run_id
+                await record_agent_audit(
+                    audit_writer=self._audit_service,
+                    audit_context=audit_context,
+                    result=confirmation_result,
+                    metadata={"flow": "confirmation"},
+                )
+                for event in stream_events_from_result(confirmation_result):
+                    yield event
+                return
+
+            agent = OrderAgentBuilder(
+                llm_client=AuditedAgentLLMClient(
+                    llm_client=self._llm_client,
+                    audit_context=audit_context,
+                ),
+                order_service=self._order_service,
+                user_id=user_id,
+                max_steps=max_steps,
+            ).build()
+            async for run_event in agent.run_events(user_input=question):
+                run_id = run_event.run_id
+                stream_event = stream_event_from_run_event(run_event)
+                if stream_event.result is not None:
+                    await record_agent_audit(
+                        audit_writer=self._audit_service,
+                        audit_context=audit_context,
+                        result=stream_event.result,
+                        metadata={"flow": "react"},
+                    )
+                yield stream_event
+        except AppException as exc:
+            await record_agent_audit(
+                audit_writer=self._audit_service,
+                audit_context=audit_context,
+                result=failed_agent_result(
+                    run_id=run_id or uuid6_unique_str_id(),
+                    error_type=f"AppException:{exc.error.code}",
+                    message=exc.message,
+                ),
+            )
+            yield app_exception_stream_event(exc, run_id=run_id)
+        except Exception as exc:
+            logger.warning(f"Order support agent stream failed: {type(exc).__name__}")
+            await record_agent_audit(
+                audit_writer=self._audit_service,
+                audit_context=audit_context,
+                result=failed_agent_result(
+                    run_id=run_id or uuid6_unique_str_id(),
+                    error_type=type(exc).__name__,
+                ),
+            )
+            yield service_unavailable_stream_event(
+                detail="订单支持 Agent 暂不可用",
+                run_id=run_id,
+            )
 
 
 _order_agent_service: OrderAgentService | None = None

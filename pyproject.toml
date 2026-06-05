@@ -75,14 +75,13 @@ dependencies = [
 # 分组依赖 —— 开发环境才需要
 [dependency-groups]
 dev = [
-    # 构建工具也放入 dev，方便本地 build（但生产以 build-system 为准）
     "pip>=25.3",
     "setuptools>=79.0.1",
     "wheel>=0.45.1",
     # 常规开发工具（可根据你需要继续添加）
     "pytest",
     "pytest-asyncio",
-    "httpx", # 测试请求常用
+    "httpx",
     "black",
     "mypy",
     "types-redis",
@@ -92,6 +91,7 @@ dev = [
     "pytest-tornasync>=0.6.0.post2",
     "pytest-trio>=0.8.0",
     "pytest-twisted>=1.14.3",
+    "ruff>=0.15.15",
 ]
 
 [tool.uv]

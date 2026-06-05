@@ -3,6 +3,7 @@ import pytest
 from pkg.agents import (
     AgentActionContext,
     AgentFinal,
+    AgentRunEventType,
     AgentRunStatus,
     AgentStepStatus,
     AgentToolCall,
@@ -66,6 +67,39 @@ async def test_react_agent_runs_tool_then_final_answer() -> None:
 
 
 @pytest.mark.asyncio
+async def test_react_agent_streams_run_events() -> None:
+    async def make_next_action(context: AgentActionContext):
+        if not context.state.steps:
+            return AgentToolCall(tool="search_order", args={"order_id": "123"})
+        return AgentFinal(answer="订单 123 已发货。")
+
+    agent = ReActAgent(
+        action_maker=FunctionActionMaker(make_next_action),
+        tools=[build_search_tool()],
+        max_steps=3,
+    )
+
+    events = [
+        event
+        async for event in agent.run_events(user_input="查询订单 123", run_id="run_1")
+    ]
+
+    assert [event.type for event in events] == [
+        AgentRunEventType.RUN_STARTED,
+        AgentRunEventType.STEP_COMPLETED,
+        AgentRunEventType.STEP_COMPLETED,
+        AgentRunEventType.RUN_COMPLETED,
+    ]
+    assert events[0].run_id == "run_1"
+    assert events[1].step is not None
+    assert events[1].step.action_result == {"order_id": "123", "status": "shipped"}
+    assert events[2].step is not None
+    assert events[2].step.action == AgentFinal(answer="订单 123 已发货。")
+    assert events[3].result is not None
+    assert events[3].result.final_answer == "订单 123 已发货。"
+
+
+@pytest.mark.asyncio
 async def test_react_agent_records_unknown_tool_error_and_continues() -> None:
     async def make_next_action(context: AgentActionContext):
         if not context.state.steps:
@@ -117,7 +151,9 @@ async def test_react_agent_records_tool_exception() -> None:
 
     assert result.status == AgentRunStatus.COMPLETED
     assert result.steps[0].status == AgentStepStatus.FAILED
-    assert result.steps[0].action_result == {"error": "RuntimeError: backend unavailable"}
+    assert result.steps[0].action_result == {
+        "error": "RuntimeError: backend unavailable"
+    }
 
 
 @pytest.mark.asyncio

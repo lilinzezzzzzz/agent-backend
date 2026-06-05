@@ -1,8 +1,8 @@
-# FastAPI Backend
+# agent-backend
 
-一个基于 FastAPI 的后端工程模板，覆盖了常见的 Web API、认证、异步数据库访问、Redis 缓存、Celery 任务调度，以及可复用的向量检索与第三方登录能力。
+一个面向 Agent、RAG 与 AI 平台场景的后端基础设施项目，基于 FastAPI，覆盖常见的 Web API、认证、异步数据库访问、Redis 缓存、Celery 任务调度，以及可复用的向量检索与第三方登录能力。
 
-当前仓库更接近“可直接扩展的后端基础设施骨架”，而不是单一业务服务。README 只描述仓库中可以直接验证的现状，细分能力放在 `docs/` 和 `pkg/` 子模块文档里。
+当前仓库更接近“可直接扩展的 Agent 后端基础设施骨架”，而不是单一业务服务。README 只描述仓库中可以直接验证的现状，细分能力放在 `docs/` 和 `pkg/` 子模块文档里。
 
 ## 技术栈
 
@@ -262,8 +262,8 @@ uv run mypy .
 ## Docker
 
 ```bash
-docker build -t fastapi-backend .
-docker run --rm -p 8000:8000 fastapi-backend
+docker build -t agent-backend .
+docker run --rm -p 8000:8000 agent-backend
 ```
 
 容器运行前仍需保证配置文件和外部依赖可用。

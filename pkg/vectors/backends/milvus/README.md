@@ -18,11 +18,11 @@
 
 相关上游抽象：
 
-- [pkg/vectors/backends/base.py](/home/lilinze/workspace/fastapi-backend/pkg/vectors/backends/base.py)
-- [pkg/vectors/contracts.py](/home/lilinze/workspace/fastapi-backend/pkg/vectors/contracts.py)
-- [pkg/vectors/repositories/base.py](/home/lilinze/workspace/fastapi-backend/pkg/vectors/repositories/base.py)
-- [pkg/vectors/post_retrieval.py](/home/lilinze/workspace/fastapi-backend/pkg/vectors/post_retrieval.py)
-- [pkg/vectors/context_assembly.py](/home/lilinze/workspace/fastapi-backend/pkg/vectors/context_assembly.py)
+- [pkg/vectors/backends/base.py](../base.py)
+- [pkg/vectors/contracts.py](../../contracts.py)
+- [pkg/vectors/repositories/base.py](../../repositories/base.py)
+- [pkg/vectors/post_retrieval.py](../../post_retrieval.py)
+- [pkg/vectors/context_assembly.py](../../context_assembly.py)
 
 ## 1. 模块职责
 

@@ -1,7 +1,7 @@
 [project]
-name = "fastapi-backend"
+name = "agent-backend"
 version = "0.1.0"
-description = "fastapi-backend"
+description = "Agent backend infrastructure based on FastAPI"
 readme = "README.md"
 requires-python = ">=3.12"
 

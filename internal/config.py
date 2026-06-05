@@ -57,6 +57,7 @@ SENSITIVE_CONFIG_KEYWORDS = (
 NON_SENSITIVE_CONFIG_KEYS = {
     "CONFIG_ECHO_REVEAL_SECRETS",
 }
+CONFIG_ECHO_MIN_PARTIAL_SECRET_LENGTH = 8
 
 
 class Settings(BaseSettings):
@@ -399,9 +400,11 @@ def _config_echo_value(
     if value is None:
         return None
     if isinstance(value, str):
-        if len(value) <= 4:
-            return "***"
-        return mask_string(value, show_prefix=2, show_suffix=2, max_visible=4)
+        if not value:
+            return "<empty>"
+        if len(value) <= CONFIG_ECHO_MIN_PARTIAL_SECRET_LENGTH:
+            return f"*** (len={len(value)})"
+        return f"{mask_string(value, show_prefix=4, show_suffix=4)} (len={len(value)})"
     return "***"
 
 

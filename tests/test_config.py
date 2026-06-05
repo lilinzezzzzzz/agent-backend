@@ -99,7 +99,7 @@ def test_config_echo_masks_sensitive_secret_values(tmp_path: Path) -> None:
             sensitive_keys={"JWT_SECRET"},
             reveal_sensitive=False,
         )
-        == "te...et"
+        == "test...cret (len=15)"
     )
     assert (
         _config_echo_value(
@@ -140,5 +140,26 @@ def test_config_echo_fully_masks_short_sensitive_values(tmp_path: Path) -> None:
             sensitive_keys={"JWT_SECRET"},
             reveal_sensitive=False,
         )
-        == "***"
+        == "*** (len=3)"
+    )
+
+
+def test_config_echo_reports_empty_sensitive_values(tmp_path: Path) -> None:
+    env_path = tmp_path / ".env.test"
+    secrets_path = tmp_path / ".secrets"
+    secret_values = _secret_values()
+    secret_values["JWT_SECRET"] = ""
+    _write_env_file(env_path, _base_env_values())
+    _write_env_file(secrets_path, secret_values)
+    settings = Settings(_env_file=[env_path, secrets_path])
+
+    assert (
+        _config_echo_value(
+            settings,
+            "JWT_SECRET",
+            settings.model_dump()["JWT_SECRET"],
+            sensitive_keys={"JWT_SECRET"},
+            reveal_sensitive=False,
+        )
+        == "<empty>"
     )

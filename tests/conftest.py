@@ -29,7 +29,12 @@ import pytest_asyncio
 from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
 from redis.asyncio import ConnectionPool, Redis
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 # ==========================================
 # 1. 路径配置
@@ -359,7 +364,7 @@ def app():
         mock_settings.APP_ENV = "test"
         mock_settings.JWT_SECRET = "test-jwt-secret-key-for-testing-only"
         mock_settings.JWT_ALGORITHM = "HS256"
-        mock_settings.ACCESS_TOKEN_EXPIRE_MINUTES = 60
+        mock_settings.ACCESS_TOKEN_EXPIRE_SECONDS = 3600
         mock_settings.BACKEND_CORS_ORIGINS = ["*"]
         mock_settings.DB_ECHO = False
         mock_settings.SLOW_SQL_THRESHOLD = 0.5
@@ -513,7 +518,7 @@ def mock_config():
     config.APP_ENV = "test"
     config.JWT_SECRET = "test-secret"
     config.JWT_ALGORITHM = "HS256"
-    config.ACCESS_TOKEN_EXPIRE_MINUTES = 60
+    config.ACCESS_TOKEN_EXPIRE_SECONDS = 3600
     config.DB_ECHO = False
     config.SLOW_SQL_THRESHOLD = 0.5
 

@@ -75,7 +75,7 @@ class Settings(BaseSettings):
     AES_SECRET: SecretStr
     JWT_SECRET: SecretStr
     JWT_ALGORITHM: str
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
+    ACCESS_TOKEN_EXPIRE_SECONDS: int = 3600
     CONFIG_ECHO_REVEAL_SECRETS: bool = False  # 打印配置时是否显示敏感值
 
     # --- CORS ---

@@ -12,7 +12,7 @@ from internal.services.user import UserService, new_user_service
 from pkg.logger import logger
 from pkg.third_party_auth import WeChatAuthStrategy, WeChatConfig
 
-TOKEN_EXPIRE_MINUTES = 30
+TOKEN_EXPIRE_SECONDS = 1800
 
 
 class AuthService:
@@ -43,7 +43,7 @@ class AuthService:
             user.id,
             token,
             self._build_user_metadata(user),
-            ex=TOKEN_EXPIRE_MINUTES * 60,
+            ex=TOKEN_EXPIRE_SECONDS,
         )
 
     async def login(self, *, username: str, password: str) -> UserLoginDTO:

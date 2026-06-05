@@ -30,7 +30,7 @@ class FakeAgentAuditWriter:
         return True
 
 
-class FakeAnyioTaskManager:
+class FakeBackgroundTaskManager:
     def __init__(self):
         self.tasks: list[dict[str, Any]] = []
 
@@ -56,12 +56,12 @@ class FakeAnyioTaskManager:
         return True
 
 
-class UninitializedAnyioTaskManager:
+class UninitializedBackgroundTaskManager:
     async def add_task(self, *args: Any, **kwargs: Any) -> bool:
-        raise RuntimeError("Anyio task manager not initialized.")
+        raise RuntimeError("Background task manager not initialized.")
 
 
-class ShuttingDownAnyioTaskManager:
+class ShuttingDownBackgroundTaskManager:
     async def add_task(self, *args: Any, **kwargs: Any) -> bool:
         raise RuntimeError("AsyncTaskManagerAnyIO is shutting down.")
 
@@ -150,12 +150,12 @@ async def test_agent_audit_service_redacts_sensitive_payloads() -> None:
 
 
 @pytest.mark.asyncio
-async def test_record_agent_audit_uses_anyio_task_manager(
+async def test_record_agent_audit_uses_background_task_manager(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    task_manager = FakeAnyioTaskManager()
+    task_manager = FakeBackgroundTaskManager()
     monkeypatch.setattr(
-        "internal.services.agents.audit.anyio_task_manager", task_manager
+        "internal.services.agents.audit.background_task_manager", task_manager
     )
     audit_writer = FakeAgentAuditWriter()
     audit_context = AgentAuditContext.start(
@@ -192,12 +192,12 @@ async def test_record_agent_audit_uses_anyio_task_manager(
 
 
 @pytest.mark.asyncio
-async def test_record_agent_audit_falls_back_when_anyio_task_manager_is_uninitialized(
+async def test_record_agent_audit_falls_back_when_background_task_manager_is_uninitialized(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "internal.services.agents.audit.anyio_task_manager",
-        UninitializedAnyioTaskManager(),
+        "internal.services.agents.audit.background_task_manager",
+        UninitializedBackgroundTaskManager(),
     )
     audit_writer = FakeAgentAuditWriter()
     audit_context = AgentAuditContext.start(
@@ -225,12 +225,12 @@ async def test_record_agent_audit_falls_back_when_anyio_task_manager_is_uninitia
 
 
 @pytest.mark.asyncio
-async def test_record_agent_audit_does_not_write_inline_when_anyio_task_manager_is_shutting_down(
+async def test_record_agent_audit_does_not_write_inline_when_background_task_manager_is_shutting_down(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "internal.services.agents.audit.anyio_task_manager",
-        ShuttingDownAnyioTaskManager(),
+        "internal.services.agents.audit.background_task_manager",
+        ShuttingDownBackgroundTaskManager(),
     )
     audit_writer = FakeAgentAuditWriter()
     audit_context = AgentAuditContext.start(

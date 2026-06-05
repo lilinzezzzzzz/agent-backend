@@ -13,7 +13,7 @@ from internal.dao.agent_audit import AgentAuditDao, new_agent_audit_dao
 from internal.models.agent_audit import AgentAudit
 from internal.schemas.agent import JsonValue
 from internal.services.dto.agent import AgentRunDTO
-from internal.utils.anyio_task import anyio_task_manager
+from internal.utils.background_tasks import background_task_manager
 from pkg.logger import logger
 from pkg.toolkit import context
 from pkg.toolkit.string import mask_string
@@ -281,18 +281,18 @@ async def record_agent_audit(
         "metadata": audit_metadata,
     }
 
-    # 当前实现是性能优先的 best-effort 审计：AnyioTaskHandler 只提供进程内后台执行，
+    # 当前实现是性能优先的 best-effort 审计：后台任务管理器只提供进程内后台执行，
     # 进程退出、队列溢出或任务取消时可能丢审计。强审计场景需要升级为同步写一条
     # 最小 outbox 事件，再由后台 worker/Celery 消费并写完整审计，配套重试、幂等和失败补偿。
     try:
-        return await anyio_task_manager.add_task(
+        return await background_task_manager.add_task(
             f"agent_audit:{audit_context.agent_name}:{result.run_id}",
             coro_func=audit_writer.record_agent_run,
             kwargs_dict=audit_kwargs,
             timeout=_AUDIT_TASK_TIMEOUT_SECONDS,
         )
     except RuntimeError as exc:
-        if not _is_anyio_task_manager_unavailable(exc):
+        if not _is_background_task_manager_unavailable(exc):
             logger.warning(f"Agent audit enqueue failed: {type(exc).__name__}")
             return False
         try:
@@ -472,7 +472,7 @@ def _supports_openai_audit_hook(llm_client: Any) -> bool:
     return llm_client.__class__.__name__ == "OpenAIClient"
 
 
-def _is_anyio_task_manager_unavailable(exc: RuntimeError) -> bool:
+def _is_background_task_manager_unavailable(exc: RuntimeError) -> bool:
     message = str(exc)
     return "not initialized" in message or "not started" in message
 

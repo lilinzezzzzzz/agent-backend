@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 from internal.core import AppException, errors
 from internal.schemas import BaseResponse
-from internal.utils.anyio_task import anyio_task_manager
+from internal.utils.background_tasks import background_task_manager
 from internal.utils.stream import stream_with_chunk_control
 from pkg.logger import logger
 from pkg.toolkit.response import ResponsePayload, success_response
@@ -64,7 +64,7 @@ async def async_task():
     summary="测试Contextvars在Asyncio任务",
 )
 async def test_contextvars_on_asyncio_task() -> ResponsePayload:
-    await anyio_task_manager.add_task("test", coro_func=async_task)
+    await background_task_manager.add_task("test", coro_func=async_task)
     return success_response()
 
 

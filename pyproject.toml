@@ -110,4 +110,4 @@ markers = [
 ]
 
 [tool.fastapi]
-entrypoint = "entrypoints.api:app"
+entrypoint = "entrypoints.main:app"

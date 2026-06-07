@@ -20,7 +20,7 @@ README 只记录当前仓库可直接核对的能力；更细的设计约束和�
 
 ## 当前能力
 
-- 进程入口：`entrypoints/api.py` 导出 FastAPI `app`，`entrypoints/celery.py` 导出 Celery `celery_app`，`internal/app.py` 负责路由、中间件和 lifespan。
+- 进程入口：`entrypoints/main.py` 导出 FastAPI `app`，`entrypoints/celery.py` 导出 Celery `celery_app`，`internal/app.py` 负责路由、中间件和 lifespan。
 - 配置加载：从 `configs/.secrets` 读取 `APP_ENV`，加载 `configs/.env.{APP_ENV}` 后再由 `.secrets` 覆盖。
 - 数据库：异步 SQLAlchemy 连接池，支持主库和可选只读副本；配置层支持 PostgreSQL、MySQL、Oracle DSN。
 - Redis：连接池、业务缓存封装、认证 token metadata、Agent action confirmation / idempotency 缓存。
@@ -140,13 +140,13 @@ ENDPOINT_GUARD_FAIL_OPEN=true
 开发模式：
 
 ```bash
-uv run uvicorn entrypoints.api:app --reload --host 0.0.0.0 --port 8000
+uv run uvicorn entrypoints.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 非热重载模式：
 
 ```bash
-uv run uvicorn entrypoints.api:app --host 0.0.0.0 --port 8000
+uv run uvicorn entrypoints.main:app --host 0.0.0.0 --port 8000
 ```
 
 当 `DEBUG=true` 时，FastAPI 文档可访问：
@@ -253,10 +253,9 @@ uv run celery -A entrypoints.celery:celery_app beat -l info
 ```text
 .
 ├── entrypoints/                # 进程启动入口
-│   ├── api.py                  # FastAPI 应用入口，导出 app
+│   ├── main.py                 # FastAPI 应用入口，导出 app
 │   ├── celery.py               # Celery CLI 入口，导出 celery_app
 │   └── run_celery_worker.sh    # Celery Worker 启动脚本
-├── main.py                     # 兼容旧部署的 FastAPI 入口，推荐使用 entrypoints/api.py
 ├── internal/                   # 业务应用代码
 │   ├── app.py                  # 应用组装、路由、中间件、lifespan
 │   ├── config.py               # 配置模型和加载逻辑

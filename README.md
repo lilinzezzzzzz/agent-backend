@@ -87,6 +87,7 @@ DB_PASSWORD=your_db_password
 REDIS_PASSWORD=
 LLM_MIMO_API_KEY=your_mimo_api_key
 LLM_DEEPSEEK_API_KEY=your_deepseek_api_key
+EMBEDDING_API_KEY=
 ```
 
 `configs/.env.local`
@@ -118,6 +119,12 @@ LLM_MIMO_MODEL=mimo-v2.5-pro
 LLM_DEEPSEEK_BASE_URL=https://api.deepseek.com
 LLM_DEEPSEEK_MODEL=deepseek-v4-flash
 
+EMBEDDING_PROVIDER=openai_compatible
+EMBEDDING_BASE_URL=http://bge-embedding:8000/v1
+EMBEDDING_MODEL=bge-m3
+EMBEDDING_DIMENSION=1024
+EMBEDDING_TIMEOUT_SECONDS=60
+
 ENDPOINT_GUARD_ENABLED=true
 ENDPOINT_GUARD_SOURCE=settings
 ENDPOINT_GUARD_RULES=[]
@@ -133,6 +140,9 @@ ENDPOINT_GUARD_FAIL_OPEN=true
 - `DB_PASSWORD`、`DB_READ_PASSWORD`、`REDIS_PASSWORD` 支持 `ENC(...)`，运行时使用 `AES_SECRET` 解密。
 - 设置 `DB_READ_HOST` 后会初始化只读副本；未设置时读会话自动 fallback 到主库。
 - `CONFIG_ECHO_REVEAL_SECRETS=true` 会在启动配置回显中显示敏感值，只应临时用于本地诊断。
+- `LLM_*` 用于 Chat / Agent 推理模型；`EMBEDDING_*` 用于向量模型，两者不要共用配置。
+- `EMBEDDING_PROVIDER` 当前支持 `openai_compatible`，可接 OpenAI-compatible `/embeddings` 协议的 BGE、vLLM、Xinference、TEI 或自建向量服务。
+- `EMBEDDING_DIMENSION` 必须与向量模型输出维度和向量 collection schema 保持一致。
 - `ENDPOINT_GUARD_RULES` 是 JSON 数组字符串，可按 method、path、match type 禁用或拒绝指定 endpoint。
 
 ### 3. 启动 API
@@ -359,7 +369,7 @@ uv run ruff format --check .
 docker build -t agent-backend .
 ```
 
-运行容器时需要提供配置文件和可访问的 PostgreSQL / Redis / LLM provider 等外部依赖。示例：
+运行容器时需要提供配置文件和可访问的 PostgreSQL / Redis / LLM provider / Embedding provider 等外部依赖。示例：
 
 ```bash
 docker run --rm -p 8000:8000 \

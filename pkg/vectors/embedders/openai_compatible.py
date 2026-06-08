@@ -19,8 +19,12 @@ DEFAULT_EMBEDDING_TOKEN_LIMIT: int = 8191
 DEFAULT_TIKTOKEN_OFFLINE: bool = True
 
 
-class LLMEmbedder(BaseEmbedder):
-    """OpenAI-compatible Embedder 实现，仅复用 token 截断策略。"""
+class OpenAICompatibleEmbedder(BaseEmbedder):
+    """OpenAI-compatible embeddings API 客户端。
+
+    适用于 OpenAI embeddings、自建兼容服务，以及通过 vLLM、Xinference、
+    TEI 等网关暴露 OpenAI-compatible `/embeddings` 的 BGE 向量服务。
+    """
 
     def __init__(
         self,
@@ -65,13 +69,17 @@ class LLMEmbedder(BaseEmbedder):
             "api_key": mask_string(self._api_key) if self._api_key else None,
         }
 
-    async def embed_texts(self, *, texts: Sequence[str], dimension: int | None = None) -> list[list[float]]:
+    async def embed_texts(
+        self, *, texts: Sequence[str], dimension: int | None = None
+    ) -> list[list[float]]:
         if not texts:
             return []
 
         effective_dimension = dimension if dimension is not None else self._dimension
         response = await self.client.embeddings.create(
-            **self._build_request_kwargs(input_value=list(texts), dimension=effective_dimension),
+            **self._build_request_kwargs(
+                input_value=list(texts), dimension=effective_dimension
+            ),
         )
         if not response.data:
             raise RecordValidationError("batch embedding 返回为空")
@@ -96,10 +104,14 @@ class LLMEmbedder(BaseEmbedder):
             context_name=caller_module,
         )
 
-    async def embed_text(self, *, text: str, dimension: int | None = None) -> list[float]:
+    async def embed_text(
+        self, *, text: str, dimension: int | None = None
+    ) -> list[float]:
         effective_dimension = dimension if dimension is not None else self._dimension
         response = await self.client.embeddings.create(
-            **self._build_request_kwargs(input_value=text, dimension=effective_dimension),
+            **self._build_request_kwargs(
+                input_value=text, dimension=effective_dimension
+            ),
         )
         if not response.data:
             raise RecordValidationError("query embedding 返回为空")
@@ -137,7 +149,9 @@ class LLMEmbedder(BaseEmbedder):
         except Exception as e:
             raise Exception(f"Embedding 请求失败: {e!s}") from e
 
-    def _build_request_kwargs(self, *, input_value: str | list[str], dimension: int | None = None) -> dict[str, Any]:
+    def _build_request_kwargs(
+        self, *, input_value: str | list[str], dimension: int | None = None
+    ) -> dict[str, Any]:
         kwargs: dict[str, Any] = {
             "input": input_value,
             "model": self._embedding_model_name,
@@ -149,22 +163,35 @@ class LLMEmbedder(BaseEmbedder):
         return kwargs
 
 
-def create_llm_embedder(
+def create_openai_compatible_embedder(
     *,
     api_key: str,
-    model_name: str,
+    model_name: str | None = None,
+    model: str | None = None,
     base_url: str | None = None,
     dimension: int = VECTOR_DIMENSION,
     timeout: float | None = None,
     token_limit: int = DEFAULT_EMBEDDING_TOKEN_LIMIT,
     offline_token_count: bool = DEFAULT_TIKTOKEN_OFFLINE,
-) -> LLMEmbedder:
-    return LLMEmbedder(
+) -> OpenAICompatibleEmbedder:
+    resolved_model_name = model_name or model
+    if not resolved_model_name:
+        raise ValueError("model_name 不能为空")
+    return OpenAICompatibleEmbedder(
         api_key=api_key,
-        embedding_model_name=model_name,
+        embedding_model_name=resolved_model_name,
         base_url=base_url,
         dimension=dimension,
         timeout=timeout,
         token_limit=token_limit,
         offline_token_count=offline_token_count,
     )
+
+
+__all__ = [
+    "DEFAULT_EMBEDDING_TOKEN_LIMIT",
+    "DEFAULT_TIKTOKEN_OFFLINE",
+    "OpenAICompatibleEmbedder",
+    "VECTOR_DIMENSION",
+    "create_openai_compatible_embedder",
+]

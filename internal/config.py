@@ -37,6 +37,7 @@ from pkg.toolkit.types import lazy_proxy
 # 支持的数据库类型
 DBType = Literal["mysql", "postgresql", "oracle"]
 EndpointGuardSource = Literal["settings", "redis", "settings+redis"]
+EmbeddingProvider = Literal["openai_compatible"]
 
 # 数据库驱动映射
 DB_DRIVER_MAP: dict[str, str] = {
@@ -94,6 +95,14 @@ class Settings(BaseSettings):
     LLM_DEEPSEEK_BASE_URL: str = ""
     LLM_DEEPSEEK_MODEL: str = ""
     LLM_DEEPSEEK_API_KEY: SecretStr = SecretStr("")
+
+    # --- Embedding ---
+    EMBEDDING_PROVIDER: EmbeddingProvider = "openai_compatible"
+    EMBEDDING_BASE_URL: str = ""
+    EMBEDDING_MODEL: str = ""
+    EMBEDDING_API_KEY: SecretStr = SecretStr("")
+    EMBEDDING_DIMENSION: PositiveInt = 1024
+    EMBEDDING_TIMEOUT_SECONDS: PositiveInt = 60
 
     # --- Agent ---
     AGENT_ACTION_CONFIRMATION_SECONDS: PositiveInt = 300

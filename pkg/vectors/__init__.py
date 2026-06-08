@@ -34,8 +34,9 @@ from pkg.vectors.contracts import (
 from pkg.vectors.embedders import (
     EMBEDDER_BUILDERS,
     EmbedderProvider,
-    LLMEmbedder,
+    OpenAICompatibleEmbedder,
     create_embedder,
+    create_openai_compatible_embedder,
 )
 from pkg.vectors.errors import (
     CapabilityNotSupportedError,
@@ -82,7 +83,7 @@ __all__ = [
     "FilterCondition",
     "FilterOperator",
     "InvalidEmbeddingDimensionError",
-    "LLMEmbedder",
+    "OpenAICompatibleEmbedder",
     "MetricType",
     "MilvusBackend",
     "CollapseConfig",
@@ -106,4 +107,5 @@ __all__ = [
     "VectorRecord",
     "create_backend",
     "create_embedder",
+    "create_openai_compatible_embedder",
 ]

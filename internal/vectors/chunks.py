@@ -31,7 +31,7 @@ from pkg.vectors.repositories.base import (
     build_scalar_filters,
 )
 
-CHUNK_ALLOWED_FILTER_FIELDS = frozenset({"doc_id"})
+CHUNK_ALLOWED_FILTER_FIELDS = frozenset({"doc_id", "kb_id"})
 
 
 @dataclass(slots=True)
@@ -39,6 +39,7 @@ class ChunkVectorDocument:
     id: int
     doc_id: int
     text: str
+    kb_id: int | None = None
 
 
 class ChunkVectorRepository(BaseVectorRepository[ChunkVectorDocument]):
@@ -59,10 +60,15 @@ class ChunkVectorRepository(BaseVectorRepository[ChunkVectorDocument]):
             payload_field=None,
             scalar_fields=[
                 ScalarFieldSpec(name="doc_id", data_type=ScalarDataType.INT64),
+                ScalarFieldSpec(
+                    name="kb_id", data_type=ScalarDataType.INT64, nullable=True
+                ),
             ],
-            index_config=MilvusHnswIndexConfig(params=MilvusHnswIndexParams(M=30, efConstruction=200)),
+            index_config=MilvusHnswIndexConfig(
+                params=MilvusHnswIndexParams(M=30, efConstruction=200)
+            ),
             full_text_search=FullTextSearchSpec(enabled=True),
-            description="Chunk vector collection",
+            description="Knowledge chunk vector collection",
         )
 
     @property
@@ -78,18 +84,19 @@ class ChunkVectorRepository(BaseVectorRepository[ChunkVectorDocument]):
         return []
 
     def to_records(self, *, entity: ChunkVectorDocument) -> list[VectorRecord]:
+        metadata: dict[str, int] = {"doc_id": entity.doc_id}
+        if entity.kb_id is not None:
+            metadata["kb_id"] = entity.kb_id
         return [
             VectorRecord(
                 id=entity.id,
                 text=entity.text,
-                metadata={
-                    "doc_id": entity.doc_id,
-                },
+                metadata=metadata,
             )
         ]
 
     async def delete_chunks(self, chunk_ids: list[int]) -> int:
-        # 调用方已在 MySQL 层完成组织级校验，这里直接走主键删除以命中 backend 的快路径。
+        # 调用方已在业务层完成知识库/文档级校验，这里直接走主键删除以命中 backend 的快路径。
         return await self.backend.delete(
             spec=self.collection_spec,
             ids=chunk_ids,
@@ -112,7 +119,12 @@ class ChunkVectorRepository(BaseVectorRepository[ChunkVectorDocument]):
         )
         if similarity_threshold is None:
             return hits
-        return [hit for hit in hits if hit.relevance_score is not None and hit.relevance_score >= similarity_threshold]
+        return [
+            hit
+            for hit in hits
+            if hit.relevance_score is not None
+            and hit.relevance_score >= similarity_threshold
+        ]
 
     async def search_similar(
         self,
@@ -127,15 +139,21 @@ class ChunkVectorRepository(BaseVectorRepository[ChunkVectorDocument]):
         query_embedding: list[float] | None = None,
     ) -> list[dict[str, Any]]:
         if data_type is not None or status is not None:
-            raise ValueError("chunk collection 仅保留 id/doc_id/content，不支持 data_type/status 过滤")
+            raise ValueError(
+                "chunk collection 仅保留 id/doc_id/kb_id/content，不支持 data_type/status 过滤"
+            )
 
         raw_filters = dict(filters or {})
         invalid_fields = sorted(set(raw_filters) - CHUNK_ALLOWED_FILTER_FIELDS)
         if invalid_fields:
-            raise ValueError(f"chunk collection 仅支持按 doc_id 过滤，不支持字段: {', '.join(invalid_fields)}")
+            raise ValueError(
+                f"chunk collection 仅支持按 doc_id/kb_id 过滤，不支持字段: {', '.join(invalid_fields)}"
+            )
         filter_conditions = list(build_scalar_filters(raw_filters))
         if document_id is not None:
-            filter_conditions.append(FilterCondition(field="doc_id", op=FilterOperator.EQ, value=document_id))
+            filter_conditions.append(
+                FilterCondition(field="doc_id", op=FilterOperator.EQ, value=document_id)
+            )
 
         if query_embedding is None:
             hits = await self.search_by_text(
@@ -161,6 +179,7 @@ class ChunkVectorRepository(BaseVectorRepository[ChunkVectorDocument]):
                 {
                     "id": hit.id,
                     "doc_id": metadata.get("doc_id"),
+                    "kb_id": metadata.get("kb_id"),
                     "content": hit.text or "",
                     "score": score,
                     "metadata": metadata,
@@ -169,7 +188,9 @@ class ChunkVectorRepository(BaseVectorRepository[ChunkVectorDocument]):
         return results
 
 
-async def new_chunk_repository(*, embedder: Embedder, scope_value: ScopeValue | None = None) -> ChunkVectorRepository:
+async def new_chunk_repository(
+    *, embedder: Embedder, scope_value: ScopeValue | None = None
+) -> ChunkVectorRepository:
     repository = ChunkVectorRepository(
         backend=create_backend(provider=BackendProvider.MILVUS),
         embedder=embedder,

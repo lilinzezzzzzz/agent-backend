@@ -8,7 +8,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 if "pkg.vectors" not in sys.modules:
     vectors_package = types.ModuleType("pkg.vectors")
-    vectors_package.__path__ = [str(Path(__file__).resolve().parents[3] / "pkg" / "vectors")]
+    vectors_package.__path__ = [
+        str(Path(__file__).resolve().parents[3] / "pkg" / "vectors")
+    ]
     sys.modules["pkg.vectors"] = vectors_package
 
 if "zvec" not in sys.modules:
@@ -40,9 +42,11 @@ if "zvec" not in sys.modules:
     zvec_module.create_and_open = MagicMock()
     sys.modules["zvec"] = zvec_module
 
-import pkg.vectors.repositories.chunks as chunks_module
+import internal.vectors.chunks as chunks_module
 from pkg.vectors.backends.base import IsolationMode
-from pkg.vectors.repositories.chunks import ChunkVectorRepository, new_chunk_repository
+from pkg.vectors.contracts import FilterOperator, SearchHit
+
+from internal.vectors.chunks import ChunkVectorRepository, new_chunk_repository
 
 
 def test_chunk_repository_enables_full_text_search_by_default():
@@ -64,6 +68,37 @@ def test_chunk_repository_disables_vector_isolation_by_default():
     assert repo.collection_spec.isolation_mode == IsolationMode.NONE
     assert repo.scope_field is None
     assert repo.build_scope_filters() == []
+
+
+def test_chunk_repository_supports_kb_id_as_regular_filter():
+    repo = ChunkVectorRepository(
+        backend=MagicMock(),
+        embedder=MagicMock(),
+    )
+    repo.search_by_text = AsyncMock(
+        return_value=[
+            SearchHit(
+                id=1,
+                text="发票开具完成后会通知用户",
+                metadata={"doc_id": 10, "kb_id": 2},
+                relevance_score=0.9,
+            )
+        ]
+    )
+
+    results = asyncio.run(
+        repo.search_similar(
+            query_text="发票通知",
+            filters={"kb_id": [2, 3]},
+            similarity_threshold=0.1,
+        )
+    )
+
+    assert results[0]["kb_id"] == 2
+    filters = repo.search_by_text.call_args.kwargs["filters"]
+    assert filters[0].field == "kb_id"
+    assert filters[0].op == FilterOperator.IN
+    assert filters[0].value == [2, 3]
 
 
 def test_new_chunk_repository_requires_embedder(monkeypatch):

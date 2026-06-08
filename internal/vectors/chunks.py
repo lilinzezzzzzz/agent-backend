@@ -20,6 +20,7 @@ from pkg.vectors.backends.milvus.types import (
 from pkg.vectors.contracts import (
     FilterCondition,
     FilterOperator,
+    ScalarValue,
     SearchHit,
     VectorRecord,
 )
@@ -89,7 +90,7 @@ class ChunkVectorRepository(BaseVectorRepository[ChunkVectorDocument]):
         return []
 
     def to_records(self, *, entity: ChunkVectorDocument) -> list[VectorRecord]:
-        metadata: dict[str, int | str] = {
+        metadata: dict[str, ScalarValue] = {
             "doc_id": entity.doc_id,
             "domain": entity.domain,
             "chunk_index": entity.chunk_index,

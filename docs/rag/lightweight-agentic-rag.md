@@ -81,7 +81,7 @@ flowchart TD
 
 | 组件 | 职责 |
 | --- | --- |
-| Request Preprocess | 用户、租户、知识库、权限、语言和请求参数解析 |
+| Request Preprocess | 用户、repository scope、知识库、权限、语言和请求参数解析 |
 | ReAct Controller | 决定下一步 action，控制最大轮数和预算 |
 | Retrieval Tool | 封装 Advanced RAG 检索能力 |
 | Evidence Store | 保存本次调用已检索证据和引用元数据 |
@@ -97,7 +97,7 @@ flowchart TD
 
 ```text
 1. 解析请求上下文
-2. 加载用户权限和知识库范围
+2. 加载用户权限、repository scope 和知识库范围
 3. 初始化 ReAct state
 4. LLM 判断下一步 action
 5. 如果 action = retrieve，调用受控检索工具
@@ -117,10 +117,14 @@ flowchart TD
 RagRunState
 - request_id
 - user_id
-- tenant_id
+- scope_field
+- scope_value
 - query
 - normalized_query
+- allowed_domains
 - allowed_kb_ids
+- effective_domains
+- effective_kb_ids
 - max_steps
 - current_step
 - token_budget
@@ -180,7 +184,14 @@ retrieve
 - `knowledge_scope` 必须来自服务端允许列表，不能完全由模型自由指定。
 - `filters` 必须经过服务端白名单校验。
 - `top_k` 有上限。
-- 检索前必须应用租户、用户和知识库权限。
+- 检索前必须应用 repository scope、用户权限和知识库过滤。
+- `scope_field` 和 `scope_value` 由服务端 repository 初始化决定，不作为模型 action 参数开放。
+
+当前知识库检索已经使用 `BaseVectorRepository` 的 `scope_field + scope_value`
+作为 shared-filter 隔离边界。`scope_field` 必须出现在
+`collection_spec.scalar_fields` 中，`scope_value` 只能是与字段类型匹配的
+`int` 或 `str`。`kb_id`、`domain`、`doc_id` 仍作为业务 metadata filter，
+不能替代 repository scope 隔离。
 
 ### 4.3 `answer` 参数
 
@@ -373,6 +384,7 @@ missing_evidence: string[]
 
 ```text
 resolve user ACL
+-> apply scope_field + scope_value
 -> retrieve allowed chunks only
 -> rerank
 -> build context
@@ -416,9 +428,13 @@ ReAct 工具必须是白名单：
 
 ```text
 request_id
-user_id / tenant_id
+user_id
+scope_field
+scope_value
 query
 normalized_query
+effective_domains
+effective_kb_ids
 step_count
 actions
 tool_args

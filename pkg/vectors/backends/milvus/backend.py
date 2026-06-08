@@ -5,6 +5,7 @@ import logging
 import threading
 import time
 from collections.abc import Awaitable, Callable, Sequence
+from typing import Any, cast
 
 import anyio
 import grpc
@@ -122,8 +123,8 @@ class MilvusBackend(BaseVectorBackend):
 
         return await anyio_run_in_thread(_run_operation)
 
-    async def _call_client_method[T](self, method_name: str, /, **kwargs: object) -> T:
-        def _run_method(client: MilvusClient) -> T:
+    async def _call_client_method(self, method_name: str, /, **kwargs: object) -> object:
+        def _run_method(client: MilvusClient) -> object:
             method = getattr(client, method_name)
             return method(**kwargs)
 
@@ -147,7 +148,9 @@ class MilvusBackend(BaseVectorBackend):
             await self._reset_client_state()
             return await operation()
 
-    async def _reset_client_state(self, *, stale_client: MilvusClient | None = None) -> None:
+    async def _reset_client_state(
+        self, *, stale_client: MilvusClient | None = None
+    ) -> None:
         async with self._recovery_lock:
             client = self._client
             if stale_client is not None and client is not stale_client:
@@ -181,7 +184,9 @@ class MilvusBackend(BaseVectorBackend):
     @staticmethod
     def _require_spec(*, spec: CollectionSpec) -> MilvusCollectionSpec:
         if not isinstance(spec, MilvusCollectionSpec):
-            raise TypeError(f"Milvus backend 需要 MilvusCollectionSpec，实际收到: {type(spec).__name__}")
+            raise TypeError(
+                f"Milvus backend 需要 MilvusCollectionSpec，实际收到: {type(spec).__name__}"
+            )
         return spec
 
     # ------------------------------------------------------------------
@@ -201,15 +206,19 @@ class MilvusBackend(BaseVectorBackend):
 
                 exists = spec.name in self._loaded_collections
                 if not exists:
-                    exists = await self._call_client_method(
-                        "has_collection",
-                        collection_name=spec.name,
+                    exists = bool(
+                        await self._call_client_method(
+                            "has_collection",
+                            collection_name=spec.name,
+                        )
                     )
 
                 if exists:
                     await self._validate_existing_collection(spec=spec)
                     await self._load_collection_if_needed(collection_name=spec.name)
-                    logger.debug("milvus collection validated and loaded: %s", spec.name)
+                    logger.debug(
+                        "milvus collection validated and loaded: %s", spec.name
+                    )
                 else:
                     schema = build_schema(spec=spec)
                     index_params = build_index_params(client=self.client, spec=spec)
@@ -302,7 +311,9 @@ class MilvusBackend(BaseVectorBackend):
     # Data operations
     # ------------------------------------------------------------------
 
-    async def upsert(self, *, spec: CollectionSpec, records: Sequence[VectorRecord]) -> None:
+    async def upsert(
+        self, *, spec: CollectionSpec, records: Sequence[VectorRecord]
+    ) -> None:
         spec = self._require_spec(spec=spec)
 
         async def _run() -> None:
@@ -335,21 +346,32 @@ class MilvusBackend(BaseVectorBackend):
 
             expr = build_filter_expression(spec=spec, ids=ids, filters=filters)
             if ids is not None and len(ids) > 0 and not filters:
-                result = await self._call_client_method(
-                    "delete",
-                    collection_name=spec.name,
-                    ids=list(ids),
+                result = cast(
+                    dict[str, object],
+                    await self._call_client_method(
+                        "delete",
+                        collection_name=spec.name,
+                        ids=list(ids),
+                    ),
                 )
             elif expr:
-                result = await self._call_client_method(
-                    "delete",
-                    collection_name=spec.name,
-                    filter=expr,
+                result = cast(
+                    dict[str, object],
+                    await self._call_client_method(
+                        "delete",
+                        collection_name=spec.name,
+                        filter=expr,
+                    ),
                 )
             else:
                 return 0
 
-            return int(result.get("delete_count", 0))
+            delete_count = result.get("delete_count", 0)
+            if isinstance(delete_count, bool):
+                return int(delete_count)
+            if isinstance(delete_count, (int, float, str)):
+                return int(delete_count)
+            return 0
 
         return await self._run_with_recovery("delete", _run)
 
@@ -368,7 +390,9 @@ class MilvusBackend(BaseVectorBackend):
             if not await self._load_collection_if_exists(collection_name=spec.name):
                 return []
             if not ids and not filters:
-                raise ValueError("fetch 需要至少提供 ids 或 filters，禁止无条件整表扫描")
+                raise ValueError(
+                    "fetch 需要至少提供 ids 或 filters，禁止无条件整表扫描"
+                )
 
             output_fields = build_fetch_output_fields(spec=spec)
             expr = build_filter_expression(spec=spec, ids=ids, filters=filters)
@@ -377,24 +401,30 @@ class MilvusBackend(BaseVectorBackend):
                 override=consistency_level,
             )
             if ids is not None and len(ids) > 0 and not filters:
-                rows = await self._call_client_method(
-                    "query",
-                    collection_name=spec.name,
-                    ids=list(ids),
-                    output_fields=output_fields,
-                    consistency_level=resolved_consistency_level,
+                rows = cast(
+                    list[dict[str, Any]],
+                    await self._call_client_method(
+                        "query",
+                        collection_name=spec.name,
+                        ids=list(ids),
+                        output_fields=output_fields,
+                        consistency_level=resolved_consistency_level,
+                    ),
                 )
             else:
                 query_kwargs: dict[str, object] = {}
                 if limit is not None:
                     query_kwargs["limit"] = limit
-                rows = await self._call_client_method(
-                    "query",
-                    collection_name=spec.name,
-                    filter=expr,
-                    output_fields=output_fields,
-                    consistency_level=resolved_consistency_level,
-                    **query_kwargs,
+                rows = cast(
+                    list[dict[str, Any]],
+                    await self._call_client_method(
+                        "query",
+                        collection_name=spec.name,
+                        filter=expr,
+                        output_fields=output_fields,
+                        consistency_level=resolved_consistency_level,
+                        **query_kwargs,
+                    ),
                 )
 
             records = [row_to_record(spec=spec, row=row) for row in rows]
@@ -413,7 +443,9 @@ class MilvusBackend(BaseVectorBackend):
 
         return await self._run_with_recovery("healthcheck", _run)
 
-    async def search(self, *, spec: CollectionSpec, request: SearchRequest) -> list[SearchHit]:
+    async def search(
+        self, *, spec: CollectionSpec, request: SearchRequest
+    ) -> list[SearchHit]:
         spec = self._require_spec(spec=spec)
 
         async def _run() -> list[SearchHit]:
@@ -467,21 +499,6 @@ class MilvusBackend(BaseVectorBackend):
 
         return await self._run_with_recovery("search", _run)
 
-    async def _load_collection_if_exists(self, *, collection_name: str) -> bool:
-        if collection_name in self._loaded_collections:
-            return True
-
-        async with self._get_collection_lock(collection_name=collection_name):
-            if collection_name in self._loaded_collections:
-                return True
-
-            exists = await self._collection_exists(collection_name=collection_name)
-            if not exists:
-                return False
-
-            await self._load_collection_if_needed(collection_name=collection_name)
-            return True
-
     # ------------------------------------------------------------------
     # Search planning and execution
     # ------------------------------------------------------------------
@@ -489,7 +506,7 @@ class MilvusBackend(BaseVectorBackend):
     def _build_search_params(
         self,
         *,
-        spec: CollectionSpec,
+        spec: MilvusCollectionSpec,
         request: SearchRequest,
     ) -> dict[str, object]:
         search_params = dict(self._default_search_params)
@@ -503,7 +520,7 @@ class MilvusBackend(BaseVectorBackend):
     def _build_search_plan(
         self,
         *,
-        spec: CollectionSpec,
+        spec: MilvusCollectionSpec,
         request: SearchRequest,
         expr: str,
         output_fields: list[str],
@@ -528,7 +545,9 @@ class MilvusBackend(BaseVectorBackend):
                         name=RetrievalMode.DENSE.value,
                         anns_field=spec.vector_field,
                         data=[request.vector],
-                        search_params=self._build_search_params(spec=spec, request=request),
+                        search_params=self._build_search_params(
+                            spec=spec, request=request
+                        ),
                         limit=request.top_k,
                     ),
                 ),
@@ -589,9 +608,9 @@ class MilvusBackend(BaseVectorBackend):
     async def _execute_search_plan(
         self,
         *,
-        spec: CollectionSpec,
+        spec: MilvusCollectionSpec,
         plan: SearchExecutionPlan,
-    ) -> list[list[dict]]:
+    ) -> list[list[dict[str, Any]]]:
         if plan.mode == RetrievalMode.HYBRID:
             reqs = [
                 AnnSearchRequest(
@@ -603,27 +622,33 @@ class MilvusBackend(BaseVectorBackend):
                 )
                 for branch in plan.branches
             ]
-            return await self._call_client_method(
-                "hybrid_search",
-                collection_name=spec.name,
-                reqs=reqs,
-                ranker=plan.ranker,
-                limit=plan.final_limit,
-                output_fields=list(plan.output_fields),
-                consistency_level=plan.consistency_level,
+            return cast(
+                list[list[dict[str, Any]]],
+                await self._call_client_method(
+                    "hybrid_search",
+                    collection_name=spec.name,
+                    reqs=reqs,
+                    ranker=plan.ranker,
+                    limit=plan.final_limit,
+                    output_fields=list(plan.output_fields),
+                    consistency_level=plan.consistency_level,
+                ),
             )
 
         branch = plan.branches[0]
-        return await self._call_client_method(
-            "search",
-            collection_name=spec.name,
-            data=branch.data,
-            filter=plan.expr,
-            limit=plan.final_limit,
-            output_fields=list(plan.output_fields),
-            search_params=branch.search_params,
-            anns_field=branch.anns_field,
-            consistency_level=plan.consistency_level,
+        return cast(
+            list[list[dict[str, Any]]],
+            await self._call_client_method(
+                "search",
+                collection_name=spec.name,
+                data=branch.data,
+                filter=plan.expr,
+                limit=plan.final_limit,
+                output_fields=list(plan.output_fields),
+                search_params=branch.search_params,
+                anns_field=branch.anns_field,
+                consistency_level=plan.consistency_level,
+            ),
         )
 
     def _build_sparse_search_params(
@@ -660,7 +685,7 @@ class MilvusBackend(BaseVectorBackend):
     def _resolve_retrieval_mode(
         self,
         *,
-        spec: CollectionSpec,
+        spec: MilvusCollectionSpec,
         request: SearchRequest,
     ) -> RetrievalMode:
         if request.retrieval_mode == RetrievalMode.AUTO:
@@ -675,7 +700,9 @@ class MilvusBackend(BaseVectorBackend):
                 return RetrievalMode.DENSE
             if request.query_text:
                 if not spec.full_text_search.enabled:
-                    raise ValueError("query_text 检索要求 collection 启用 BM25/full-text search")
+                    raise ValueError(
+                        "query_text 检索要求 collection 启用 BM25/full-text search"
+                    )
                 return RetrievalMode.FULL_TEXT
             raise ValueError("至少需要提供 query vector 或 query_text")
 
@@ -689,7 +716,7 @@ class MilvusBackend(BaseVectorBackend):
     @staticmethod
     def _resolve_consistency_level(
         *,
-        spec: CollectionSpec,
+        spec: MilvusCollectionSpec,
         override: object | None,
     ) -> str:
         resolved = override if override is not None else spec.consistency_level

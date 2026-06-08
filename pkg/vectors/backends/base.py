@@ -32,7 +32,6 @@ class CollectionName:
 
 class BackendProvider(StrEnum):
     MILVUS = "milvus"
-    ZVEC = "zvec"
 
     @classmethod
     def is_valid(cls, value: object) -> BackendProvider:
@@ -133,7 +132,9 @@ class CollectionSpec(BaseModel, extra="forbid"):
     vector_field: str = "embedding"  # 向量字段名
     payload_field: str | None = "payload"  # JSON payload 字段名，None 表示不使用
     # ========== 扩展字段 ==========
-    scalar_fields: list[ScalarFieldSpec] = Field(default_factory=list)  # 标量元数据字段列表
+    scalar_fields: list[ScalarFieldSpec] = Field(
+        default_factory=list
+    )  # 标量元数据字段列表
 
     # ========== 索引配置 ==========
     index_config: IndexConfig = Field(default_factory=IndexConfig)
@@ -149,7 +150,9 @@ class VectorBackend(ABC):
         """确保 collection 已存在且满足约束。"""
 
     @abstractmethod
-    async def upsert(self, *, spec: CollectionSpec, records: Sequence[VectorRecord]) -> None:
+    async def upsert(
+        self, *, spec: CollectionSpec, records: Sequence[VectorRecord]
+    ) -> None:
         """批量写入记录，必要时自动准备 collection。"""
 
     @abstractmethod
@@ -175,7 +178,9 @@ class VectorBackend(ABC):
         """按 id 或过滤条件获取记录。"""
 
     @abstractmethod
-    async def search(self, *, spec: CollectionSpec, request: SearchRequest) -> list[SearchHit]:
+    async def search(
+        self, *, spec: CollectionSpec, request: SearchRequest
+    ) -> list[SearchHit]:
         """执行向量检索。"""
 
     @abstractmethod
@@ -195,12 +200,16 @@ class BaseVectorBackend(VectorBackend):
                 f"record embedding 维度不匹配: got={len(record.embedding)}, expected={spec.dimension}, id={record.id}"
             )
 
-    def validate_records(self, *, spec: CollectionSpec, records: Sequence[VectorRecord]) -> None:
+    def validate_records(
+        self, *, spec: CollectionSpec, records: Sequence[VectorRecord]
+    ) -> None:
         for record in records:
             self.validate_record(spec=spec, record=record)
 
     @staticmethod
-    def validate_search_request(*, spec: CollectionSpec, request: SearchRequest) -> None:
+    def validate_search_request(
+        *, spec: CollectionSpec, request: SearchRequest
+    ) -> None:
         if request.vector is not None and len(request.vector) != spec.dimension:
             raise InvalidEmbeddingDimensionError(
                 f"query embedding 维度不匹配: got={len(request.vector)}, expected={spec.dimension}"

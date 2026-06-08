@@ -4,7 +4,9 @@ from collections.abc import Mapping
 from typing import Any
 
 from internal.services.order import OrderService
+from internal.services.rag import RagService
 from pkg.agents import StructuredTool
+from pkg.vectors.contracts import RetrievalMode
 
 
 def build_get_order_status_tool(
@@ -52,8 +54,18 @@ def build_get_return_policy_tool() -> StructuredTool:
     )
 
 
-def build_search_order_knowledge_tool() -> StructuredTool:
+def build_search_order_knowledge_tool(
+    *, rag_service: RagService, user_id: int
+) -> StructuredTool:
     """创建订单知识检索工具。"""
+
+    async def search_order_knowledge(args: Mapping[str, Any]) -> dict[str, Any]:
+        return await _search_order_knowledge(
+            args,
+            rag_service=rag_service,
+            user_id=user_id,
+        )
+
     return StructuredTool(
         name="search_order_knowledge",
         description="检索订单、物流、售后和发票相关知识，返回可用于回答用户的知识片段和来源。",
@@ -70,10 +82,15 @@ def build_search_order_knowledge_tool() -> StructuredTool:
                     "minimum": 1,
                     "maximum": 5,
                 },
+                "kb_ids": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "description": "可选知识库 ID 列表；最终范围仍由服务端 allowed scope 求交得到",
+                },
             },
             "required": ["query"],
         },
-        handler=_search_order_knowledge,
+        handler=search_order_knowledge,
     )
 
 
@@ -179,7 +196,12 @@ def _get_return_policy(args: Mapping[str, Any]) -> dict[str, Any]:
     return {"ok": True, "category": category, **return_policy}
 
 
-def _search_order_knowledge(args: Mapping[str, Any]) -> dict[str, Any]:
+async def _search_order_knowledge(
+    args: Mapping[str, Any],
+    *,
+    rag_service: RagService,
+    user_id: int,
+) -> dict[str, Any]:
     query = str(args.get("query") or "").strip()
     if not query:
         return {"ok": False, "error": "query is required"}
@@ -190,60 +212,33 @@ def _search_order_knowledge(args: Mapping[str, Any]) -> dict[str, Any]:
         return {"ok": False, "error": "top_k must be an integer"}
     top_k = max(1, min(top_k, 5))
 
-    # 模拟 RAG 知识库检索：真实业务应替换为文档切片、Embedding 和向量数据库检索。
-    knowledge_chunks: list[dict[str, Any]] = [
-        {
-            "id": "order_invoice_guide",
-            "title": "电子发票开具与通知",
-            "content": (
-                "开票申请提交后通常会在 1-3 个工作日内完成。电子发票开具完成后，"
-                "系统会通过站内信通知用户，并发送到申请时填写的邮箱。"
-            ),
-            "source": "订单帮助中心/发票服务",
-            "keywords": ("发票", "开票", "电子发票", "税号", "抬头", "邮箱"),
-        },
-        {
-            "id": "order_logistics_exception",
-            "title": "物流长时间未更新处理方式",
-            "content": (
-                "物流轨迹超过 48 小时未更新时，可以提交物流核查。核查期间订单状态"
-                "不会自动变更，处理结果会通过站内信通知用户。"
-            ),
-            "source": "订单帮助中心/物流服务",
-            "keywords": ("物流", "轨迹", "未更新", "运输", "快递", "核查"),
-        },
-        {
-            "id": "order_return_process",
-            "title": "订单退货处理流程",
-            "content": (
-                "用户提交退货申请后，需要按页面提示寄回商品。仓库验收通过后进入退款流程，"
-                "实际到账时间取决于原支付渠道。"
-            ),
-            "source": "订单帮助中心/售后服务",
-            "keywords": ("退货", "售后", "退款", "寄回", "验收", "到账"),
-        },
-    ]
+    kb_ids, error = _read_kb_ids(args)
+    if error:
+        return {"ok": False, "error": error}
+    retrieval = await rag_service.retrieve(
+        user_id=user_id,
+        query=query,
+        requested_domain="order",
+        requested_kb_ids=kb_ids,
+        top_k=max(top_k, 5),
+        final_k=top_k,
+        retrieval_mode=RetrievalMode.HYBRID,
+    )
+    return retrieval.to_action_result()
 
-    matches = [
-        {
-            "id": chunk["id"],
-            "title": chunk["title"],
-            "content": chunk["content"],
-            "source": chunk["source"],
-            "score": score,
-        }
-        for chunk in knowledge_chunks
-        if (score := sum(keyword in query for keyword in chunk["keywords"])) > 0
-    ]
-    matches.sort(key=lambda item: item["score"], reverse=True)
-    matches = matches[:top_k]
 
-    return {
-        "ok": True,
-        "query": query,
-        "matches": matches,
-        "total": len(matches),
-    }
+def _read_kb_ids(args: Mapping[str, Any]) -> tuple[list[int] | None, str | None]:
+    raw_value = args.get("kb_ids")
+    if raw_value is None:
+        return None, None
+    if not isinstance(raw_value, list):
+        return None, "kb_ids must be an array of integers"
+    kb_ids: list[int] = []
+    for item in raw_value:
+        if not isinstance(item, int) or isinstance(item, bool) or item <= 0:
+            return None, "kb_ids must be positive integers"
+        kb_ids.append(item)
+    return kb_ids, None
 
 
 def _calculate_refund_amount(args: Mapping[str, Any]) -> dict[str, Any]:

@@ -1,9 +1,11 @@
+"""Vector package public exports."""
+
+from __future__ import annotations
+
 from pkg.vectors.backends import (
-    BACKEND_BUILDERS,
     BackendProvider,
     BaseVectorBackend,
     CollectionSpec,
-    ConsistencyLevel,
     IsolationMode,
     MetricType,
     MilvusBackend,
@@ -25,6 +27,7 @@ from pkg.vectors.context_assembly import (
     DocumentContextAssembler,
 )
 from pkg.vectors.contracts import (
+    ConsistencyLevel,
     FilterCondition,
     FilterOperator,
     SearchHit,
@@ -60,14 +63,15 @@ from pkg.vectors.post_retrieval import (
 from pkg.vectors.repositories import BaseVectorRepository, ScopeValue
 
 __all__ = [
-    "BACKEND_BUILDERS",
-    "BackendProvider",
-    "BaseVectorBackend",
-    "BaseVectorRepository",
     "AssembledContextChunk",
     "AssembledContextWindow",
     "AssembledDocumentContext",
+    "BackendProvider",
+    "BaseVectorBackend",
+    "BaseVectorRepository",
     "CapabilityNotSupportedError",
+    "CollapseConfig",
+    "CollapsedSearchHit",
     "CollectionSchemaMismatchError",
     "CollectionSpec",
     "ConsistencyLevel",
@@ -77,25 +81,23 @@ __all__ = [
     "ContextBudgetConfig",
     "ContextHeaderConfig",
     "ContextWindowConfig",
+    "DedupConfig",
+    "DedupKeepStrategy",
     "DocumentContextAssembler",
     "EMBEDDER_BUILDERS",
     "EmbedderProvider",
     "FilterCondition",
     "FilterOperator",
-    "IsolationMode",
     "InvalidEmbeddingDimensionError",
-    "OpenAICompatibleEmbedder",
+    "IsolationMode",
     "MetricType",
     "MilvusBackend",
-    "CollapseConfig",
-    "CollapsedSearchHit",
-    "DedupConfig",
-    "DedupKeepStrategy",
-    "RecordValidationError",
+    "OpenAICompatibleEmbedder",
     "PostRetrievalConfig",
     "PostRetrievalPipeline",
     "PostRetrievalResult",
     "PostRetrievalStats",
+    "RecordValidationError",
     "ScalarDataType",
     "ScalarFieldSpec",
     "ScopeValue",

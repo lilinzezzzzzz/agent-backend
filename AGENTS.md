@@ -17,7 +17,7 @@
 - Celery + Beat
 - anyio
 - Loguru
-- 向量后端：`zvec`、`pymilvus`
+- 向量后端：`pymilvus`
 
 ## 目录结构
 

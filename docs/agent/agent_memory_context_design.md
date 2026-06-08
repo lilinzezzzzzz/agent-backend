@@ -131,7 +131,7 @@ flowchart TD
 | 原始事件 | 保存用户消息、assistant 输出、工具调用、工具结果引用 | PostgreSQL |
 | 会话状态 | 保存当前目标、阶段、摘要、工作状态 | PostgreSQL + Redis |
 | 长期记忆 | 保存偏好、事实、规则、决策、长期摘要 | PostgreSQL |
-| 向量索引 | 保存可检索 chunk 和 embedding | Milvus / pgvector / zvec |
+| 向量索引 | 保存可检索 chunk 和 embedding | Milvus / pgvector |
 | 大对象 | 保存长日志、文件、完整工具响应 | Object Storage / PostgreSQL 大字段按需 |
 | Prompt 快照 | 可选保存本轮最终 prompt 摘要或 hash，用于审计 | PostgreSQL |
 

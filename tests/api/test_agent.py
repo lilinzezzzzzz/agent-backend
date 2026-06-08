@@ -31,7 +31,9 @@ from internal.services.dto.agent import (
     AgentStreamEventDTO,
     AgentStreamEventName,
 )
+from internal.services.dto.rag import RagEvidenceDTO, RagRetrievalDTO
 from internal.services.order import OrderService
+from pkg.vectors.contracts import RetrievalMode
 from pkg.toolkit import context
 
 
@@ -288,6 +290,55 @@ class FakeAgentAuditService:
         return True
 
 
+class FakeRagService:
+    def __init__(self):
+        self.calls: list[dict[str, Any]] = []
+
+    async def retrieve(self, **kwargs: Any) -> RagRetrievalDTO:
+        self.calls.append(kwargs)
+        requested_domain = kwargs.get("requested_domain")
+        title = (
+            "付款失败常见原因"
+            if requested_domain == "payment"
+            else "电子发票开具与通知"
+        )
+        source_uri = (
+            "payment/help/failed"
+            if requested_domain == "payment"
+            else "order/help/invoice"
+        )
+        content = (
+            "付款失败通常与余额不足、银行卡限额、渠道风控、网络超时或收银台订单过期有关。"
+            if requested_domain == "payment"
+            else "开票申请提交后通常会在 1-3 个工作日内完成，完成后会通知用户。"
+        )
+        return RagRetrievalDTO(
+            run_id="rag_run_test",
+            trace_id="trace_test",
+            query=kwargs["query"],
+            requested_domain=requested_domain,
+            requested_kb_ids=kwargs.get("requested_kb_ids"),
+            effective_domains=[requested_domain],
+            effective_kb_ids=[2],
+            retrieval_mode=RetrievalMode.HYBRID,
+            evidence=[
+                RagEvidenceDTO(
+                    evidence_id="ev_001",
+                    chunk_id=1001,
+                    doc_id=10,
+                    kb_id=2,
+                    title=title,
+                    source_uri=source_uri,
+                    document_version="v1",
+                    text_hash="sha256:test",
+                    content_excerpt=content,
+                    score=0.91,
+                    retrieval_mode="hybrid",
+                )
+            ],
+        )
+
+
 def _new_order_service(
     action_store: FakeAgentActionStore | None = None,
 ) -> OrderService:
@@ -304,13 +355,16 @@ def _new_order_agent_service(
     return OrderAgentService(
         llm_client=llm_client,
         order_service=_new_order_service(action_store),
+        rag_service=FakeRagService(),
         audit_service=FakeAgentAuditService(),
     )
 
 
 def _new_payment_agent_service(llm_client: FakeLLMClient) -> PaymentAgentService:
     return PaymentAgentService(
-        llm_client=llm_client, audit_service=FakeAgentAuditService()
+        llm_client=llm_client,
+        rag_service=FakeRagService(),
+        audit_service=FakeAgentAuditService(),
     )
 
 
@@ -337,6 +391,7 @@ def test_order_agent_system_prompt_names_all_registered_tools() -> None:
     builder = OrderAgentBuilder(
         llm_client=FakeLLMClient([]),
         order_service=_new_order_service(),
+        rag_service=FakeRagService(),
         user_id=999,
         max_steps=3,
     )
@@ -367,6 +422,8 @@ def test_order_agent_system_prompt_defines_when_tools_are_optional() -> None:
 def test_payment_agent_system_prompt_names_all_registered_tools() -> None:
     builder = PaymentAgentBuilder(
         llm_client=FakeLLMClient([]),
+        rag_service=FakeRagService(),
+        user_id=999,
         max_steps=3,
     )
     registered_tools = builder.build_tools()
@@ -815,7 +872,9 @@ async def test_payment_agent_service_runs_react_with_tools() -> None:
     assert action_result["ok"] is True
     assert action_result["query"] == "支付失败怎么办？"
     assert action_result["total"] == 1
-    assert action_result["matches"][0]["id"] == "payment_failed_common_causes"
+    assert action_result["matches"][0]["evidence_id"] == "ev_001"
+    assert action_result["matches"][0]["chunk_id"] == 1001
+    assert action_result["matches"][0]["title"] == "付款失败常见原因"
     assert len(llm_client.calls) == 2
     assert llm_client.calls[0]["response_model"] is LLMActionModel
 
@@ -1039,8 +1098,9 @@ async def test_order_agent_service_searches_mock_rag_knowledge() -> None:
     assert action_result["ok"] is True
     assert action_result["query"] == "电子发票多久能开好？"
     assert action_result["total"] == 1
-    assert action_result["matches"][0]["id"] == "order_invoice_guide"
-    assert action_result["matches"][0]["source"] == "订单帮助中心/发票服务"
+    assert action_result["matches"][0]["evidence_id"] == "ev_001"
+    assert action_result["matches"][0]["chunk_id"] == 1001
+    assert action_result["matches"][0]["source_uri"] == "order/help/invoice"
     assert "1-3 个工作日" in action_result["matches"][0]["content"]
 
 

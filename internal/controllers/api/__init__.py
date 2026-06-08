@@ -1,12 +1,13 @@
 from fastapi import APIRouter
 
-from internal.controllers.api import agent, auth, user
+from internal.controllers.api import agent, auth, rag, user
 
 router = APIRouter(prefix="/v1")
 
 routers = [
     agent.router,
     auth.router,
+    rag.router,
     user.router,
 ]
 

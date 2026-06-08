@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from pkg.vectors.backends import create_backend
 from pkg.vectors.backends.base import (
     BackendProvider,
     CollectionName,
@@ -31,13 +30,15 @@ from pkg.vectors.repositories.base import (
     build_scalar_filters,
 )
 
-CHUNK_ALLOWED_FILTER_FIELDS = frozenset({"doc_id", "kb_id"})
+CHUNK_ALLOWED_FILTER_FIELDS = frozenset({"doc_id", "kb_id", "domain"})
 
 
 @dataclass(slots=True)
 class ChunkVectorDocument:
     id: int
     doc_id: int
+    domain: str
+    chunk_index: int
     text: str
     kb_id: int | None = None
 
@@ -63,6 +64,10 @@ class ChunkVectorRepository(BaseVectorRepository[ChunkVectorDocument]):
                 ScalarFieldSpec(
                     name="kb_id", data_type=ScalarDataType.INT64, nullable=True
                 ),
+                ScalarFieldSpec(
+                    name="domain", data_type=ScalarDataType.STRING, max_length=64
+                ),
+                ScalarFieldSpec(name="chunk_index", data_type=ScalarDataType.INT64),
             ],
             index_config=MilvusHnswIndexConfig(
                 params=MilvusHnswIndexParams(M=30, efConstruction=200)
@@ -84,7 +89,11 @@ class ChunkVectorRepository(BaseVectorRepository[ChunkVectorDocument]):
         return []
 
     def to_records(self, *, entity: ChunkVectorDocument) -> list[VectorRecord]:
-        metadata: dict[str, int] = {"doc_id": entity.doc_id}
+        metadata: dict[str, int | str] = {
+            "doc_id": entity.doc_id,
+            "domain": entity.domain,
+            "chunk_index": entity.chunk_index,
+        }
         if entity.kb_id is not None:
             metadata["kb_id"] = entity.kb_id
         return [
@@ -140,14 +149,14 @@ class ChunkVectorRepository(BaseVectorRepository[ChunkVectorDocument]):
     ) -> list[dict[str, Any]]:
         if data_type is not None or status is not None:
             raise ValueError(
-                "chunk collection 仅保留 id/doc_id/kb_id/content，不支持 data_type/status 过滤"
+                "chunk collection 仅保留 id/doc_id/kb_id/domain/chunk_index/content，不支持 data_type/status 过滤"
             )
 
         raw_filters = dict(filters or {})
         invalid_fields = sorted(set(raw_filters) - CHUNK_ALLOWED_FILTER_FIELDS)
         if invalid_fields:
             raise ValueError(
-                f"chunk collection 仅支持按 doc_id/kb_id 过滤，不支持字段: {', '.join(invalid_fields)}"
+                f"chunk collection 仅支持按 doc_id/kb_id/domain 过滤，不支持字段: {', '.join(invalid_fields)}"
             )
         filter_conditions = list(build_scalar_filters(raw_filters))
         if document_id is not None:
@@ -191,6 +200,8 @@ class ChunkVectorRepository(BaseVectorRepository[ChunkVectorDocument]):
 async def new_chunk_repository(
     *, embedder: Embedder, scope_value: ScopeValue | None = None
 ) -> ChunkVectorRepository:
+    from pkg.vectors.backends import create_backend
+
     repository = ChunkVectorRepository(
         backend=create_backend(provider=BackendProvider.MILVUS),
         embedder=embedder,

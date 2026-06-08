@@ -10,41 +10,24 @@ import pytest
 
 if "pkg.vectors" not in sys.modules:
     vectors_package = types.ModuleType("pkg.vectors")
-    vectors_package.__path__ = [str(Path(__file__).resolve().parents[3] / "pkg" / "vectors")]
+    vectors_package.__path__ = [
+        str(Path(__file__).resolve().parents[3] / "pkg" / "vectors")
+    ]
     sys.modules["pkg.vectors"] = vectors_package
 
-if "zvec" not in sys.modules:
-    zvec_module = types.ModuleType("zvec")
-    zvec_module.Collection = type("Collection", (), {})
-    zvec_module.CollectionOption = type("CollectionOption", (), {})
-    zvec_module.CollectionSchema = type("CollectionSchema", (), {})
-    zvec_module.Doc = type("Doc", (), {})
-    zvec_module.VectorQuery = type("VectorQuery", (), {})
-    zvec_module.DataType = types.SimpleNamespace(
-        STRING="STRING",
-        INT64="INT64",
-        DOUBLE="DOUBLE",
-        BOOL="BOOL",
-        VECTOR_FP32="VECTOR_FP32",
-    )
-    zvec_module.MetricType = types.SimpleNamespace(
-        COSINE="COSINE",
-        IP="IP",
-        L2="L2",
-    )
-    zvec_module.HnswIndexParam = type("HnswIndexParam", (), {})
-    zvec_module.IVFIndexParam = type("IVFIndexParam", (), {})
-    zvec_module.FlatIndexParam = type("FlatIndexParam", (), {})
-    zvec_module.InvertIndexParam = type("InvertIndexParam", (), {})
-    zvec_module.FieldSchema = type("FieldSchema", (), {})
-    zvec_module.VectorSchema = type("VectorSchema", (), {})
-    zvec_module.open = MagicMock()
-    zvec_module.create_and_open = MagicMock()
-    sys.modules["zvec"] = zvec_module
-
-from pkg.vectors.backends.base import CollectionSpec, IsolationMode, ScalarDataType, ScalarFieldSpec
+from pkg.vectors.backends.base import (
+    CollectionSpec,
+    IsolationMode,
+    ScalarDataType,
+    ScalarFieldSpec,
+)
 from pkg.vectors.context_assembly import DocumentContextAssembler
-from pkg.vectors.contracts import ConsistencyLevel, RetrievalMode, SearchHit, VectorRecord
+from pkg.vectors.contracts import (
+    ConsistencyLevel,
+    RetrievalMode,
+    SearchHit,
+    VectorRecord,
+)
 from pkg.vectors.post_retrieval import PostRetrievalPipeline
 from pkg.vectors.repositories.base import BaseVectorRepository
 
@@ -176,8 +159,12 @@ def test_scope_value_does_not_scope_queries_without_explicit_isolation_mode(
     assert request.filters == []
 
 
-def test_shared_filter_isolation_mode_adds_int_scope_filter(backend: MagicMock, embedder: MagicMock):
-    repo = SharedFilterScopeRepository(backend=backend, embedder=embedder, scope_value=1)
+def test_shared_filter_isolation_mode_adds_int_scope_filter(
+    backend: MagicMock, embedder: MagicMock
+):
+    repo = SharedFilterScopeRepository(
+        backend=backend, embedder=embedder, scope_value=1
+    )
 
     asyncio.run(repo.search_by_text(query_text="hello", top_k=1))
 
@@ -187,8 +174,12 @@ def test_shared_filter_isolation_mode_adds_int_scope_filter(backend: MagicMock, 
     assert request.filters[0].value == 1
 
 
-def test_shared_filter_isolation_mode_adds_string_scope_filter(backend: MagicMock, embedder: MagicMock):
-    repo = SharedFilterStringScopeRepository(backend=backend, embedder=embedder, scope_value="workspace-prod")
+def test_shared_filter_isolation_mode_adds_string_scope_filter(
+    backend: MagicMock, embedder: MagicMock
+):
+    repo = SharedFilterStringScopeRepository(
+        backend=backend, embedder=embedder, scope_value="workspace-prod"
+    )
 
     asyncio.run(repo.search_by_text(query_text="hello", top_k=1))
 
@@ -198,22 +189,32 @@ def test_shared_filter_isolation_mode_adds_string_scope_filter(backend: MagicMoc
     assert request.filters[0].value == "workspace-prod"
 
 
-def test_shared_filter_isolation_mode_requires_scope_field(backend: MagicMock, embedder: MagicMock):
-    repo = SharedFilterMissingScopeFieldRepository(backend=backend, embedder=embedder, scope_value=1)
+def test_shared_filter_isolation_mode_requires_scope_field(
+    backend: MagicMock, embedder: MagicMock
+):
+    repo = SharedFilterMissingScopeFieldRepository(
+        backend=backend, embedder=embedder, scope_value=1
+    )
 
     with pytest.raises(ValueError, match="scope_field"):
         repo.build_scope_filters()
 
 
-def test_shared_filter_isolation_mode_requires_scope_value(backend: MagicMock, embedder: MagicMock):
+def test_shared_filter_isolation_mode_requires_scope_value(
+    backend: MagicMock, embedder: MagicMock
+):
     repo = SharedFilterScopeRepository(backend=backend, embedder=embedder)
 
     with pytest.raises(ValueError, match="scope_value"):
         repo.build_scope_filters()
 
 
-def test_shared_filter_isolation_mode_requires_scalar_field(backend: MagicMock, embedder: MagicMock):
-    repo = SharedFilterMissingScalarFieldRepository(backend=backend, embedder=embedder, scope_value=1)
+def test_shared_filter_isolation_mode_requires_scalar_field(
+    backend: MagicMock, embedder: MagicMock
+):
+    repo = SharedFilterMissingScalarFieldRepository(
+        backend=backend, embedder=embedder, scope_value=1
+    )
 
     with pytest.raises(ValueError, match="scalar_fields"):
         repo.build_scope_filters()
@@ -223,14 +224,20 @@ def test_shared_filter_isolation_mode_rejects_mismatched_scope_value_type(
     backend: MagicMock,
     embedder: MagicMock,
 ):
-    repo = SharedFilterScopeRepository(backend=backend, embedder=embedder, scope_value="1")
+    repo = SharedFilterScopeRepository(
+        backend=backend, embedder=embedder, scope_value="1"
+    )
 
     with pytest.raises(TypeError, match="scope_value 必须是 int"):
         repo.build_scope_filters()
 
 
-def test_shared_filter_isolation_mode_rejects_bool_scope_value(backend: MagicMock, embedder: MagicMock):
-    repo = SharedFilterScopeRepository(backend=backend, embedder=embedder, scope_value=True)
+def test_shared_filter_isolation_mode_rejects_bool_scope_value(
+    backend: MagicMock, embedder: MagicMock
+):
+    repo = SharedFilterScopeRepository(
+        backend=backend, embedder=embedder, scope_value=True
+    )
 
     with pytest.raises(TypeError, match="不支持 bool"):
         repo.build_scope_filters()
@@ -240,7 +247,9 @@ def test_shared_filter_isolation_mode_rejects_unsupported_scope_field_type(
     backend: MagicMock,
     embedder: MagicMock,
 ):
-    repo = SharedFilterUnsupportedScopeTypeRepository(backend=backend, embedder=embedder, scope_value=1)
+    repo = SharedFilterUnsupportedScopeTypeRepository(
+        backend=backend, embedder=embedder, scope_value=1
+    )
 
     with pytest.raises(ValueError, match="只支持 INT64 或 STRING"):
         repo.build_scope_filters()
@@ -256,10 +265,14 @@ def test_fetch_by_ids_passes_consistency_level(backend: MagicMock, embedder: Mag
         )
     )
 
-    assert backend.fetch.await_args.kwargs["consistency_level"] == ConsistencyLevel.STRONG
+    assert (
+        backend.fetch.await_args.kwargs["consistency_level"] == ConsistencyLevel.STRONG
+    )
 
 
-def test_search_by_text_passes_consistency_level(backend: MagicMock, embedder: MagicMock):
+def test_search_by_text_passes_consistency_level(
+    backend: MagicMock, embedder: MagicMock
+):
     repo = DummyRepository(backend=backend, embedder=embedder)
 
     asyncio.run(

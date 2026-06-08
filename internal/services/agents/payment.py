@@ -19,13 +19,21 @@ from internal.services.agents.stream import (
     stream_event_from_run_event,
 )
 from internal.services.dto.agent import AgentRunDTO, AgentStreamEventDTO
+from internal.services.rag import RagService, new_rag_service
 from pkg.logger import logger
 from pkg.toolkit.string import uuid6_unique_str_id
 
 
 class PaymentAgentService:
-    def __init__(self, *, llm_client: AgentLLMClient, audit_service: AgentAuditWriter):
+    def __init__(
+        self,
+        *,
+        llm_client: AgentLLMClient,
+        rag_service: RagService,
+        audit_service: AgentAuditWriter,
+    ):
         self._llm_client = llm_client
+        self._rag_service = rag_service
         self._audit_service = audit_service
 
     async def answer_payment_support_question(
@@ -55,6 +63,8 @@ class PaymentAgentService:
                     llm_client=self._llm_client,
                     audit_context=audit_context,
                 ),
+                rag_service=self._rag_service,
+                user_id=user_id,
                 max_steps=max_steps,
             ).build()
             result = await agent.run(user_input=question)
@@ -119,6 +129,8 @@ class PaymentAgentService:
                     llm_client=self._llm_client,
                     audit_context=audit_context,
                 ),
+                rag_service=self._rag_service,
+                user_id=user_id,
                 max_steps=max_steps,
             ).build()
             async for run_event in agent.run_events(user_input=question):
@@ -168,6 +180,7 @@ def new_payment_agent_service() -> PaymentAgentService:
     if _payment_agent_service is None:
         _payment_agent_service = PaymentAgentService(
             llm_client=new_default_llm_client(),
+            rag_service=new_rag_service(),
             audit_service=new_agent_audit_service(),
         )
     return _payment_agent_service

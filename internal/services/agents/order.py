@@ -22,6 +22,7 @@ from internal.services.agents.stream import (
 from internal.services.dto.agent import AgentRunDTO
 from internal.services.dto.agent import AgentStreamEventDTO
 from internal.services.order import OrderService, new_order_service
+from internal.services.rag import RagService, new_rag_service
 from pkg.logger import logger
 from pkg.toolkit.string import uuid6_unique_str_id
 
@@ -32,10 +33,12 @@ class OrderAgentService:
         *,
         llm_client: AgentLLMClient,
         order_service: OrderService,
+        rag_service: RagService,
         audit_service: AgentAuditWriter,
     ):
         self._llm_client = llm_client
         self._order_service = order_service
+        self._rag_service = rag_service
         self._audit_service = audit_service
 
     async def answer_order_support_question(
@@ -78,6 +81,7 @@ class OrderAgentService:
                     audit_context=audit_context,
                 ),
                 order_service=self._order_service,
+                rag_service=self._rag_service,
                 user_id=user_id,
                 max_steps=max_steps,
             ).build()
@@ -159,6 +163,7 @@ class OrderAgentService:
                     audit_context=audit_context,
                 ),
                 order_service=self._order_service,
+                rag_service=self._rag_service,
                 user_id=user_id,
                 max_steps=max_steps,
             ).build()
@@ -210,6 +215,7 @@ def new_order_agent_service() -> OrderAgentService:
         _order_agent_service = OrderAgentService(
             llm_client=new_default_llm_client(),
             order_service=new_order_service(),
+            rag_service=new_rag_service(),
             audit_service=new_agent_audit_service(),
         )
     return _order_agent_service

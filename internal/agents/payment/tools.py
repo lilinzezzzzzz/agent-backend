@@ -3,7 +3,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from internal.services.rag import RagService
 from pkg.agents import StructuredTool
+from pkg.vectors.contracts import RetrievalMode
 
 
 def build_get_supported_payment_methods_tool() -> StructuredTool:
@@ -19,8 +21,18 @@ def build_get_supported_payment_methods_tool() -> StructuredTool:
     )
 
 
-def build_search_payment_knowledge_tool() -> StructuredTool:
+def build_search_payment_knowledge_tool(
+    *, rag_service: RagService, user_id: int
+) -> StructuredTool:
     """创建支付知识检索工具。"""
+
+    async def search_payment_knowledge(args: Mapping[str, Any]) -> dict[str, Any]:
+        return await _search_payment_knowledge(
+            args,
+            rag_service=rag_service,
+            user_id=user_id,
+        )
+
     return StructuredTool(
         name="search_payment_knowledge",
         description="检索支付失败、扣款异常、账单、分期和支付安全相关知识。",
@@ -37,10 +49,15 @@ def build_search_payment_knowledge_tool() -> StructuredTool:
                     "minimum": 1,
                     "maximum": 5,
                 },
+                "kb_ids": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "description": "可选知识库 ID 列表；最终范围仍由服务端 allowed scope 求交得到",
+                },
             },
             "required": ["query"],
         },
-        handler=_search_payment_knowledge,
+        handler=search_payment_knowledge,
     )
 
 
@@ -87,7 +104,12 @@ def _get_supported_payment_methods(_: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def _search_payment_knowledge(args: Mapping[str, Any]) -> dict[str, Any]:
+async def _search_payment_knowledge(
+    args: Mapping[str, Any],
+    *,
+    rag_service: RagService,
+    user_id: int,
+) -> dict[str, Any]:
     query = str(args.get("query") or "").strip()
     if not query:
         return {"ok": False, "error": "query is required"}
@@ -98,60 +120,40 @@ def _search_payment_knowledge(args: Mapping[str, Any]) -> dict[str, Any]:
         return {"ok": False, "error": "top_k must be an integer"}
     top_k = max(1, min(top_k, 5))
 
-    # 模拟支付知识库检索：真实业务应替换为支付规则配置、支付网关状态和向量检索。
-    knowledge_chunks: list[dict[str, Any]] = [
-        {
-            "id": "payment_failed_common_causes",
-            "title": "付款失败常见原因",
-            "content": "付款失败通常与余额不足、银行卡限额、渠道风控、网络超时或收银台订单过期有关。",
-            "source": "支付帮助中心/付款失败",
-            "keywords": ("支付失败", "付款失败", "付不了", "限额", "余额不足", "订单过期"),
-        },
-        {
-            "id": "payment_duplicate_charge",
-            "title": "重复扣款处理",
-            "content": "如果出现重复扣款，系统通常会在支付渠道对账后自动原路退回，多数渠道会在 1-3 个工作日内完成。",
-            "source": "支付帮助中心/扣款异常",
-            "keywords": ("重复扣", "扣款", "多扣", "重复付款", "原路退回"),
-        },
-        {
-            "id": "payment_installment_rules",
-            "title": "分期支付规则",
-            "content": "分期支付是否可用取决于订单金额、支付渠道、用户账户状态和渠道实时风控结果。",
-            "source": "支付帮助中心/分期",
-            "keywords": ("分期", "账单", "信用卡", "手续费", "期数"),
-        },
-    ]
+    kb_ids, error = _read_kb_ids(args)
+    if error:
+        return {"ok": False, "error": error}
+    retrieval = await rag_service.retrieve(
+        user_id=user_id,
+        query=query,
+        requested_domain="payment",
+        requested_kb_ids=kb_ids,
+        top_k=max(top_k, 5),
+        final_k=top_k,
+        retrieval_mode=RetrievalMode.HYBRID,
+    )
+    return retrieval.to_action_result()
 
-    matches = [
-        {
-            "id": chunk["id"],
-            "title": chunk["title"],
-            "content": chunk["content"],
-            "source": chunk["source"],
-            "score": score,
-        }
-        for chunk in knowledge_chunks
-        if (score := sum(keyword in query for keyword in chunk["keywords"])) > 0
-    ]
-    matches.sort(key=lambda item: item["score"], reverse=True)
-    matches = matches[:top_k]
 
-    return {
-        "ok": True,
-        "query": query,
-        "matches": matches,
-        "total": len(matches),
-    }
+def _read_kb_ids(args: Mapping[str, Any]) -> tuple[list[int] | None, str | None]:
+    raw_value = args.get("kb_ids")
+    if raw_value is None:
+        return None, None
+    if not isinstance(raw_value, list):
+        return None, "kb_ids must be an array of integers"
+    kb_ids: list[int] = []
+    for item in raw_value:
+        if not isinstance(item, int) or isinstance(item, bool) or item <= 0:
+            return None, "kb_ids must be positive integers"
+        kb_ids.append(item)
+    return kb_ids, None
 
 
 def _calculate_payment_total(args: Mapping[str, Any]) -> dict[str, Any]:
     item_amount_cents, error = _read_integer_arg(args, "item_amount_cents")
     if error:
         return {"ok": False, "error": error}
-    shipping_fee_cents, error = _read_integer_arg(
-        args, "shipping_fee_cents", default=0
-    )
+    shipping_fee_cents, error = _read_integer_arg(args, "shipping_fee_cents", default=0)
     if error:
         return {"ok": False, "error": error}
     discount_cents, error = _read_integer_arg(args, "discount_cents", default=0)

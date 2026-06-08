@@ -1125,13 +1125,7 @@ weights=[0.7, 0.3]
 
 这些属于 post-retrieval / context assembly 层，不属于 backend。
 
-### 21.6 `ZvecBackend` 不能替代这些能力
-
-当前 BM25 / full-text / hybrid / reranker 是 `MilvusBackend` 特有能力。
-
-`ZvecBackend` 目前只支持 dense vector retrieval。
-
-### 21.7 误以为 context assembly 会自动补齐相邻 chunk
+### 21.6 误以为 context assembly 会自动补齐相邻 chunk
 
 当前 `DocumentContextAssembler` 只组装已经召回并 collapse 出来的 chunks。
 

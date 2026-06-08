@@ -16,7 +16,7 @@ README 只记录当前仓库可直接核对的能力；更细的设计约束和�
 - anyio
 - Loguru
 - OpenAI-compatible LLM client
-- 向量后端：`zvec`、`pymilvus`
+- 向量后端：`pymilvus`
 
 ## 当前能力
 
@@ -28,7 +28,7 @@ README 只记录当前仓库可直接核对的能力；更细的设计约束和�
 - 中间件：请求日志、CORS、Endpoint Guard、认证、GZip。
 - Agent：通用结构化 ReAct / Tool Calling 执行循环，统一 Router Agent，订单售后 Agent，支付支持 Agent。
 - Celery：Worker、Beat、任务路由和示例任务骨架。
-- 向量检索：通用 repository / backend 抽象，包含 Milvus 和 zvec backend。
+- 向量检索：通用 repository / backend 抽象，包含 Milvus backend。
 - 基础包：日志、数据库、OSS / S3、第三方登录、加解密、通用 toolkit。
 
 ## 环境要求
@@ -40,7 +40,7 @@ README 只记录当前仓库可直接核对的能力；更细的设计约束和�
 
 配置层支持 `mysql`、`postgresql`、`oracle` 三种 `DB_TYPE`，但当前 `pyproject.toml` 默认只包含 PostgreSQL 异步驱动 `asyncpg`。如果切换到 MySQL 或 Oracle，需要先补充对应运行时驱动，例如 `aiomysql` 或 `oracledb`，再同步锁文件和部署环境。
 
-使用向量集成测试或真实向量检索时，还需要准备对应的 Milvus、zvec 或其他后端依赖。
+使用向量集成测试或真实向量检索时，还需要准备对应的 Milvus 后端依赖。
 
 ## 快速开始
 
@@ -306,13 +306,11 @@ uv run celery -A entrypoints.celery:celery_app beat -l info
 通用向量抽象位于 `pkg/vectors/`，当前 backend：
 
 - `pkg.vectors.backends.milvus`
-- `pkg.vectors.backends.zvec`
 
 接入 RAG、知识库检索或混合检索前，先读：
 
 - `pkg/vectors/AGENTS.md`
 - `pkg/vectors/backends/milvus/README.md`
-- `pkg/vectors/backends/zvec/README.md`
 
 ## 测试与质量检查
 
@@ -385,7 +383,6 @@ docker run --rm -p 8000:8000 \
 - `docs/README.md`
 - `pkg/agents/README.md`
 - `pkg/vectors/backends/milvus/README.md`
-- `pkg/vectors/backends/zvec/README.md`
 
 ## License
 

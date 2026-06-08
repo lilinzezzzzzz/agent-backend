@@ -108,6 +108,11 @@ class Settings(BaseSettings):
     AGENT_ACTION_CONFIRMATION_SECONDS: PositiveInt = 300
     AGENT_ACTION_IDEMPOTENCY_SECONDS: PositiveInt = 86400
 
+    # --- RAG ---
+    RAG_ALLOWED_DOMAINS: list[str] = ["order", "payment", "general"]
+    RAG_ALLOWED_KB_IDS: list[int] = [1, 2, 3]
+    RAG_MAX_CONTEXT_CHARS: PositiveInt = 12000
+
     # --- Database ---
     DB_TYPE: DBType  # 数据库类型: mysql, postgresql, oracle (必填)
     DB_HOST: str

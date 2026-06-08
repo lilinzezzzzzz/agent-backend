@@ -65,7 +65,6 @@ dependencies = [
     "uuid6>=2025.0.1",
     "pyyaml>=6.0.3",
     "aiosqlite>=0.22.1",
-    "zvec>=0.2.0",
     "pymilvus>=2.6.10",
     "wordfreq>=3.1.1",
     "mcp>=1,<2",

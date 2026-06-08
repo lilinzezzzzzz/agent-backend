@@ -27,6 +27,7 @@ from pkg.vectors.contracts import (
     FilterCondition,
     FilterOperator,
     RetrievalMode,
+    ScalarValue,
     SearchHit,
 )
 from pkg.vectors.post_retrieval import (
@@ -506,7 +507,7 @@ class RagService:
         user_id: int,
         requested_domain: str | None,
         requested_kb_ids: Sequence[int] | None,
-    ) -> "_ResolvedRagScope":
+    ) -> _ResolvedRagScope:
         requested_context: dict[str, Any] = {
             "requested_domain": requested_domain,
             "requested_kb_ids": list(requested_kb_ids)
@@ -534,16 +535,24 @@ class RagService:
 
     @staticmethod
     def _build_scope_filters(
-        *, scope: "_ResolvedRagScope"
+        *, scope: _ResolvedRagScope
     ) -> tuple[FilterCondition, ...]:
         return (
             FilterCondition(
-                field="domain", op=FilterOperator.IN, value=scope.effective_domains
+                field="domain",
+                op=FilterOperator.IN,
+                value=RagService._as_filter_values(scope.effective_domains),
             ),
             FilterCondition(
-                field="kb_id", op=FilterOperator.IN, value=scope.effective_kb_ids
+                field="kb_id",
+                op=FilterOperator.IN,
+                value=RagService._as_filter_values(scope.effective_kb_ids),
             ),
         )
+
+    @staticmethod
+    def _as_filter_values(values: Sequence[ScalarValue]) -> list[ScalarValue]:
+        return list(values)
 
     @staticmethod
     def _read_int(hit: SearchHit, field: str) -> int | None:

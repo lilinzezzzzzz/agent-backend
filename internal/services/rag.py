@@ -12,6 +12,7 @@ from internal.config import settings
 from internal.core import AppException, errors
 from internal.dao.rag import RagChunkMetadata, RagMetadataDao, new_rag_metadata_dao
 from internal.services.dto.rag import (
+    PreparedRetrievalQueryDTO,
     RagAnswerDTO,
     RagCitationDTO,
     RagEvidenceDTO,
@@ -124,7 +125,7 @@ class RagService:
         started = time.perf_counter()
         run_id = self._new_run_id()
         trace_id = self._resolve_trace_id()
-        normalized_query = self._normalize_question(query)
+        prepared_query = await self.prepare_retrieval_query(question=query)
         top_k = self._bounded_top_k(top_k)
         final_k = self._bounded_final_k(final_k=final_k, top_k=top_k)
         scope = self._resolve_effective_scope(
@@ -137,7 +138,7 @@ class RagService:
             return RagRetrievalDTO(
                 run_id=run_id,
                 trace_id=trace_id,
-                query=normalized_query,
+                query=prepared_query.retrieval_query,
                 requested_domain=requested_domain,
                 requested_kb_ids=list(requested_kb_ids)
                 if requested_kb_ids is not None
@@ -152,7 +153,7 @@ class RagService:
         filters = self._build_scope_filters(scope=scope)
         repository = await self._get_repository()
         retrieval_result = await repository.retrieve_by_text(
-            query_text=normalized_query,
+            query_text=prepared_query.retrieval_query,
             top_k=top_k,
             filters=filters,
             include_payload=True,
@@ -181,7 +182,7 @@ class RagService:
         return RagRetrievalDTO(
             run_id=run_id,
             trace_id=trace_id,
-            query=normalized_query,
+            query=prepared_query.retrieval_query,
             requested_domain=requested_domain,
             requested_kb_ids=list(requested_kb_ids)
             if requested_kb_ids is not None
@@ -192,6 +193,16 @@ class RagService:
             evidence=evidence,
             latency_ms=latency_ms,
             errors=errors,
+        )
+
+    async def prepare_retrieval_query(
+        self, *, question: str
+    ) -> PreparedRetrievalQueryDTO:
+        """Prepare a user question for retrieval."""
+        return PreparedRetrievalQueryDTO(
+            original_question=question,
+            retrieval_query=self._normalize_question(question),
+            expanded_queries=[],
         )
 
     async def answer(

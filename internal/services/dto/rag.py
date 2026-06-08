@@ -12,6 +12,13 @@ from pkg.vectors.contracts import RetrievalMode
 
 
 @dataclass(frozen=True, slots=True)
+class PreparedRetrievalQueryDTO:
+    original_question: str
+    retrieval_query: str
+    expanded_queries: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
 class RagCitationDTO:
     evidence_id: str
     doc_id: int

@@ -82,6 +82,23 @@ class FakeLLMClient:
 
 
 @pytest.mark.asyncio
+async def test_prepare_retrieval_query_normalizes_question_and_preserves_original() -> None:
+    service = RagService(
+        llm_client=FakeLLMClient(["ev_001"]),
+        embedder=object(),
+        metadata_dao=FakeMetadataDao(),
+        scope_resolver=FakeScopeResolver(),
+        repository=FakeRepository(),
+    )
+
+    result = await service.prepare_retrieval_query(question=" 发票   多久开具 ")
+
+    assert result.original_question == " 发票   多久开具 "
+    assert result.retrieval_query == "发票 多久开具"
+    assert result.expanded_queries == []
+
+
+@pytest.mark.asyncio
 async def test_rag_retrieve_intersects_requested_scope_and_builds_evidence() -> None:
     repository = FakeRepository()
     service = RagService(
@@ -103,6 +120,7 @@ async def test_rag_retrieve_intersects_requested_scope_and_builds_evidence() -> 
 
     assert result.errors == []
     assert result.query == "发票 多久开具"
+    assert repository.calls[0]["query_text"] == "发票 多久开具"
     assert result.effective_domains == ["order"]
     assert result.effective_kb_ids == [2]
     filters = repository.calls[0]["filters"]

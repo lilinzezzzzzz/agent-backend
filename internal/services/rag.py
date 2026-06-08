@@ -198,7 +198,22 @@ class RagService:
     async def prepare_retrieval_query(
         self, *, question: str
     ) -> PreparedRetrievalQueryDTO:
-        """Prepare a user question for retrieval."""
+        """在向量检索前准备用户问题。
+
+        这是 RAG 检索前的 query preprocessing 边界。首版只做确定性的
+        normalization，保持检索行为稳定且成本可控。DTO 保留原始问题，并为后续接入
+        LLM query rewrite、query expansion、multi-query 或 HyDE 预留结构，
+        避免改动主检索流程。
+
+        Query preparation 只能改变检索表达，不得改变 requested scope、
+        服务端 allowed scope 或最终 vector filter。
+
+        DTO 字段语义:
+            original_question: 用户原始问题，用于 trace、审计和后续问题定位。
+            retrieval_query: 实际传给向量库的主检索表达，首版等于规范化后的问题。
+            expanded_queries: query expansion 或 multi-query 生成的补充检索表达；
+                首版暂为空列表，后续用于提升召回覆盖率。
+        """
         return PreparedRetrievalQueryDTO(
             original_question=question,
             retrieval_query=self._normalize_question(question),

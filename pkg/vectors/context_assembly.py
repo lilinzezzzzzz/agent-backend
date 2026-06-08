@@ -1,4 +1,17 @@
-"""Assemble collapsed retrieval results into LLM-ready document contexts."""
+"""把后处理后的检索结果组装成可直接放入 LLM prompt 的上下文。
+
+本模块位于 RAG 检索链路的最后一段：
+
+1. `BaseVectorRepository.search_*()` 从向量后端返回原始 `SearchHit`。
+2. `PostRetrievalPipeline` 负责 dedup、rerank 和按文档 collapse。
+3. `DocumentContextAssembler` 接收 `CollapsedSearchHit` / `PostRetrievalResult`，
+   按文档标题、来源、chunk 顺序、相邻窗口和字符预算拼出最终 `context_text`。
+
+这里不负责召回、重排、补邻近 chunk 或访问外部存储；调用方必须在传入前准备好需要
+喂给 LLM 的 chunk 集合。仓储层的接入入口是
+`BaseVectorRepository.assemble_context_by_text()` 和
+`BaseVectorRepository.assemble_context_by_vector()`。
+"""
 
 from __future__ import annotations
 
@@ -172,7 +185,15 @@ class _ResolvedChunk:
 
 
 class DocumentContextAssembler:
-    """把 collapse 后的 document/chunk 结果拼装成适合直接喂给 LLM 的上下文。"""
+    """把 collapse 后的 document/chunk 结果拼装成适合直接喂给 LLM 的上下文。
+
+    接入方式：
+    - 业务代码通常不直接 new 后手动传 documents，而是通过 repository 的
+      `assemble_context_by_text()` / `assemble_context_by_vector()` 间接调用。
+    - 需要定制 header、window 合并、chunk 分隔符或字符预算时，构造自定义
+      `ContextAssemblyConfig` 后作为 `context_assembler` 传给 repository。
+    - 如果调用方已经自行完成检索和 post-retrieval，也可以直接调用 `assemble()`。
+    """
 
     def __init__(self, *, config: ContextAssemblyConfig | None = None) -> None:
         self._config = config or ContextAssemblyConfig()

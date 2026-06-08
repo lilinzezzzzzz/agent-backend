@@ -102,7 +102,7 @@ Authorization: Bearer tk_abc123def456...
 
 ### Token 存储
 
-```
+```text
 Key: token:{token_value}
 Type: String (JSON)
 Value: {
@@ -116,7 +116,7 @@ TTL: 1800 秒 (30 分钟)
 
 ### 用户 Token 列表
 
-```
+```text
 Key: token_list:{user_id}
 Type: List
 Value: ["token1", "token2", ...]

@@ -1,6 +1,6 @@
 # 文档索引
 
-`docs/` 按主题分组，根目录仅保留本索引。
+`docs/` 按主题分组，少量通用方案文档保留在根目录。
 
 ## `auth/`
 
@@ -30,8 +30,8 @@ RAG 工程架构、技术选型和 Agentic RAG 方案。
 - [RAG 工程分类与技术选型](rag/rag-engineering-classification-selection.md)
 - [Lightweight Agentic RAG 技术方案](rag/lightweight-agentic-rag.md)
 
-## `platform/`
+## 根目录
 
 AI 平台和算力调度相关架构方案。
 
-- [AI 中台数字人算力动态调度](platform/AI中台数字人动态算力调度.md)
+- [AI 中台数字人算力动态调度](AI中台数字人动态算力调度.md)

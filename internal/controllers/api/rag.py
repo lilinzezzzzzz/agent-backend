@@ -33,7 +33,7 @@ async def answer_rag_question(
 
     业务边界:
         只读接口，不写入业务数据；会调用 embedding/vector backend 和 LLM provider。
-        不接收 tenant、gold answer、expected evidence 或评测评分参数。
+        不接收 tenant、gold answer、expected evidence 或评分参数。
 
     Args:
         req: 请求体，包含问题、requested scope、检索参数和 citation 要求。

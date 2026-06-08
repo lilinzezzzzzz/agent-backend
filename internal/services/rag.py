@@ -14,8 +14,8 @@ from internal.dao.rag import RagChunkMetadata, RagMetadataDao, new_rag_metadata_
 from internal.services.dto.rag import (
     RagAnswerDTO,
     RagCitationDTO,
-    RagEvaluationRunDTO,
     RagEvidenceDTO,
+    RagExternalRunDTO,
     RagRetrievalDTO,
 )
 from internal.vectors.chunks import ChunkVectorRepository, new_chunk_repository
@@ -268,7 +268,7 @@ class RagService:
             retrieval=retrieval,
         )
 
-    async def run_evaluation(
+    async def run_external(
         self,
         *,
         case_id: str,
@@ -280,7 +280,7 @@ class RagService:
         final_k: int = _DEFAULT_FINAL_K,
         retrieval_mode: RetrievalMode = RetrievalMode.HYBRID,
         return_context: bool = False,
-    ) -> RagEvaluationRunDTO:
+    ) -> RagExternalRunDTO:
         answer = await self.answer(
             user_id=subject_user_id,
             question=question,
@@ -296,7 +296,7 @@ class RagService:
             if return_context
             else self._strip_context(answer.retrieval.evidence)
         )
-        return RagEvaluationRunDTO(
+        return RagExternalRunDTO(
             case_id=case_id,
             rag_run_id=answer.run_id,
             answer=answer.answer,
@@ -304,8 +304,6 @@ class RagService:
             retrieved_evidence=evidence,
             requested_domain=answer.retrieval.requested_domain,
             requested_kb_ids=answer.retrieval.requested_kb_ids,
-            effective_domains=answer.retrieval.effective_domains,
-            effective_kb_ids=answer.retrieval.effective_kb_ids,
             retrieval_mode=answer.retrieval.retrieval_mode,
             latency_ms=answer.retrieval.latency_ms,
             errors=answer.retrieval.errors,

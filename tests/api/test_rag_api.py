@@ -12,8 +12,8 @@ from internal.controllers.internal import rag as internal_rag_controller
 from internal.services.dto.rag import (
     RagAnswerDTO,
     RagCitationDTO,
-    RagEvaluationRunDTO,
     RagRetrievalDTO,
+    RagExternalRunDTO,
 )
 from pkg.vectors.contracts import RetrievalMode
 
@@ -21,7 +21,7 @@ from pkg.vectors.contracts import RetrievalMode
 class FakeRagService:
     def __init__(self):
         self.answer_calls: list[dict[str, Any]] = []
-        self.evaluation_calls: list[dict[str, Any]] = []
+        self.external_run_calls: list[dict[str, Any]] = []
 
     async def answer(self, **kwargs: Any) -> RagAnswerDTO:
         self.answer_calls.append(kwargs)
@@ -55,9 +55,9 @@ class FakeRagService:
             retrieval=retrieval,
         )
 
-    async def run_evaluation(self, **kwargs: Any) -> RagEvaluationRunDTO:
-        self.evaluation_calls.append(kwargs)
-        return RagEvaluationRunDTO(
+    async def run_external(self, **kwargs: Any) -> RagExternalRunDTO:
+        self.external_run_calls.append(kwargs)
+        return RagExternalRunDTO(
             case_id=kwargs["case_id"],
             rag_run_id="rag_run_1",
             answer="通常会在 1-3 个工作日内完成。",
@@ -65,8 +65,6 @@ class FakeRagService:
             retrieved_evidence=[],
             requested_domain=kwargs.get("requested_domain"),
             requested_kb_ids=kwargs.get("requested_kb_ids"),
-            effective_domains=["order"],
-            effective_kb_ids=[2],
             retrieval_mode=RetrievalMode.HYBRID,
             latency_ms=12,
             errors=[],
@@ -113,12 +111,12 @@ async def test_rag_answer_endpoint_wraps_service_dto(rag_client) -> None:
 
 
 @pytest.mark.asyncio
-async def test_rag_internal_evaluation_endpoint_does_not_accept_gold_fields(
+async def test_rag_internal_external_run_endpoint_does_not_accept_gold_fields(
     rag_client,
 ) -> None:
     client, service = rag_client
     response = await client.post(
-        "/v1/internal/rag/evaluations/run",
+        "/v1/internal/rag/external-runs",
         json={
             "case_id": "case_001",
             "subject_user_id": 999,
@@ -131,14 +129,14 @@ async def test_rag_internal_evaluation_endpoint_does_not_accept_gold_fields(
     )
 
     assert response.status_code == 422
-    assert service.evaluation_calls == []
+    assert service.external_run_calls == []
 
 
 @pytest.mark.asyncio
-async def test_rag_internal_evaluation_endpoint_wraps_run_data(rag_client) -> None:
+async def test_rag_internal_external_run_endpoint_wraps_run_data(rag_client) -> None:
     client, service = rag_client
     response = await client.post(
-        "/v1/internal/rag/evaluations/run",
+        "/v1/internal/rag/external-runs",
         json={
             "case_id": "case_001",
             "subject_user_id": 999,
@@ -152,5 +150,6 @@ async def test_rag_internal_evaluation_endpoint_wraps_run_data(rag_client) -> No
     assert response.status_code == 200
     data = response.json()["data"]
     assert data["case_id"] == "case_001"
-    assert data["effective_domains"] == ["order"]
-    assert service.evaluation_calls[0]["subject_user_id"] == 999
+    assert "effective_domains" not in data
+    assert "effective_kb_ids" not in data
+    assert service.external_run_calls[0]["subject_user_id"] == 999

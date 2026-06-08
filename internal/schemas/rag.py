@@ -39,9 +39,9 @@ class RagAnswerReqSchema(ForbidExtraModel):
     )
 
 
-class RagEvaluationRunReqSchema(ForbidExtraModel):
+class RagExternalRunReqSchema(ForbidExtraModel):
     case_id: str = Field(
-        ..., description="外部评测系统的 case ID", min_length=1, max_length=128
+        ..., description="外部调用方的 case ID", min_length=1, max_length=128
     )
     subject_user_id: int = Field(
         ..., description="代表哪个用户解析 allowed scope", ge=0
@@ -92,7 +92,7 @@ class RagAnswerRespSchema(BaseModel):
     trace_id: str
 
 
-class RagEvaluationRunRespSchema(BaseModel):
+class RagExternalRunRespSchema(BaseModel):
     case_id: str
     rag_run_id: str
     answer: str
@@ -100,8 +100,6 @@ class RagEvaluationRunRespSchema(BaseModel):
     retrieved_evidence: list[RagEvidenceSchema] = Field(default_factory=list)
     requested_domain: str | None = None
     requested_kb_ids: list[int] | None = None
-    effective_domains: list[str] = Field(default_factory=list)
-    effective_kb_ids: list[int] = Field(default_factory=list)
     retrieval_mode: RetrievalMode
     latency_ms: int = Field(ge=0)
     errors: list[str] = Field(default_factory=list)

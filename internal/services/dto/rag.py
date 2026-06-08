@@ -5,8 +5,8 @@ from dataclasses import dataclass, field
 from internal.schemas.rag import (
     RagAnswerRespSchema,
     RagCitationSchema,
-    RagEvaluationRunRespSchema,
     RagEvidenceSchema,
+    RagExternalRunRespSchema,
 )
 from pkg.vectors.contracts import RetrievalMode
 
@@ -133,7 +133,7 @@ class RagAnswerDTO:
 
 
 @dataclass(frozen=True, slots=True)
-class RagEvaluationRunDTO:
+class RagExternalRunDTO:
     case_id: str
     rag_run_id: str
     answer: str
@@ -141,14 +141,12 @@ class RagEvaluationRunDTO:
     retrieved_evidence: list[RagEvidenceDTO]
     requested_domain: str | None
     requested_kb_ids: list[int] | None
-    effective_domains: list[str]
-    effective_kb_ids: list[int]
     retrieval_mode: RetrievalMode
     latency_ms: int
     errors: list[str]
 
-    def to_schema(self) -> RagEvaluationRunRespSchema:
-        return RagEvaluationRunRespSchema(
+    def to_schema(self) -> RagExternalRunRespSchema:
+        return RagExternalRunRespSchema(
             case_id=self.case_id,
             rag_run_id=self.rag_run_id,
             answer=self.answer,
@@ -158,8 +156,6 @@ class RagEvaluationRunDTO:
             ],
             requested_domain=self.requested_domain,
             requested_kb_ids=self.requested_kb_ids,
-            effective_domains=self.effective_domains,
-            effective_kb_ids=self.effective_kb_ids,
             retrieval_mode=self.retrieval_mode,
             latency_ms=self.latency_ms,
             errors=list(self.errors),

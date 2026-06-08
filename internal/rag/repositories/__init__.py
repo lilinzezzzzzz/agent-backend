@@ -1,4 +1,4 @@
-from internal.vectors.chunks import (
+from internal.rag.repositories.chunk_vector import (
     ChunkVectorDocument,
     ChunkVectorRepository,
     new_chunk_repository,

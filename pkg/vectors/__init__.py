@@ -34,13 +34,6 @@ from pkg.vectors.contracts import (
     SearchRequest,
     VectorRecord,
 )
-from pkg.vectors.embedders import (
-    EMBEDDER_BUILDERS,
-    EmbedderProvider,
-    OpenAICompatibleEmbedder,
-    create_embedder,
-    create_openai_compatible_embedder,
-)
 from pkg.vectors.errors import (
     CapabilityNotSupportedError,
     CollectionSchemaMismatchError,
@@ -84,15 +77,12 @@ __all__ = [
     "DedupConfig",
     "DedupKeepStrategy",
     "DocumentContextAssembler",
-    "EMBEDDER_BUILDERS",
-    "EmbedderProvider",
     "FilterCondition",
     "FilterOperator",
     "InvalidEmbeddingDimensionError",
     "IsolationMode",
     "MetricType",
     "MilvusBackend",
-    "OpenAICompatibleEmbedder",
     "PostRetrievalConfig",
     "PostRetrievalPipeline",
     "PostRetrievalResult",
@@ -109,6 +99,4 @@ __all__ = [
     "VectorCoreError",
     "VectorRecord",
     "create_backend",
-    "create_embedder",
-    "create_openai_compatible_embedder",
 ]

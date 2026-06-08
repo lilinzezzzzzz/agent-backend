@@ -1,15 +1,6 @@
 from __future__ import annotations
 
-import sys
-import types
-from pathlib import Path
-
-if "pkg.vectors" not in sys.modules:
-    vectors_package = types.ModuleType("pkg.vectors")
-    vectors_package.__path__ = [str(Path(__file__).resolve().parents[2] / "pkg" / "vectors")]
-    sys.modules["pkg.vectors"] = vectors_package
-
-from pkg.vectors.embedders import (
+from pkg.embeddings import (
     EmbedderProvider,
     OpenAICompatibleEmbedder,
     create_embedder,

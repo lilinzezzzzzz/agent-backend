@@ -6,9 +6,9 @@ from typing import Any
 
 from openai import AsyncOpenAI
 
+from pkg.embeddings.base import BaseEmbedder
+from pkg.embeddings.errors import EmbeddingResponseValidationError
 from pkg.toolkit.string import mask_string
-from pkg.vectors.embedders.base import BaseEmbedder
-from pkg.vectors.errors import RecordValidationError
 
 # =========================================================
 # 默认配置常量
@@ -82,7 +82,7 @@ class OpenAICompatibleEmbedder(BaseEmbedder):
             ),
         )
         if not response.data:
-            raise RecordValidationError("batch embedding 返回为空")
+            raise EmbeddingResponseValidationError("batch embedding 返回为空")
 
         vectors = [list(item.embedding) for item in response.data]
         self.validate_vectors(vectors, source="embed_texts")
@@ -114,7 +114,7 @@ class OpenAICompatibleEmbedder(BaseEmbedder):
             ),
         )
         if not response.data:
-            raise RecordValidationError("query embedding 返回为空")
+            raise EmbeddingResponseValidationError("query embedding 返回为空")
 
         vector = list(response.data[0].embedding)
         self.validate_vector(vector, source="embed_text")

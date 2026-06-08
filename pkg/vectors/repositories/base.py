@@ -15,7 +15,7 @@ from pkg.vectors.contracts import (
     SearchReranker,
     VectorRecord,
 )
-from pkg.vectors.embedders.base import Embedder
+from pkg.embeddings.base import Embedder
 from pkg.vectors.errors import RecordValidationError
 from pkg.vectors.post_retrieval import PostRetrievalPipeline, PostRetrievalResult
 

@@ -19,7 +19,7 @@ from internal.services.dto.rag import (
     RagExternalRunDTO,
     RagRetrievalDTO,
 )
-from internal.vectors.chunks import ChunkVectorRepository, new_chunk_repository
+from internal.rag.repositories.chunk_vector import ChunkVectorRepository, new_chunk_repository
 from pkg.logger import logger
 from pkg.toolkit import context
 from pkg.toolkit.string import uuid6_unique_str_id

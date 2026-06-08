@@ -16,7 +16,7 @@ if "pkg.vectors" not in sys.modules:
 from pkg.vectors.backends.base import IsolationMode
 from pkg.vectors.contracts import FilterOperator, SearchHit
 
-from internal.vectors.chunks import (
+from internal.rag.repositories.chunk_vector import (
     ChunkVectorDocument,
     ChunkVectorRepository,
     new_chunk_repository,

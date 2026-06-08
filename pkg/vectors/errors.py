@@ -1,9 +1,8 @@
+from pkg.embeddings.errors import InvalidEmbeddingDimensionError as InvalidEmbeddingDimensionError
+
+
 class VectorCoreError(Exception):
     """向量核心模块基类异常。"""
-
-
-class InvalidEmbeddingDimensionError(VectorCoreError):
-    """Embedding 维度不匹配。"""
 
 
 class CollectionSchemaMismatchError(VectorCoreError):

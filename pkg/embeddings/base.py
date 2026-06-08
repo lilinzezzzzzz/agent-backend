@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from enum import StrEnum
 
-from pkg.vectors.errors import InvalidEmbeddingDimensionError
+from pkg.embeddings.errors import InvalidEmbeddingDimensionError
 
 
 class EmbedderProvider(StrEnum):

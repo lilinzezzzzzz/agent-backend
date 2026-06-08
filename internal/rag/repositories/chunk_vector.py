@@ -24,7 +24,7 @@ from pkg.vectors.contracts import (
     SearchHit,
     VectorRecord,
 )
-from pkg.vectors.embedders.base import Embedder
+from pkg.embeddings.base import Embedder
 from pkg.vectors.repositories.base import (
     BaseVectorRepository,
     ScopeValue,

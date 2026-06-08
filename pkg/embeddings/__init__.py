@@ -3,8 +3,13 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from pkg.vectors.embedders.base import BaseEmbedder, Embedder, EmbedderProvider
-from pkg.vectors.embedders.openai_compatible import (
+from pkg.embeddings.base import BaseEmbedder, Embedder, EmbedderProvider
+from pkg.embeddings.errors import (
+    EmbeddingCoreError,
+    EmbeddingResponseValidationError,
+    InvalidEmbeddingDimensionError,
+)
+from pkg.embeddings.openai_compatible import (
     OpenAICompatibleEmbedder,
     VECTOR_DIMENSION,
     create_openai_compatible_embedder,
@@ -27,8 +32,11 @@ def create_embedder(*, provider: EmbedderProvider | str, **kwargs: Any) -> Embed
 __all__ = [
     "BaseEmbedder",
     "EMBEDDER_BUILDERS",
+    "EmbeddingCoreError",
+    "EmbeddingResponseValidationError",
     "Embedder",
     "EmbedderProvider",
+    "InvalidEmbeddingDimensionError",
     "OpenAICompatibleEmbedder",
     "VECTOR_DIMENSION",
     "create_embedder",

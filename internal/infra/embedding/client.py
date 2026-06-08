@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from internal.config import settings
 from internal.core import AppException, errors
-from pkg.vectors.embedders import create_embedder
-from pkg.vectors.embedders.base import Embedder
+from pkg.embeddings import create_embedder
+from pkg.embeddings.base import Embedder
 
 _NO_AUTH_API_KEY = "not-required"
 

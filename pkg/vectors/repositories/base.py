@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from typing import Any, cast
 
-from pkg.vectors.backends.base import CollectionSpec, VectorBackend
+from pkg.vectors.backends.base import CollectionSpec, IsolationMode, ScalarDataType, ScalarFieldSpec, VectorBackend
 from pkg.vectors.context_assembly import ContextAssemblyResult, DocumentContextAssembler
 from pkg.vectors.contracts import (
     ConsistencyLevel,
@@ -19,6 +19,8 @@ from pkg.vectors.embedders.base import Embedder
 from pkg.vectors.errors import RecordValidationError
 from pkg.vectors.post_retrieval import PostRetrievalPipeline, PostRetrievalResult
 
+type ScopeValue = int | str
+
 
 class BaseVectorRepository[T](ABC):
     """向量仓储基类。
@@ -30,7 +32,7 @@ class BaseVectorRepository[T](ABC):
     核心职责：
     1. 实体 <-> VectorRecord 转换
     2. 自动补全 embedding（若实体未提供）
-    3. 多租户隔离（通过 tenant_field + tenant_id 过滤）
+    3. 可选数据隔离（显式配置 SHARED_FILTER + scope_field + scope_value 后生效）
     4. 统一的 upsert/delete/fetch/search 接口
     """
 
@@ -39,11 +41,11 @@ class BaseVectorRepository[T](ABC):
         *,
         backend: VectorBackend,  # 向量数据库后端（Milvus/Qdrant 等）
         embedder: Embedder,  # 文本向量化器
-        tenant_id: ScalarValue | None = None,  # 租户 ID，用于数据隔离
+        scope_value: ScopeValue | None = None,  # 显式启用 SHARED_FILTER 隔离时使用
     ) -> None:
         self._backend = backend
         self._embedder = embedder
-        self._tenant_id = tenant_id
+        self._scope_value = scope_value
 
     @property
     def backend(self) -> VectorBackend:
@@ -54,8 +56,8 @@ class BaseVectorRepository[T](ABC):
         return self._embedder
 
     @property
-    def tenant_id(self) -> ScalarValue | None:
-        return self._tenant_id
+    def scope_value(self) -> ScopeValue | None:
+        return self._scope_value
 
     @property
     @abstractmethod
@@ -63,8 +65,8 @@ class BaseVectorRepository[T](ABC):
         """返回 repository 绑定的 collection spec。"""
 
     @property
-    def tenant_field(self) -> str | None:
-        """租户隔离字段名，子类可覆写（如 'org_id'）。返回 None 表示不启用租户隔离。"""
+    def scope_field(self) -> str | None:
+        """数据隔离字段名，子类可覆写（如 'org_id'）。默认不启用数据隔离。"""
         return None
 
     @abstractmethod
@@ -75,14 +77,27 @@ class BaseVectorRepository[T](ABC):
         """
 
     def build_scope_filters(self) -> list[FilterCondition]:
-        """构建租户隔离过滤条件，自动附加到所有查询操作。"""
-        if self.tenant_field is None or self.tenant_id is None:
+        """构建 scope 隔离过滤条件，自动附加到所有查询操作。"""
+        spec = self.collection_spec
+        scope_field = self.scope_field
+
+        if spec.isolation_mode != IsolationMode.SHARED_FILTER:
             return []
+
+        if scope_field is None:
+            raise ValueError("isolation_mode=shared_filter 需要显式配置 scope_field")
+        if self.scope_value is None:
+            raise ValueError("isolation_mode=shared_filter 需要显式传入 scope_value")
+        scope_scalar_field = find_scalar_field(spec=spec, field_name=scope_field)
+        if scope_scalar_field is None:
+            raise ValueError(f"scope_field 必须出现在 collection_spec.scalar_fields 中: field={scope_field}")
+        validate_scope_value_type(field=scope_scalar_field, value=self.scope_value)
+
         return [
             FilterCondition(
-                field=self.tenant_field,
+                field=scope_field,
                 op=FilterOperator.EQ,
-                value=self.tenant_id,
+                value=self.scope_value,
             )
         ]
 
@@ -445,6 +460,29 @@ class BaseVectorRepository[T](ABC):
             reranker=reranker,
             consistency_level=consistency_level,
         )
+
+
+def find_scalar_field(*, spec: CollectionSpec, field_name: str) -> ScalarFieldSpec | None:
+    """按字段名查找 collection scalar field。"""
+    return next((field for field in spec.scalar_fields if field.name == field_name), None)
+
+
+def validate_scope_value_type(*, field: ScalarFieldSpec, value: ScopeValue) -> None:
+    """校验 scope_value 类型与 scope_field 标量类型一致。"""
+    if isinstance(value, bool):
+        raise TypeError("scope_value 只支持 int 或 str，不支持 bool")
+
+    if field.data_type == ScalarDataType.INT64:
+        if not isinstance(value, int):
+            raise TypeError(f"scope_field={field.name} 使用 INT64 时 scope_value 必须是 int")
+        return
+
+    if field.data_type == ScalarDataType.STRING:
+        if not isinstance(value, str):
+            raise TypeError(f"scope_field={field.name} 使用 STRING 时 scope_value 必须是 str")
+        return
+
+    raise ValueError(f"scope_field={field.name} 只支持 INT64 或 STRING，不支持 {field.data_type.value}")
 
 
 def as_scalar_list(values: list[Any]) -> list[ScalarValue]:

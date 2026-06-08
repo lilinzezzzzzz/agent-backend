@@ -1,3 +1,3 @@
-from pkg.vectors.repositories.base import BaseVectorRepository
+from pkg.vectors.repositories.base import BaseVectorRepository, ScopeValue
 
-__all__ = ["BaseVectorRepository"]
+__all__ = ["BaseVectorRepository", "ScopeValue"]

@@ -71,15 +71,16 @@ class EmptyIndexParams(IndexParams):
     """无参数索引。"""
 
 
-class TenantIsolationMode(StrEnum):
-    """多租户隔离模式。
+class IsolationMode(StrEnum):
+    """数据隔离模式。
 
-    定义不同租户数据在向量数据库中的隔离策略。
+    定义不同 scope 数据在向量数据库中的隔离策略。
     """
 
-    SHARED_FILTER = "shared_filter"  # 共享集合，通过 filter 条件隔离租户数据
+    NONE = "none"  # 默认不在向量库层做数据隔离
+    SHARED_FILTER = "shared_filter"  # 共享集合，通过 filter 条件隔离 scope 数据
     NAMESPACE = "namespace"  # 使用 Milvus partition 或 Qdrant namespace 隔离
-    COLLECTION_PREFIX = "collection_prefix"  # 每个租户独立集合，集合名加租户前缀
+    COLLECTION_PREFIX = "collection_prefix"  # 每个 scope 独立集合，集合名加 scope 前缀
 
 
 class ScalarFieldSpec(BaseModel, extra="forbid"):
@@ -117,7 +118,7 @@ class IndexConfig(BaseModel, extra="forbid"):
 class CollectionSpec(BaseModel, extra="forbid"):
     """向量集合规格定义。
 
-    定义向量数据库集合的完整 schema，包括字段定义、索引配置、租户隔离模式等。
+    定义向量数据库集合的完整 schema，包括字段定义、索引配置、可选数据隔离模式等。
     用于 ensure_collection 时创建或验证集合结构。
     """
 
@@ -137,8 +138,8 @@ class CollectionSpec(BaseModel, extra="forbid"):
     # ========== 索引配置 ==========
     index_config: IndexConfig = Field(default_factory=IndexConfig)
 
-    # ========== 多租户与其他配置 ==========
-    tenant_mode: TenantIsolationMode = TenantIsolationMode.SHARED_FILTER  # 租户隔离模式
+    # ========== 隔离与其他配置 ==========
+    isolation_mode: IsolationMode = IsolationMode.NONE  # 默认不启用向量库层数据隔离
     description: str = ""  # 集合描述
 
 

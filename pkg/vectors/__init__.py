@@ -4,11 +4,11 @@ from pkg.vectors.backends import (
     BaseVectorBackend,
     CollectionSpec,
     ConsistencyLevel,
+    IsolationMode,
     MetricType,
     MilvusBackend,
     ScalarDataType,
     ScalarFieldSpec,
-    TenantIsolationMode,
     VectorBackend,
     create_backend,
 )
@@ -57,7 +57,7 @@ from pkg.vectors.post_retrieval import (
     PostRetrievalStats,
     ScoreAggregation,
 )
-from pkg.vectors.repositories import BaseVectorRepository
+from pkg.vectors.repositories import BaseVectorRepository, ScopeValue
 
 __all__ = [
     "BACKEND_BUILDERS",
@@ -82,6 +82,7 @@ __all__ = [
     "EmbedderProvider",
     "FilterCondition",
     "FilterOperator",
+    "IsolationMode",
     "InvalidEmbeddingDimensionError",
     "OpenAICompatibleEmbedder",
     "MetricType",
@@ -97,10 +98,10 @@ __all__ = [
     "PostRetrievalStats",
     "ScalarDataType",
     "ScalarFieldSpec",
+    "ScopeValue",
     "ScoreAggregation",
     "SearchHit",
     "SearchRequest",
-    "TenantIsolationMode",
     "UnsupportedFilterError",
     "VectorBackend",
     "VectorCoreError",

@@ -27,6 +27,7 @@ from pkg.vectors.contracts import (
 from pkg.vectors.embedders.base import Embedder
 from pkg.vectors.repositories.base import (
     BaseVectorRepository,
+    ScopeValue,
     build_scalar_filters,
 )
 
@@ -46,11 +47,11 @@ class ChunkVectorRepository(BaseVectorRepository[ChunkVectorDocument]):
         *,
         backend: VectorBackend,
         embedder: Embedder,
-        tenant_id: int,
+        scope_value: ScopeValue | None = None,
         collection_name: str = CollectionName.CHUNKS,
         dimension: int = 1024,
     ) -> None:
-        super().__init__(backend=backend, embedder=embedder, tenant_id=tenant_id)
+        super().__init__(backend=backend, embedder=embedder, scope_value=scope_value)
         self._collection_spec = MilvusCollectionSpec(
             name=collection_name,
             dimension=dimension,
@@ -69,7 +70,7 @@ class ChunkVectorRepository(BaseVectorRepository[ChunkVectorDocument]):
         return self._collection_spec
 
     @property
-    def tenant_field(self) -> str | None:
+    def scope_field(self) -> str | None:
         return None
 
     @staticmethod
@@ -168,11 +169,11 @@ class ChunkVectorRepository(BaseVectorRepository[ChunkVectorDocument]):
         return results
 
 
-async def new_chunk_repository(tenant_id: int, *, embedder: Embedder) -> ChunkVectorRepository:
+async def new_chunk_repository(*, embedder: Embedder, scope_value: ScopeValue | None = None) -> ChunkVectorRepository:
     repository = ChunkVectorRepository(
         backend=create_backend(provider=BackendProvider.MILVUS),
         embedder=embedder,
-        tenant_id=tenant_id,
+        scope_value=scope_value,
     )
     await repository.ensure_collection()
     return repository

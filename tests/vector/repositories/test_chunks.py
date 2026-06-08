@@ -41,6 +41,7 @@ if "zvec" not in sys.modules:
     sys.modules["zvec"] = zvec_module
 
 import pkg.vectors.repositories.chunks as chunks_module
+from pkg.vectors.backends.base import IsolationMode
 from pkg.vectors.repositories.chunks import ChunkVectorRepository, new_chunk_repository
 
 
@@ -48,10 +49,21 @@ def test_chunk_repository_enables_full_text_search_by_default():
     repo = ChunkVectorRepository(
         backend=MagicMock(),
         embedder=MagicMock(),
-        tenant_id=1,
     )
 
     assert repo.collection_spec.full_text_search.enabled is True
+
+
+def test_chunk_repository_disables_vector_isolation_by_default():
+    repo = ChunkVectorRepository(
+        backend=MagicMock(),
+        embedder=MagicMock(),
+        scope_value=1,
+    )
+
+    assert repo.collection_spec.isolation_mode == IsolationMode.NONE
+    assert repo.scope_field is None
+    assert repo.build_scope_filters() == []
 
 
 def test_new_chunk_repository_requires_embedder(monkeypatch):
@@ -61,7 +73,7 @@ def test_new_chunk_repository_requires_embedder(monkeypatch):
 
     monkeypatch.setattr(chunks_module, "create_backend", lambda **_: backend)
 
-    repo = asyncio.run(new_chunk_repository(tenant_id=1, embedder=embedder))
+    repo = asyncio.run(new_chunk_repository(embedder=embedder, scope_value=1))
 
     assert repo.embedder is embedder
     backend.ensure_collection.assert_awaited_once_with(spec=repo.collection_spec)

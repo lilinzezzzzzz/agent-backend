@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import inspect
 from collections import defaultdict
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Sequence
 from enum import StrEnum
 from typing import Any
 
@@ -271,7 +271,7 @@ class PostRetrievalPipeline:
         raw = hit.raw_score if hit.raw_score is not None else float("-inf")
         return relevance, raw, -hit.id
 
-    def _sort_hits(self, hits: Sequence[SearchHit]) -> list[SearchHit]:
+    def _sort_hits(self, hits: Iterable[SearchHit]) -> list[SearchHit]:
         return sorted(hits, key=self._hit_sort_key, reverse=True)
 
     @staticmethod

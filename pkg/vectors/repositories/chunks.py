@@ -24,6 +24,7 @@ from pkg.vectors.contracts import (
     SearchHit,
     VectorRecord,
 )
+from pkg.vectors.embedders.base import Embedder
 from pkg.vectors.repositories.base import (
     BaseVectorRepository,
     build_scalar_filters,
@@ -44,7 +45,7 @@ class ChunkVectorRepository(BaseVectorRepository[ChunkVectorDocument]):
         self,
         *,
         backend: VectorBackend,
-        embedder: Any | None = None,
+        embedder: Embedder,
         tenant_id: int,
         collection_name: str = CollectionName.CHUNKS,
         dimension: int = 1024,
@@ -167,9 +168,10 @@ class ChunkVectorRepository(BaseVectorRepository[ChunkVectorDocument]):
         return results
 
 
-async def new_chunk_repository(tenant_id: int) -> ChunkVectorRepository:
+async def new_chunk_repository(tenant_id: int, *, embedder: Embedder) -> ChunkVectorRepository:
     repository = ChunkVectorRepository(
         backend=create_backend(provider=BackendProvider.MILVUS),
+        embedder=embedder,
         tenant_id=tenant_id,
     )
     await repository.ensure_collection()

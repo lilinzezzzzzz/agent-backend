@@ -372,11 +372,7 @@ docker run --rm -p 8000:8000 \
 
 ## 相关文档
 
-- `docs/auth_module_guide.md`
-- `docs/third_party_login_guide.md`
-- `docs/uv_use_guide.md`
-- `docs/dataclass_use_guide.md`
-- `docs/md_use_guide.md`
+- `docs/README.md`
 - `pkg/agents/README.md`
 - `pkg/vectors/backends/milvus/README.md`
 - `pkg/vectors/backends/zvec/README.md`

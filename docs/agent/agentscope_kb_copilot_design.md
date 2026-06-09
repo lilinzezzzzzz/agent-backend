@@ -16,6 +16,11 @@ AGENT-BACKEND = 继续提供 Controller / Service / DTO / DAO / Cache / RAG / Ve
 因此，本 demo 的目标不是替代现有 `pkg.agents.ReActAgent`，而是展示成熟 Agent
 framework 如何以项目风格落地到一个 FastAPI 后端脚手架中。
 
+官方来源：
+
+- AgentScope 2.0 中文文档：https://docs.agentscope.io/zh/v2
+- AgentScope GitHub 仓库：https://github.com/agentscope-ai/agentscope
+
 ## 1. 目标与非目标
 
 ### 1.1 目标

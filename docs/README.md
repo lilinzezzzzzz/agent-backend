@@ -22,6 +22,7 @@
 Agent 运行时、记忆和上下文工程方案。
 
 - [Agent 记忆与 200k 上下文工程方案](agent/agent_memory_context_design.md)
+- [AgentScope 2.0 知识库运维 Copilot 技术方案](agent/agentscope_kb_copilot_design.md)
 
 ## `rag/`
 
@@ -29,6 +30,7 @@ RAG 工程架构、技术选型和 Agentic RAG 方案。
 
 - [RAG 工程分类与技术选型](rag/rag-engineering-classification-selection.md)
 - [Lightweight Agentic RAG 技术方案](rag/lightweight-agentic-rag.md)
+- [知识库 / 文档 / Chunk ORM 管理后台技术方案](rag/kb_orm_admin_design.md)
 
 ## 根目录
 

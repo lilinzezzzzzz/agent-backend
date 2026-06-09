@@ -17,12 +17,18 @@
 - [Python `@dataclass` 实战指南](development/dataclass_use_guide.md)
 - [程序员常用 Markdown 语法速查](development/md_use_guide.md)
 
+## `plans/`
+
+尚未执行、待验证或待拆分的开发计划。
+
+- [AgentScope 2.0 Agent Service 接入执行计划](plans/AGENTSCOPE_KB_COPILOT_EXECUTION_PLAN.md)
+
 ## `agent/`
 
 Agent 运行时、记忆和上下文工程方案。
 
 - [Agent 记忆与 200k 上下文工程方案](agent/agent_memory_context_design.md)
-- [AgentScope 2.0 知识库运维 Copilot 技术方案](agent/agentscope_kb_copilot_design.md)
+- [AgentScope 2.0 Agent Service 接入方案](agent/agentscope_service_integration.md)
   - 官方文档：[AgentScope 2.0 中文文档](https://docs.agentscope.io/zh/v2)
   - 源码仓库：[agentscope-ai/agentscope](https://github.com/agentscope-ai/agentscope)
 

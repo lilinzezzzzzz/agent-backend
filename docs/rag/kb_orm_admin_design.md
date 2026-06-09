@@ -3,21 +3,22 @@
 ## 概述
 
 本文档定义 AGENT-BACKEND 后续完整实现知识库、文档、chunk 和索引任务管理后台的技术方案。
-它是 AgentScope 2.0 知识库运维 Copilot demo 的后续演进文档，不是该 demo 的首版前置条件。
+它是 AgentScope 2.0 Agent Service 中知识库运维 tool / skill 的后续演进文档，不是 AgentScope
+Service 首版接入的前置条件。
 
 关系说明：
 
 ```text
-docs/agent/agentscope_kb_copilot_design.md
--> 首版使用 mock registry 快速展示 AgentScope 2.0 Copilot
+docs/agent/agentscope_service_integration.md
+-> 首版通过 AgentScope 官方 Agent Service 接入，KB 运维能力先作为 tool / skill 规划
 
 docs/rag/kb_orm_admin_design.md
--> 后续把 mock registry 替换为真实 ORM / DAO / Service / API
+-> 后续把 KB registry 替换为真实 ORM / DAO / Service / API
 ```
 
 核心目标：
 
-- 为 RAG 和 AgentScope Copilot 提供真实 KB registry。
+- 为 RAG 和 AgentScope Agent Service 中的 KB 运维能力提供真实 KB registry。
 - 管理知识库、文档、chunk、索引任务和基础质量状态。
 - 让 `RagMetadataDao` 可以批量查询真实 metadata，减少对 vector hit metadata 的依赖。
 - 为后续文档上传、解析、embedding refresh、index rebuild 和质量评估任务打基础。

@@ -1,5 +1,7 @@
 # AgentScope 2.0 Agent Service 接入执行计划
 
+状态：待实施。当前仅完成文档路线同步，尚未修改 FastAPI 挂载、配置、测试或运行时代码。
+
 本文档替代旧版 `AgentScope KB Copilot` 自建接口路线。新的结论是：当前接入方向不应手写一套
 `/kb-copilot/chat`、`/chat/stream`、agent/session/pending-action 适配层；应参考官方
 AgentScope 2.0 Agent Service 文档，把官方 FastAPI app 嵌入到本项目中，并选择本地文件系统
@@ -129,11 +131,12 @@ AGENTSCOPE_STORAGE_KEY_TTL_SECONDS: int | None = None
 internal/infra/agentscope_service.py
 internal/app.py
 internal/config.py
-.gitignore
 tests/api/test_agentscope_service_mount.py
 README.md
 docs/README.md
 ```
+
+说明：`.gitignore` 已覆盖 `runtime/`，本轮无需额外修改。
 
 删除或降级旧路线文件：
 
@@ -147,7 +150,6 @@ internal/agents/agentscope_kb/
 tests/api/test_agentscope_kb.py
 tests/services/test_agentscope_kb.py
 tests/agents/test_agentscope_kb_tools.py
-docs/agent/agentscope_kb_copilot_design.md
 ```
 
 处理策略：
@@ -155,6 +157,7 @@ docs/agent/agentscope_kb_copilot_design.md
 - 如果这些文件尚未合并到主线，建议删除旧 demo 实现，避免两个 AgentScope contract 并存。
 - 如果需要保留旧 KB Copilot 思路，应改为“基于 AgentScope Agent Service 的示例配置/seed 数据/skill”，而不是
   自建同名 chat API。
+- 旧 KB Copilot 设计文档已选择性合并到 `docs/agent/agentscope_service_integration.md`，并从文档集中删除。
 - 删除旧文件前必须确认没有其他业务入口依赖它们。
 
 ## 6. 分阶段执行
@@ -231,7 +234,7 @@ PY
 - 从 `internal/controllers/api/__init__.py` 移除 `agentscope_kb.router`。
 - 删除旧 `/v1/agentscope/kb-copilot/chat` 与 `/chat/stream` controller/schema/service/tests。
 - 如需保留知识库运维示例，将其重新设计为 AgentScope service 中的 Agent 配置、tool/skill 或 seed 流程。
-- 更新 `docs/agent/agentscope_kb_copilot_design.md`，明确旧设计已废弃或转为 Agent Service 示例。
+- 保持 `docs/agent/agentscope_service_integration.md` 为唯一 AgentScope 2.0 主接入方案文档。
 
 完成标准：
 

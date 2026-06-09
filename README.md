@@ -252,8 +252,13 @@ uv run celery -A entrypoints.celery:celery_app beat -l info
 - `internal/agents/order/`：订单、物流、售后、退款、发票咨询和开票两阶段确认。
 - `internal/agents/payment/`：支付方式、付款失败、扣款异常、账单、分期和金额计算咨询。
 
+AgentScope 2.0 的推荐接入路线是嵌入官方 Agent Service，而不是自建 KB Copilot chat API。
+该路线尚未落地到代码，详细方案见 `docs/agent/agentscope_service_integration.md` 和
+`docs/plans/AGENTSCOPE_KB_COPILOT_EXECUTION_PLAN.md`。
+
 相关文档：
 
+- `docs/agent/agentscope_service_integration.md`
 - `pkg/agents/README.md`
 - `internal/agents/order/README.md`
 - `internal/agents/payment/README.md`

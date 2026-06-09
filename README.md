@@ -1,6 +1,6 @@
 # agent-backend
 
-面向 Agent、RAG 与 AI 平台场景的 FastAPI 后端基础设施骨架。它不是单一业务服务，而是一个可继续扩展的后端模板，已经包含 Web API、认证、异步数据库访问、Redis、Celery、请求日志、第三方登录、Agent 执行循环和向量检索抽象。
+AGENT-BACKEND 是面向 Agent、RAG 与 AI 平台场景的 FastAPI demo 合集与后端脚手架。它的目标是沉淀可复用的后端工程范式和示例能力，便于快速验证 Agent 运行时、RAG、认证、异步数据库访问、Redis、Celery、请求日志、第三方登录和向量检索等基础设施；它不是一套需要长期承载真实业务流量的单一业务服务。
 
 README 只记录当前仓库可直接核对的能力；更细的设计约束和模块说明见 `docs/`、`pkg/*/README.md` 以及各目录下的 `AGENTS.md`。
 
@@ -260,46 +260,16 @@ uv run celery -A entrypoints.celery:celery_app beat -l info
 
 ## 项目结构
 
-```text
-.
-├── entrypoints/                # 进程启动入口
-│   ├── main.py                 # FastAPI 应用入口，导出 app
-│   ├── celery.py               # Celery CLI 入口，导出 celery_app
-│   └── run_celery_worker.sh    # Celery Worker 启动脚本
-├── internal/                   # 业务应用代码
-│   ├── app.py                  # 应用组装、路由、中间件、lifespan
-│   ├── config.py               # 配置模型和加载逻辑
-│   ├── controllers/            # API 路由
-│   │   ├── api/                # /v1
-│   │   ├── public/             # /v1/public
-│   │   └── internal/           # /v1/internal
-│   ├── middlewares/            # 请求日志、认证、Endpoint Guard 等中间件
-│   ├── infra/                  # DB、Redis、LLM client、Celery、调度器等基础设施
-│   ├── services/               # 业务用例与跨 DAO / 缓存 / 外部服务编排
-│   ├── agents/                 # 业务 Agent prompt、builder、tools
-│   ├── dao/                    # ORM 数据访问层
-│   ├── cache/                  # Redis 业务缓存封装
-│   ├── models/                 # SQLAlchemy ORM 模型
-│   ├── schemas/                # 请求和响应 Schema
-│   ├── tasks/                  # Celery 任务与 Beat 配置
-│   └── utils/                  # 应用内工具
-├── pkg/                        # 可复用基础包
-│   ├── agents/                 # 通用 Agent 执行循环
-│   ├── database/               # Async ORM 基础设施
-│   ├── logger/                 # Loguru 日志封装和 span
-│   ├── crypter/                # AES 加解密
-│   ├── oss/                    # OSS / S3 抽象
-│   ├── third_party_auth/       # 第三方登录策略
-│   ├── toolkit/                # 通用工具集
-│   └── vectors/                # 向量检索抽象与 backend
-├── examples/                   # 可运行示例代码，不作为生产运行时基础包
-│   └── llm/                    # LLM function call、MCP SSE 示例
-├── configs/                    # 环境配置模板与密钥模板
-├── docs/                       # 补充文档
-├── tests/                      # pytest 测试
-├── ddl/                        # DDL SQL
-└── dml/                        # DML SQL
-```
+- `entrypoints/`：进程入口，包含 FastAPI、Celery Worker / Beat 启动入口。
+- `internal/`：业务应用代码，包含路由、中间件、配置、服务、DAO、缓存、模型、Schema、任务和业务 Agent。
+- `pkg/`：可复用基础包，包含通用 Agent、数据库、日志、OSS、第三方登录、加解密、toolkit 和向量检索抽象。
+- `examples/`：可运行示例代码，不作为生产运行时基础包。
+- `configs/`：环境配置模板与密钥模板。
+- `docs/`：补充文档。
+- `tests/`：pytest 测试。
+- `ddl/`、`dml/`：数据库 SQL。
+
+更细的目录职责和修改约束见各目录下的 `AGENTS.md`；模块级使用说明优先看对应 `README.md`。
 
 ## 向量检索
 

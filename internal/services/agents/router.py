@@ -5,7 +5,6 @@ from internal.core import AppException, errors
 from internal.infra.llm import AgentLLMClient, new_default_llm_client
 from internal.services.agents.audit import (
     AgentAuditContext,
-    AgentAuditWriter,
     AuditedAgentLLMClient,
     failed_agent_result,
     new_agent_audit_service,
@@ -35,6 +34,7 @@ from internal.services.dto.agent import (
     AgentStreamEventDTO,
     AgentStreamEventName,
 )
+from internal.services.protocols import AgentAuditWriter
 from pkg.logger import logger
 from pkg.toolkit import context
 from pkg.toolkit.string import uuid6_unique_str_id

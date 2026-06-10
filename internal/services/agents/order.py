@@ -7,7 +7,6 @@ from internal.core import AppException, errors
 from internal.infra.llm import AgentLLMClient, new_default_llm_client
 from internal.services.agents.audit import (
     AgentAuditContext,
-    AgentAuditWriter,
     AuditedAgentLLMClient,
     failed_agent_result,
     new_agent_audit_service,
@@ -25,6 +24,7 @@ from internal.services.agents.stream import (
 )
 from internal.services.dto.agent import AgentRunResultDTO, AgentStreamEventDTO
 from internal.services.order import OrderService, new_order_service
+from internal.services.protocols import AgentAuditWriter
 from internal.services.rag import RagService, new_rag_service
 from pkg.logger import logger
 from pkg.toolkit import context

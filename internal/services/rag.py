@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from internal.config import settings
 from internal.core import AppException, errors
 from internal.dao.rag import RagChunkMetadata, RagMetadataDao, new_rag_metadata_dao
+from internal.infra.llm import AgentLLMClient
 from internal.services.dto.rag import (
     PreparedRetrievalQueryDTO,
     RagAnswerDTO,
@@ -73,18 +74,6 @@ class SettingsRagScopeResolver:
         return {kb_id for kb_id in settings.RAG_ALLOWED_KB_IDS if kb_id > 0}
 
 
-class RagLLMClient(Protocol):
-    async def chat_completion_structured[StructuredOutputT: BaseModel](
-        self,
-        *,
-        messages: Sequence[Mapping[str, Any]],
-        response_model: type[StructuredOutputT],
-        max_tokens: int | None = None,
-        temperature: float | None = None,
-        **kwargs: Any,
-    ) -> StructuredOutputT: ...
-
-
 class _RagLLMAnswerModel(BaseModel):
     answer: str = Field(default="")
     citations: list[str] = Field(default_factory=list)
@@ -95,7 +84,7 @@ class RagService:
     def __init__(
         self,
         *,
-        llm_client: RagLLMClient,
+        llm_client: AgentLLMClient,
         embedder: Any,
         metadata_dao: RagMetadataDao,
         scope_resolver: RagScopeResolver | None = None,

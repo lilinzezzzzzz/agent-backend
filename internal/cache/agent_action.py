@@ -1,27 +1,9 @@
 """Agent 待确认动作与幂等结果缓存。"""
 
 from hashlib import sha256
-from typing import Protocol
 
 from internal.infra.redis.connection import redis_client
-
-
-class AgentActionRedisClient(Protocol):
-    """AgentActionCache 使用的最小 Redis 客户端协议。"""
-
-    async def set_dict(
-        self, key: str, value: dict[str, object], ex: int | None = None
-    ) -> bool: ...
-
-    async def get_dict(self, key: str) -> dict[str, object] | None: ...
-
-    async def delete_key(self, key: str) -> int: ...
-
-    async def acquire_lock(
-        self, lock_key: str, expire_ms: int, timeout_ms: int
-    ) -> str: ...
-
-    async def release_lock(self, lock_key: str, identifier: str) -> bool: ...
+from pkg.toolkit.redis_client import RedisClient
 
 
 class AgentActionCache:
@@ -32,7 +14,7 @@ class AgentActionCache:
     请求的重试。Redis key 中只保存幂等键摘要，避免把客户端原始重试键暴露到 key 空间。
     """
 
-    def __init__(self, redis_cli: AgentActionRedisClient):
+    def __init__(self, redis_cli: RedisClient):
         self._redis = redis_cli
 
     @staticmethod

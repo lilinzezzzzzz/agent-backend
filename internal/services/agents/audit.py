@@ -13,6 +13,7 @@ from internal.dao.agent_audit import AgentAuditDao, new_agent_audit_dao
 from internal.models.agent_audit import AgentAudit
 from internal.schemas.agent import JsonValue
 from internal.services.dto.agent import AgentRunResultDTO
+from internal.services.protocols import AgentAuditWriter
 from internal.utils.background_tasks import background_task_manager
 from pkg.logger import logger
 from pkg.toolkit import context
@@ -61,25 +62,6 @@ class ModelDumpable(Protocol):
     """支持 Pydantic 风格 model_dump 的对象。"""
 
     def model_dump(self, **kwargs: Any) -> Any: ...
-
-
-class AgentAuditWriter(Protocol):
-    """Agent 审计写入协议，便于业务 Service 测试替换。"""
-
-    async def record_agent_run(
-        self,
-        *,
-        agent_name: str,
-        user_id: int,
-        trace_id: str | None,
-        user_input: str,
-        max_steps: int,
-        result: AgentRunResultDTO,
-        started_at: datetime,
-        ended_at: datetime,
-        llm_calls: Sequence[Mapping[str, JsonValue]],
-        metadata: Mapping[str, JsonValue] | None = None,
-    ) -> bool: ...
 
 
 @dataclass(slots=True)

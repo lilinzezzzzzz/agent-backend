@@ -7,6 +7,7 @@ from internal.core import AppException, errors
 from internal.infra.llm import AgentLLMClient, new_default_llm_client
 from internal.services.agents.audit import (
     AgentAuditContext,
+    AgentAuditService,
     AuditedAgentLLMClient,
     failed_agent_result,
     new_agent_audit_service,
@@ -22,7 +23,6 @@ from internal.services.agents.stream import (
     stream_event_from_run_event,
 )
 from internal.services.dto.agent import AgentRunResultDTO, AgentStreamEventDTO
-from internal.services.protocols import AgentAuditWriter
 from internal.services.rag import RagService, new_rag_service
 from pkg.logger import logger
 from pkg.toolkit import context
@@ -35,7 +35,7 @@ class PaymentAgentService:
         *,
         llm_client: AgentLLMClient,
         rag_service: RagService,
-        audit_service: AgentAuditWriter,
+        audit_service: AgentAuditService,
         conversation_service: AgentConversationService | None = None,
     ):
         self._llm_client = llm_client

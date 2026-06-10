@@ -303,27 +303,6 @@ class FakeAgentAuditService:
         return True
 
 
-class FakeAgentConfirmationResolver:
-    def __init__(self, routes: dict[str, AgentRoute] | None = None):
-        self._routes = routes or {"confirmation-token": AgentRoute.ORDER}
-        self.calls: list[dict[str, Any]] = []
-
-    async def resolve(
-        self,
-        *,
-        user_id: int,
-        confirmation_token: str,
-    ):
-        self.calls.append(
-            {"user_id": user_id, "confirmation_token": confirmation_token}
-        )
-        return type(
-            "FakeAgentConfirmationContext",
-            (),
-            {"route": self._routes[confirmation_token]},
-        )()
-
-
 class FakeRagService:
     def __init__(self):
         self.calls: list[dict[str, Any]] = []
@@ -651,7 +630,7 @@ async def test_agent_router_service_routes_order_question_without_llm() -> None:
         order_agent_service=order_agent_service,
         payment_agent_service=payment_agent_service,
         audit_service=FakeAgentAuditService(),
-        confirmation_resolver=FakeAgentConfirmationResolver(),
+        action_store=FakeAgentActionStore(),
     )
 
     result = await service.chat(user_id=999, question="订单 1001 到哪了？", max_steps=3)
@@ -673,7 +652,7 @@ async def test_agent_router_service_streams_route_and_agent_events() -> None:
         order_agent_service=order_agent_service,
         payment_agent_service=payment_agent_service,
         audit_service=FakeAgentAuditService(),
-        confirmation_resolver=FakeAgentConfirmationResolver(),
+        action_store=FakeAgentActionStore(),
     )
 
     events = [
@@ -705,7 +684,7 @@ async def test_agent_router_service_falls_back_to_llm_for_ambiguous_question() -
         order_agent_service=order_agent_service,
         payment_agent_service=payment_agent_service,
         audit_service=FakeAgentAuditService(),
-        confirmation_resolver=FakeAgentConfirmationResolver(),
+        action_store=FakeAgentActionStore(),
     )
 
     result = await service.chat(user_id=999, question="我买的东西怎么还没到")
@@ -726,7 +705,7 @@ async def test_agent_router_service_routes_payment_question_without_llm() -> Non
         order_agent_service=order_agent_service,
         payment_agent_service=payment_agent_service,
         audit_service=FakeAgentAuditService(),
-        confirmation_resolver=FakeAgentConfirmationResolver(),
+        action_store=FakeAgentActionStore(),
     )
 
     result = await service.chat(user_id=999, question="支付失败怎么办？", max_steps=3)
@@ -750,7 +729,7 @@ async def test_agent_router_service_returns_unsupported_without_calling_agents()
         order_agent_service=order_agent_service,
         payment_agent_service=payment_agent_service,
         audit_service=FakeAgentAuditService(),
-        confirmation_resolver=FakeAgentConfirmationResolver(),
+        action_store=FakeAgentActionStore(),
     )
 
     result = await service.chat(user_id=999, question="帮我写一首诗")
@@ -767,13 +746,18 @@ async def test_agent_router_service_bypasses_llm_for_confirmation() -> None:
     llm_client = FakeLLMClient([])
     order_agent_service = RecordingOrderAgentService()
     payment_agent_service = RecordingPaymentAgentService()
-    confirmation_resolver = FakeAgentConfirmationResolver()
+    action_store = FakeAgentActionStore()
+    action_store.pending["confirmation-token"] = {
+        "route": "order",
+        "action": "submit_invoice_request",
+        "user_id": 999,
+    }
     service = AgentRouterService(
         llm_client=llm_client,
         order_agent_service=order_agent_service,
         payment_agent_service=payment_agent_service,
         audit_service=FakeAgentAuditService(),
-        confirmation_resolver=confirmation_resolver,
+        action_store=action_store,
     )
 
     result = await service.chat(
@@ -785,9 +769,6 @@ async def test_agent_router_service_bypasses_llm_for_confirmation() -> None:
 
     assert result.route == "order"
     assert llm_client.calls == []
-    assert confirmation_resolver.calls == [
-        {"user_id": 999, "confirmation_token": "confirmation-token"}
-    ]
     assert order_agent_service.calls[0]["confirmation_token"] == "confirmation-token"
     assert payment_agent_service.calls == []
 
@@ -797,14 +778,18 @@ async def test_agent_router_service_routes_confirmation_by_pending_action_route(
     llm_client = FakeLLMClient([])
     order_agent_service = RecordingOrderAgentService()
     payment_agent_service = RecordingPaymentAgentService()
+    action_store = FakeAgentActionStore()
+    action_store.pending["payment-confirmation-token"] = {
+        "route": "payment",
+        "action": "submit_payment",
+        "user_id": 999,
+    }
     service = AgentRouterService(
         llm_client=llm_client,
         order_agent_service=order_agent_service,
         payment_agent_service=payment_agent_service,
         audit_service=FakeAgentAuditService(),
-        confirmation_resolver=FakeAgentConfirmationResolver(
-            {"payment-confirmation-token": AgentRoute.PAYMENT}
-        ),
+        action_store=action_store,
     )
 
     result = await service.chat(

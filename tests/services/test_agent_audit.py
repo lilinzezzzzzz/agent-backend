@@ -21,7 +21,7 @@ class FakeAgentAuditDao:
         self.inserted = instance
 
 
-class FakeAgentAuditWriter:
+class FakeAgentAuditService:
     def __init__(self):
         self.records: list[dict[str, Any]] = []
 
@@ -157,7 +157,7 @@ async def test_record_agent_audit_uses_background_task_manager(
     monkeypatch.setattr(
         "internal.services.agents.audit.background_task_manager", task_manager
     )
-    audit_writer = FakeAgentAuditWriter()
+    audit_writer = FakeAgentAuditService()
     audit_context = AgentAuditContext.start(
         agent_name="order_support",
         user_id=999,
@@ -199,7 +199,7 @@ async def test_record_agent_audit_falls_back_when_background_task_manager_is_uni
         "internal.services.agents.audit.background_task_manager",
         UninitializedBackgroundTaskManager(),
     )
-    audit_writer = FakeAgentAuditWriter()
+    audit_writer = FakeAgentAuditService()
     audit_context = AgentAuditContext.start(
         agent_name="order_support",
         user_id=999,
@@ -232,7 +232,7 @@ async def test_record_agent_audit_does_not_write_inline_when_background_task_man
         "internal.services.agents.audit.background_task_manager",
         ShuttingDownBackgroundTaskManager(),
     )
-    audit_writer = FakeAgentAuditWriter()
+    audit_writer = FakeAgentAuditService()
     audit_context = AgentAuditContext.start(
         agent_name="order_support",
         user_id=999,

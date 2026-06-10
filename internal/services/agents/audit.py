@@ -5,7 +5,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from time import monotonic
-from typing import Any, Protocol, runtime_checkable
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -13,7 +13,6 @@ from internal.dao.agent_audit import AgentAuditDao, new_agent_audit_dao
 from internal.models.agent_audit import AgentAudit
 from internal.schemas.agent import JsonValue
 from internal.services.dto.agent import AgentRunResultDTO
-from internal.services.protocols import AgentAuditWriter
 from internal.utils.background_tasks import background_task_manager
 from pkg.logger import logger
 from pkg.toolkit import context
@@ -55,13 +54,6 @@ _NON_SECRET_TOKEN_KEYS = {
     "prompt_tokens",
     "total_tokens",
 }
-
-
-@runtime_checkable
-class ModelDumpable(Protocol):
-    """支持 Pydantic 风格 model_dump 的对象。"""
-
-    def model_dump(self, **kwargs: Any) -> Any: ...
 
 
 @dataclass(slots=True)
@@ -241,7 +233,7 @@ class AuditedAgentLLMClient:
 
 async def record_agent_audit(
     *,
-    audit_writer: AgentAuditWriter,
+    audit_writer: AgentAuditService,
     audit_context: AgentAuditContext,
     result: AgentRunResultDTO,
     metadata: Mapping[str, JsonValue] | None = None,
@@ -323,8 +315,6 @@ def redact_value(value: Any) -> Any:
         return [redact_value(item) for item in value]
     if isinstance(value, str):
         return _redact_text(value)
-    if isinstance(value, ModelDumpable):
-        return redact_value(value.model_dump(mode="json"))
     if hasattr(value, "__dict__"):
         return redact_value(vars(value))
     return value
@@ -341,8 +331,6 @@ def to_json_value(value: Any) -> JsonValue:
     if isinstance(value, Sequence) and not isinstance(value, str | bytes | bytearray):
         return [to_json_value(item) for item in value]
     if isinstance(value, BaseModel):
-        return to_json_value(value.model_dump(mode="json"))
-    if isinstance(value, ModelDumpable):
         return to_json_value(value.model_dump(mode="json"))
     if hasattr(value, "__dict__"):
         return to_json_value(vars(value))

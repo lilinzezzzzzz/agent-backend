@@ -1,18 +1,19 @@
 from collections.abc import AsyncIterator
 
 from internal.agents.router import AgentRoute, HybridAgentRouter
+from internal.cache import AgentActionCache, new_agent_action_cache
 from internal.core import AppException, errors
 from internal.infra.llm import AgentLLMClient, new_default_llm_client
 from internal.services.agents.audit import (
     AgentAuditContext,
+    AgentAuditService,
     AuditedAgentLLMClient,
     failed_agent_result,
     new_agent_audit_service,
     record_agent_audit,
 )
 from internal.services.agents.confirmation import (
-    AgentConfirmationResolver,
-    new_agent_confirmation_resolver,
+    resolve_agent_confirmation_context,
 )
 from internal.services.agents.conversation import (
     AgentConversationService,
@@ -34,7 +35,6 @@ from internal.services.dto.agent import (
     AgentStreamEventDTO,
     AgentStreamEventName,
 )
-from internal.services.protocols import AgentAuditWriter
 from pkg.logger import logger
 from pkg.toolkit import context
 from pkg.toolkit.string import uuid6_unique_str_id
@@ -49,15 +49,15 @@ class AgentRouterService:
         llm_client: AgentLLMClient,
         order_agent_service: OrderAgentService,
         payment_agent_service: PaymentAgentService,
-        audit_service: AgentAuditWriter,
-        confirmation_resolver: AgentConfirmationResolver,
+        audit_service: AgentAuditService,
+        action_store: AgentActionCache,
         conversation_service: AgentConversationService | None = None,
     ):
         self._llm_client = llm_client
         self._order_agent_service = order_agent_service
         self._payment_agent_service = payment_agent_service
         self._audit_service = audit_service
-        self._confirmation_resolver = confirmation_resolver
+        self._action_store = action_store
         self._conversation_service = conversation_service
 
     async def chat(
@@ -96,7 +96,8 @@ class AgentRouterService:
             # 确认请求必须走确定性路径。这里不能让 LLM Router 重新判定路由，
             # 也不能相信客户端传 route；业务域必须来自服务端保存的 pending action。
             if confirmation_token is not None:
-                confirmation_context = await self._confirmation_resolver.resolve(
+                confirmation_context = await resolve_agent_confirmation_context(
+                    action_store=self._action_store,
                     user_id=user_id,
                     confirmation_token=confirmation_token,
                 )
@@ -259,7 +260,8 @@ class AgentRouterService:
         run_id: str | None = None
         try:
             if confirmation_token is not None:
-                confirmation_context = await self._confirmation_resolver.resolve(
+                confirmation_context = await resolve_agent_confirmation_context(
+                    action_store=self._action_store,
                     user_id=user_id,
                     confirmation_token=confirmation_token,
                 )
@@ -397,7 +399,7 @@ def new_agent_router_service() -> AgentRouterService:
             order_agent_service=new_order_agent_service(),
             payment_agent_service=new_payment_agent_service(),
             audit_service=new_agent_audit_service(),
-            confirmation_resolver=new_agent_confirmation_resolver(),
+            action_store=new_agent_action_cache(),
             conversation_service=new_agent_conversation_service(),
         )
     return _agent_router_service

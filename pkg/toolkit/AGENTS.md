@@ -11,7 +11,7 @@
 - 客户端：`http_cli.py`、`redis_client.py`、`grpc.py`
 - 时间/任务：`timer.py`、`celery.py`、`apscheduler.py`
 - 上下文/签名/认证：`context.py`、`signature.py`、`jwt.py`、`hasher.py`
-- 其他：`config_loader.py`、`exc.py`、`inter.py`、`middleware.py`、`logger.py`
+- 其他：`config_loader.py`、`exc.py`、`inter.py`、`middleware.py`
 
 ## 编码约定
 

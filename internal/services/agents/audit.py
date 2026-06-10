@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from internal.dao.agent_audit import AgentAuditDao, new_agent_audit_dao
 from internal.models.agent_audit import AgentAudit
 from internal.schemas.agent import JsonValue
-from internal.services.dto.agent import AgentRunDTO
+from internal.services.dto.agent import AgentRunResultDTO
 from internal.utils.background_tasks import background_task_manager
 from pkg.logger import logger
 from pkg.toolkit import context
@@ -74,7 +74,7 @@ class AgentAuditWriter(Protocol):
         trace_id: str | None,
         user_input: str,
         max_steps: int,
-        result: AgentRunDTO,
+        result: AgentRunResultDTO,
         started_at: datetime,
         ended_at: datetime,
         llm_calls: Sequence[Mapping[str, JsonValue]],
@@ -136,7 +136,7 @@ class AgentAuditService:
         trace_id: str | None,
         user_input: str,
         max_steps: int,
-        result: AgentRunDTO,
+        result: AgentRunResultDTO,
         started_at: datetime,
         ended_at: datetime,
         llm_calls: Sequence[Mapping[str, JsonValue]],
@@ -261,7 +261,7 @@ async def record_agent_audit(
     *,
     audit_writer: AgentAuditWriter,
     audit_context: AgentAuditContext,
-    result: AgentRunDTO,
+    result: AgentRunResultDTO,
     metadata: Mapping[str, JsonValue] | None = None,
 ) -> bool:
     """性能型审计写入入口：请求链路只投递后台任务。"""
@@ -310,10 +310,10 @@ def failed_agent_result(
     run_id: str,
     error_type: str,
     message: str | None = None,
-) -> AgentRunDTO:
+) -> AgentRunResultDTO:
     """构造用于审计的失败结果，不暴露给 API。"""
     metadata_message = f"{error_type}: {message}" if message else error_type
-    return AgentRunDTO(
+    return AgentRunResultDTO(
         run_id=run_id,
         status="failed",
         answer=None,

@@ -37,10 +37,6 @@ question + max_steps
 使用以下分层：
 
 ```text
-MockAgentStorageBackend
-  -> Phase 0 使用，先跑通 API / Service / 上下文装配链路
-  -> 仅用于 local / test / demo，不作为权威存储
-
 PostgreSQL / 当前主数据库
   -> 权威保存 session、message、run、step、rolling summary
   -> 默认直接保存普通规模的工具参数和结构化结果
@@ -50,9 +46,9 @@ Redis
   -> session active lock / run lock
   -> 可选缓存最近上下文
 
-Object Storage / 大字段存储，后续按需引入
-  -> 只处理超过阈值的大工具结果、长日志、文件型 artifact
-  -> 大多数普通 Agent 运行不需要写入 Object Storage
+Object Storage / OSS，大字段存储后续按需引入
+  -> 首版只预留 agent_tool_artifact 表结构，不强制接入对象存储
+  -> 真正需要大对象存储时，再接入项目已有 OSS provider、MinIO、S3 或阿里云 OSS
 
 agent_audit
   -> 继续作为脱敏审计表，不参与会话恢复和上下文读取
@@ -62,9 +58,9 @@ agent_audit
 作为 Agent 请求和响应都显式承载的业务 contract；请求侧只有首次普通对话允许为空，
 表示创建新会话。
 
-为降低首轮落地成本，可以先实现 mock backend。mock 必须实现同一个
-`AgentStorageBackend` 协议，保证 API、Service 和 Agent 上下文链路稳定；后续替换成
-数据库 backend 时，不应再改 Controller contract。
+首版直接落地数据库 backend，不引入临时内存存储。`AgentStorageBackend`
+协议用于隔离 Service 与 DAO/表结构，保证 API、Service 和 Agent 上下文链路稳定；
+后续如替换底层存储，不应再改 Controller contract。
 
 ## 3. 目标与非目标
 
@@ -76,7 +72,7 @@ agent_audit
 - 支持按 session 装配最近上下文，但不把全量历史塞进 prompt。
 - 保持 Controller 薄层，存储编排放在 Service，数据库访问放在 DAO。
 - 保留 Redis confirmation / idempotency 现有语义，不把短期确认状态迁移到 DB。
-- 支持 Phase 0 使用 mock backend 先验证接口和 Service 链路。
+- 首版直接使用数据库 backend 验证接口和 Service 链路。
 - 为后续 rolling summary、long-term memory、tool artifact 和向量检索预留结构。
 
 ### 3.2 非目标
@@ -85,8 +81,6 @@ agent_audit
 - 不把 `agent_audit` 升级成会话存储。
 - 不在 Controller 中直接读写数据库、Redis 或拼装上下文。
 - 不在首版实现长期记忆抽取、embedding、上下文预算 packer 的完整能力。
-- 不新增 AgentScope 官方 Agent Service 的存储方案；AgentScope 仍按
-  `agentscope_service_integration.md` 走官方 storage/message bus。
 
 ## 4. API Contract
 
@@ -243,43 +237,35 @@ class AgentStorageBackend(Protocol):
 - 测试可以用 fake backend 覆盖 Agent Service 行为。
 - 事务和批量写策略集中管理。
 
-### 6.1 Mock backend
+### 6.1 Database backend
 
-Phase 0 可以先实现 `MockAgentStorageBackend`：
+首版直接实现 `DatabaseAgentStorageBackend`：
 
 ```text
 internal/services/agents/conversation.py
   -> AgentConversationService
-  -> MockAgentStorageBackend
-  -> DatabaseAgentStorageBackend，后续替换
+  -> DatabaseAgentStorageBackend
+  -> AgentSessionDao / AgentMessageDao / AgentRunDao / AgentRunStepDao
 ```
 
-mock backend 规则：
+database backend 规则：
 
-- 只在 `local`、`test` 或显式配置启用时使用。
-- 使用进程内 dict/list 保存 session、message、run、step。
-- 生成真实格式的 `session_id`、`run_id`、`message_id`，不要返回硬编码 ID。
+- 使用当前主数据库保存 session、message、run、step。
+- 在 `start_run()` 中生成真实格式的 `session_id`、`run_id`、`message_id`，不要返回硬编码 ID。
 - 校验 `user_id + session_id` 归属，保持权限语义和真实 backend 一致。
-- 支持最近消息读取、run 完成、run 失败和软删除的最小行为。
-- 用 `anyio.Lock` 或等价锁保护内存状态，避免并发测试中写乱序。
-- 对内存数据设置容量上限，例如最多保留 1000 个 session，防止本地长时间运行无限增长。
+- `start_run()` 负责创建或校验 session、写入 user message、创建 running run。
+- `complete_run()` 负责写 assistant message、批量写 run steps、更新 run/session 状态。
+- `fail_run()` 负责把 run 标记为 failed/cancelled，并记录稳定错误码和脱敏错误信息。
+- 最近消息读取必须分页并稳定排序，不能无边界加载全量历史。
+- 写入路径通过 DAO 完成，Controller 不直接访问数据库。
+- 不在数据库事务中执行 LLM 调用、RAG 检索或外部网络请求。
 
-mock backend 限制：
+本地和测试环境也默认使用 database backend。单元测试如需隔离数据库，可以在测试内
+注入轻量 fake 实现覆盖 `AgentStorageBackend` 协议，但 fake 只作为测试替身，不进入
+运行时配置、部署方案或产品链路。
 
-- 进程重启数据丢失。
-- 多 worker / 多进程之间不共享状态。
-- 不提供可靠审计、恢复、分页性能和 retention。
-- 不能用于生产、压测或任何需要数据可靠性的环境。
-
-配置建议：
-
-```text
-AGENT_STORAGE_BACKEND=mock      # local/test/demo
-AGENT_STORAGE_BACKEND=database  # dev/prod 或需要可靠存储的环境
-```
-
-如果暂不新增配置，也可以在 `new_agent_conversation_service()` 中先固定返回
-`MockAgentStorageBackend`，但必须在文档和代码注释中标明这是临时 Phase 0 实现。
+因此首版不需要新增存储后端切换配置；`new_agent_conversation_service()`
+固定组装 `DatabaseAgentStorageBackend` 和对应 DAO。
 
 ## 7. 数据模型
 
@@ -465,8 +451,14 @@ index idx_agent_run_step_tool(tool)
 
 ### 7.5 agent_tool_artifact
 
-首版可以延后，但表结构应预留。大多数工具调用不会产生大字段数据，可以直接把脱敏后的
-结构化结果写入 `agent_run_step.action_result`；只有命中阈值或文件型结果时才创建 artifact。
+首版可以延后完整 artifact 存取能力，但表结构应预留。落地规则：
+
+- 小型工具结果直接存 `agent_run_step.action_result`。
+- 大型或文件型结果先预留 `agent_tool_artifact` 表结构，不强制首版接入对象存储。
+- 真正需要大对象存储时，再接入项目已有 OSS provider、MinIO、S3 或阿里云 OSS。
+
+大多数工具调用不会产生大字段数据，可以直接把脱敏后的结构化结果写入
+`agent_run_step.action_result`；只有命中阈值或文件型结果时才创建 artifact。
 
 ```text
 agent_tool_artifact
@@ -554,13 +546,17 @@ confirmation 路径必须绕过 LLM：
 
 ```text
 confirmation_token + idempotency_key
--> OrderService.confirm_invoice_request()
+-> AgentConfirmationResolver.resolve()
 -> Redis pending action / lock / idempotency result
+-> route 对应的专业 Service confirm 方法
 -> AgentConversationService.complete_run()
 ```
 
 要求：
 
+- Router 不能把 `confirmation_token` 默认等同于订单业务，必须先从服务端 pending action
+  读取可信 `route`，再分发到对应专业 Agent。
+- pending action 必须保存 `route`、`action`、`user_id` 和业务 payload；`route` 不信任客户端传入值。
 - 不信任客户端重传的订单号、发票抬头、税号、邮箱等参数。
 - `confirmation_token` 不保存明文到 message 或 run metadata；如需关联，只保存 hash 或脱敏值。
 - 确认结果需要写入同一个 session，便于用户看到“已提交/queued”的上下文。
@@ -686,22 +682,20 @@ agent_session:recent_context:{session_id}
 推荐部署顺序：
 
 ```text
-0. 先实现 MockAgentStorageBackend，跑通 API / Service / 上下文链路。
-1. 新增 DDL 和 ORM model。
-2. 新增 DAO 和 DatabaseAgentStorageBackend。
-3. 将配置从 mock 切换到 database。
-4. 调整 schema 和 controller docstring。
-5. 接入 JSON Agent Service。
-6. 接入 SSE Agent Service。
-7. 增加 session list/messages/delete API。
-8. 补充测试和 README/docs 同步。
+0. 新增 DDL 和 ORM model。
+1. 新增 DAO 和 DatabaseAgentStorageBackend。
+2. 调整 schema 和 controller docstring。
+3. 接入 JSON Agent Service。
+4. 接入 SSE Agent Service。
+5. 增加 session list/messages/delete API。
+6. 补充测试和 README/docs 同步。
 ```
 
 ## 13. 测试计划
 
 Service 单元测试：
 
-- mock backend 创建 session、追加消息、读取最近上下文。
+- storage backend 创建 session、追加消息、读取最近上下文。
 - 未传 `session_id` 创建新会话。
 - 传入他人 `session_id` 返回无权限。
 - 普通 run 成功后写 user message、assistant message、run、steps。
@@ -733,43 +727,40 @@ uv run ruff check internal/controllers/api/agent.py internal/services/agents int
 
 ## 14. 分阶段落地
 
-### Phase 0：Mock 存储链路
+### Phase 0：数据库存储基础链路
+
+状态：已落地完成。
 
 - 定义 `AgentStorageBackend` 协议和 DTO。
-- 实现 `MockAgentStorageBackend`。
-- 接入 `AgentConversationService`。
-- 调整 Agent 请求/响应 `session_id` contract。
-- 用 mock 跑通 JSON 和 SSE 的 session/run/message/step 语义。
-
-### Phase 1：可靠会话存储
-
 - 新增 session、message、run、step 表。
 - 新增 DAO 和 `DatabaseAgentStorageBackend`。
-- 保持 Phase 0 已确定的 `session_id` contract 不变。
+- 接入 `AgentConversationService`。
+- 调整 Agent 请求/响应 `session_id` contract。
 - JSON Agent 接口完成可靠写入。
 
-### Phase 2：SSE 存储一致性
+### Phase 1：SSE 存储一致性
 
 - SSE 开始前创建 running run。
 - run completed 前完成 DB 写入。
 - 客户端断开时标记 cancelled。
 - 增加 running run 清理任务。
 
-### Phase 3：会话读取 API
+### Phase 2：会话读取 API
 
 - `GET /v1/agent/sessions`
 - `GET /v1/agent/sessions/{session_id}/messages`
 - `DELETE /v1/agent/sessions/{session_id}`
 - 完善分页、排序、软删除。
 
-### Phase 4：上下文摘要与 artifact
+### Phase 3：上下文摘要与 artifact
 
 - 增加 rolling summary。
-- 增加 `agent_tool_artifact`。
+- 预留 `agent_tool_artifact` 表结构。
 - 大工具结果默认以摘要和引用进入 prompt。
+- 需要大对象存储时，再接入项目已有 OSS provider、MinIO、S3 或阿里云 OSS。
 - 摘要和 artifact 清理通过 Celery 或后台任务执行。
 
-### Phase 5：长期记忆和检索
+### Phase 4：长期记忆和检索
 
 - 新增 `agent_memory`。
 - 支持 owner scope、memory type、source event、status、expires_at。

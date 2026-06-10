@@ -115,6 +115,7 @@ class OrderService:
 
         token = uuid6_unique_str_id()
         payload: dict[str, object] = {
+            "route": "order",
             "action": INVOICE_REQUEST_ACTION,
             "user_id": user_id,
             "order_id": order_id,

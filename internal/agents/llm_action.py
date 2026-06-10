@@ -40,12 +40,14 @@ class LLMReactActionMaker:
         *,
         llm_client: AgentLLMClient,
         system_prompt: str,
+        session_context: Mapping[str, Any] | None = None,
         max_tokens: int | None = 800,
         temperature: float | None = 0,
         extra_completion_kwargs: Mapping[str, Any] | None = None,
     ):
         self._llm_client = llm_client
         self._system_prompt = system_prompt
+        self._session_context = dict(session_context or {})
         self._max_tokens = max_tokens
         self._temperature = temperature
         self._extra_completion_kwargs = dict(extra_completion_kwargs or {})
@@ -93,6 +95,7 @@ class LLMReactActionMaker:
                             }
                             for step in context.state.steps
                         ],
+                        "session_context": self._session_context,
                         "output_contract": {
                             "tool_call": {
                                 "type": "tool_call",

@@ -10,6 +10,12 @@ type JsonValue = (
 class AgentReqSchema(BaseModel):
     """Agent 通用请求。"""
 
+    session_id: str | None = Field(
+        None,
+        description="会话 ID；首次普通对话可为空，继续对话时传入服务端返回值",
+        min_length=1,
+        max_length=64,
+    )
     question: str = Field(..., description="用户问题", min_length=1, max_length=500)
     max_steps: int = Field(4, description="Agent 最大执行步数", ge=1, le=8)
     confirmation_token: str | None = Field(
@@ -60,6 +66,7 @@ class AgentActionConfirmationSchema(BaseModel):
 class AgentRunRespSchema(BaseModel):
     """业务 Agent 运行响应。"""
 
+    session_id: str = Field(..., description="本次 Agent 运行所属会话 ID")
     run_id: str = Field(..., description="本次 Agent 运行 ID")
     status: str = Field(..., description="Agent 运行状态")
     answer: str | None = Field(None, description="最终回答；达到步数上限时可能为空")

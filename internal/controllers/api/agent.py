@@ -64,7 +64,8 @@ async def agent_chat(
         携带服务端确认 token 和幂等键的请求绕过 LLM Router，由确定性 Service 执行。
 
     Args:
-        req: 请求体，包含问题、最大执行步数，以及可选的确认 token 与幂等键。
+        req: 请求体，包含可选 session_id、问题、最大执行步数，以及可选的确认 token 与幂等键；
+            首次普通对话可不传 session_id，继续对话时传入上次响应的 session_id。
         agent_router_service: 通过依赖注入获取的 `AgentRouterService` 实例。
 
     Returns:
@@ -74,6 +75,7 @@ async def agent_chat(
     """
     result = await agent_router_service.chat(
         user_id=get_user_id(),
+        session_id=req.session_id,
         question=req.question,
         max_steps=req.max_steps,
         confirmation_token=req.confirmation_token,
@@ -106,7 +108,7 @@ async def agent_chat_stream(
         `step_completed`、`run_completed` 和 `error`，每条 `data` 都是 JSON object。
 
     Args:
-        req: 请求体，包含问题、最大执行步数，以及可选的确认 token 与幂等键。
+        req: 请求体，包含可选 session_id、问题、最大执行步数，以及可选的确认 token 与幂等键。
         agent_router_service: 通过依赖注入获取的 `AgentRouterService` 实例。
 
     Returns:
@@ -116,6 +118,7 @@ async def agent_chat_stream(
     return _agent_streaming_response(
         agent_router_service.stream_chat(
             user_id=get_user_id(),
+            session_id=req.session_id,
             question=req.question,
             max_steps=req.max_steps,
             confirmation_token=req.confirmation_token,
@@ -149,7 +152,8 @@ async def order_support_agent(
         开票申请；当前示例返回 queued，不代表发票已开具完成。
 
     Args:
-        req: 请求体，包含用户问题、最大执行步数，以及可选的确认 token 与幂等键。
+        req: 请求体，包含可选 session_id、用户问题、最大执行步数，以及可选的确认 token 与幂等键；
+            首次普通对话可不传 session_id，继续对话或确认同一会话动作时传入上次响应的 session_id。
         order_agent_service: 通过依赖注入获取的 `OrderAgentService` 实例。
 
     Returns:
@@ -159,6 +163,7 @@ async def order_support_agent(
     """
     result = await order_agent_service.answer_order_support_question(
         user_id=get_user_id(),
+        session_id=req.session_id,
         question=req.question,
         max_steps=req.max_steps,
         confirmation_token=req.confirmation_token,
@@ -191,7 +196,7 @@ async def order_support_agent_stream(
         不使用 `BaseResponse[T]` 信封。
 
     Args:
-        req: 请求体，包含用户问题、最大执行步数，以及可选的确认 token 与幂等键。
+        req: 请求体，包含可选 session_id、用户问题、最大执行步数，以及可选的确认 token 与幂等键。
         order_agent_service: 通过依赖注入获取的 `OrderAgentService` 实例。
 
     Returns:
@@ -201,6 +206,7 @@ async def order_support_agent_stream(
     return _agent_streaming_response(
         order_agent_service.stream_order_support_question(
             user_id=get_user_id(),
+            session_id=req.session_id,
             question=req.question,
             max_steps=req.max_steps,
             confirmation_token=req.confirmation_token,
@@ -233,7 +239,8 @@ async def payment_support_agent(
         不发起真实支付、扣款、退款、解绑银行卡或账单修改，也不接受确认 token 执行副作用动作。
 
     Args:
-        req: 请求体，包含问题、最大执行步数，以及当前不支持的确认 token 与幂等键字段。
+        req: 请求体，包含可选 session_id、问题、最大执行步数，以及当前不支持的确认 token 与幂等键字段；
+            首次普通对话可不传 session_id，继续对话时传入上次响应的 session_id。
         payment_agent_service: 通过依赖注入获取的 `PaymentAgentService` 实例。
 
     Returns:
@@ -243,6 +250,7 @@ async def payment_support_agent(
     """
     result = await payment_agent_service.answer_payment_support_question(
         user_id=get_user_id(),
+        session_id=req.session_id,
         question=req.question,
         max_steps=req.max_steps,
         confirmation_token=req.confirmation_token,
@@ -275,7 +283,7 @@ async def payment_support_agent_stream(
         响应为 `text/event-stream`，不使用 `BaseResponse[T]` 信封。
 
     Args:
-        req: 请求体，包含问题、最大执行步数，以及当前不支持的确认 token 与幂等键字段。
+        req: 请求体，包含可选 session_id、问题、最大执行步数，以及当前不支持的确认 token 与幂等键字段。
         payment_agent_service: 通过依赖注入获取的 `PaymentAgentService` 实例。
 
     Returns:
@@ -285,6 +293,7 @@ async def payment_support_agent_stream(
     return _agent_streaming_response(
         payment_agent_service.stream_payment_support_question(
             user_id=get_user_id(),
+            session_id=req.session_id,
             question=req.question,
             max_steps=req.max_steps,
             confirmation_token=req.confirmation_token,

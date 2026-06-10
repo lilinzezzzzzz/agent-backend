@@ -1,3 +1,6 @@
+from collections.abc import Mapping
+from typing import Any
+
 from internal.agents import LLMReactActionMaker
 from internal.agents.payment.prompt import PAYMENT_SUPPORT_SYSTEM_PROMPT
 from internal.agents.payment.tools import (
@@ -20,11 +23,13 @@ class PaymentAgentBuilder:
         rag_service: RagService,
         user_id: int,
         max_steps: int,
+        session_context: Mapping[str, Any] | None = None,
     ):
         self._llm_client = llm_client
         self._rag_service = rag_service
         self._user_id = user_id
         self._max_steps = max_steps
+        self._session_context = dict(session_context or {})
 
     def build(self) -> ReActAgent:
         """创建可运行的支付支持 ReActAgent。"""
@@ -32,6 +37,7 @@ class PaymentAgentBuilder:
             action_maker=LLMReactActionMaker(
                 llm_client=self._llm_client,
                 system_prompt=PAYMENT_SUPPORT_SYSTEM_PROMPT,
+                session_context=self._session_context,
                 extra_completion_kwargs={"thinking": False},
             ),
             tools=self.build_tools(),

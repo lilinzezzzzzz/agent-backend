@@ -64,30 +64,76 @@ class AgentStepDTO:
 
 
 @dataclass(frozen=True, slots=True)
-class AgentRunDTO:
+class AgentMessageDTO:
+    """Agent 会话上下文消息 DTO。"""
+
+    role: str
+    content: str
+
+
+@dataclass(frozen=True, slots=True)
+class AgentConversationContextDTO:
+    """Agent 会话上下文 DTO。"""
+
+    session_id: str
+    rolling_summary: str | None = None
+    recent_messages: Sequence[AgentMessageDTO] = field(default_factory=tuple)
+    working_state: dict[str, JsonValue] = field(default_factory=dict)
+    truncated: bool = False
+
+    def to_prompt_context(self) -> dict[str, JsonValue]:
+        """转换为 LLM prompt 可安全序列化的上下文字段。"""
+        return {
+            "session_id": self.session_id,
+            "rolling_summary": self.rolling_summary,
+            "recent_messages": [
+                {"role": message.role, "content": message.content}
+                for message in self.recent_messages
+            ],
+            "working_state": self.working_state,
+            "truncated": self.truncated,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class AgentRunStartDTO:
+    """Agent run 启动结果 DTO。"""
+
+    session_id: str
+    run_id: str
+    user_message_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class AgentRunResultDTO:
     """Agent 运行结果 DTO。"""
 
     run_id: str
     status: str
     answer: str | None
     steps: Sequence[AgentStepDTO]
+    session_id: str | None = None
     confirmation: AgentActionConfirmationDTO | None = None
     audit_metadata: dict[str, JsonValue] | None = None
 
     @classmethod
-    def from_agent_result(cls, result: AgentRunResult) -> AgentRunDTO:
+    def from_agent_result(
+        cls, result: AgentRunResult, *, session_id: str | None = None
+    ) -> AgentRunResultDTO:
         """从 ReActAgent 运行结果构造业务 DTO。"""
         return cls(
             run_id=result.run_id,
             status=result.status.value,
             answer=result.final_answer,
             steps=[AgentStepDTO.from_step_record(step) for step in result.steps],
+            session_id=session_id,
             confirmation=_extract_confirmation(result),
         )
 
     def to_schema(self) -> AgentRunRespSchema:
         """转换为 API 响应 schema。"""
         return AgentRunRespSchema(
+            session_id=self.session_id or "",
             run_id=self.run_id,
             status=self.status,
             answer=self.answer,
@@ -105,10 +151,16 @@ class AgentRunDTO:
         )
 
     @classmethod
-    def from_confirmed_invoice(cls, result: InvoiceRequestDTO) -> AgentRunDTO:
+    def from_confirmed_invoice(
+        cls,
+        result: InvoiceRequestDTO,
+        *,
+        run_id: str | None = None,
+        session_id: str | None = None,
+    ) -> AgentRunResultDTO:
         """构造确定性确认执行结果。"""
         return cls(
-            run_id=uuid6_unique_str_id(),
+            run_id=run_id or uuid6_unique_str_id(),
             status="completed",
             answer=result.message,
             steps=[
@@ -121,16 +173,24 @@ class AgentRunDTO:
                     action_result=to_json_value(result.to_action_result()),
                 )
             ],
+            session_id=session_id,
         )
 
     @classmethod
-    def final(cls, *, answer: str) -> AgentRunDTO:
+    def final(
+        cls,
+        *,
+        answer: str,
+        run_id: str | None = None,
+        session_id: str | None = None,
+    ) -> AgentRunResultDTO:
         """构造无需运行专业 Agent 的最终回答。"""
         return cls(
-            run_id=uuid6_unique_str_id(),
+            run_id=run_id or uuid6_unique_str_id(),
             status="completed",
             answer=answer,
             steps=[],
+            session_id=session_id,
         )
 
 
@@ -139,7 +199,7 @@ class AgentChatDTO:
     """统一 Agent Router 结果。"""
 
     route: str
-    result: AgentRunDTO
+    result: AgentRunResultDTO
 
     def to_schema(self) -> AgentChatRespSchema:
         """转换为统一 Agent Router 响应 schema。"""
@@ -162,7 +222,7 @@ class AgentStreamEventDTO:
 
     event: AgentStreamEventName
     data: dict[str, JsonValue] = field(default_factory=dict)
-    result: AgentRunDTO | None = field(default=None, compare=False, repr=False)
+    result: AgentRunResultDTO | None = field(default=None, compare=False, repr=False)
 
     @classmethod
     def route(cls, *, route: str) -> AgentStreamEventDTO:
@@ -210,7 +270,7 @@ class AgentStreamEventDTO:
     def run_completed(
         cls,
         *,
-        result: AgentRunDTO,
+        result: AgentRunResultDTO,
         route: str | None = None,
     ) -> AgentStreamEventDTO:
         """构造 Agent 运行完成事件。"""

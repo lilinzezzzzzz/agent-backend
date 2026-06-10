@@ -6,7 +6,7 @@
 
 业务缓存层。封装 Redis 对特定业务域的读写，例如 auth token 的 key 约定、TTL 策略、元数据序列化。
 
-- 只承接**业务语义**的缓存访问，不做通用 Redis 薄包装（通用操作直接使用 `pkg.toolkit.redis_client.RedisClient`）。
+- 只承接**业务语义**的缓存访问，不做通用 Redis 薄包装（通用操作直接使用 `pkg.redis.RedisClient`）。
 - 按业务域拆文件：`auth.py`、`user.py`、`captcha.py` …，避免单个 `cache.py` 堆成巨石。
 - 不承担持久化数据访问，ORM 相关走 `internal/dao/`。
 
@@ -25,7 +25,7 @@
 
 from internal.infra.redis.connection import redis_client
 from pkg.toolkit.json import orjson_dumps, orjson_loads
-from pkg.toolkit.redis_client import RedisClient
+from pkg.redis import RedisClient
 
 
 class AuthCache:
@@ -57,5 +57,5 @@ def new_auth_cache() -> AuthCache:
 ## 验证重点
 
 - 修改 key 前缀、TTL、序列化格式属于跨服务兼容性变更：必须同步检查依赖方（认证中间件、Service、Celery 任务）并评估历史数据迁移或过期策略。
-- 新增业务域缓存时，优先复用 `pkg.toolkit.redis_client` 已有原语，不要再实现一层 Redis 封装。
+- 新增业务域缓存时，优先复用 `pkg.redis` 已有原语，不要再实现一层 Redis 封装。
 - 单元测试使用 fake/mock `RedisClient`，覆盖 miss、hit、TTL 过期、并发写入顺序等边界。

@@ -18,7 +18,7 @@ from internal.core import errors
 import pkg.logger as logger_module
 from pkg.logger import LogFormat, init_logger
 from pkg.logger.span import configure_span_logger
-from pkg.toolkit import context
+from pkg import request_context as context
 
 
 class _ContextStore:

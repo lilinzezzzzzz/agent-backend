@@ -14,8 +14,8 @@ from internal.schemas.user import (
     WeChatLoginReqSchema,
 )
 from internal.services.auth import AuthService, new_auth_service
-from pkg.toolkit.context import get_user_id
-from pkg.toolkit.response import ResponsePayload, success_response
+from pkg.request_context import get_user_id
+from pkg.api_response import ResponsePayload, success_response
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
 

@@ -3,7 +3,7 @@
 from typing import Any
 
 from pkg.logger import logger
-from pkg.toolkit.http_cli import AsyncHttpClient
+from pkg.http_client import AsyncHttpClient
 
 from ..base import BaseThirdPartyAuthStrategy, ThirdPartyUserInfo
 from ..config import WeChatConfig

@@ -1,5 +1,5 @@
 from pkg.logger import logger
-from pkg.toolkit.inter import SnowflakeIDGenerator, auto_snowflake_node_id
+from pkg.ids import SnowflakeIDGenerator, auto_snowflake_node_id
 
 _snowflake_id_generator: SnowflakeIDGenerator | None = None
 

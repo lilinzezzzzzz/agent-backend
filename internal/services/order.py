@@ -10,8 +10,8 @@ from internal.services.dto.order import (
     InvoiceRequestDTO,
     OrderStatusDTO,
 )
-from pkg.toolkit import context
-from pkg.toolkit.string import uuid6_unique_str_id
+from pkg import request_context as context
+from pkg.ids import uuid6_unique_str_id
 
 INVOICE_REQUEST_ACTION = "submit_invoice_request"
 

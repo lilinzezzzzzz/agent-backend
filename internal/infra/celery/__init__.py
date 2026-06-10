@@ -24,8 +24,8 @@ from internal.tasks.scheduler import (
     STATIC_BEAT_SCHEDULE,
 )
 from pkg.logger import init_logger, logger
-from pkg.toolkit import context
-from pkg.toolkit.celery import CeleryClient
+from pkg import request_context as context
+from pkg.celery_queue import CeleryClient
 
 __all__ = [
     "celery_app",

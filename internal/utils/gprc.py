@@ -1,5 +1,5 @@
 from pkg.toolkit.grpc import GrpcChannel
-from pkg.toolkit.types import lazy_proxy
+from pkg.lazy_proxy import lazy_proxy
 
 _grpc_channel: GrpcChannel | None = None
 _channels: list[GrpcChannel] = []

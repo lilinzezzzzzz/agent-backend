@@ -27,8 +27,8 @@ from internal.services.dto.agent import AgentRunResultDTO, AgentStreamEventDTO
 from internal.services.order import OrderService, new_order_service
 from internal.services.rag import RagService, new_rag_service
 from pkg.logger import logger
-from pkg.toolkit import context
-from pkg.toolkit.string import uuid6_unique_str_id
+from pkg import request_context as context
+from pkg.ids import uuid6_unique_str_id
 
 
 class OrderAgentService:

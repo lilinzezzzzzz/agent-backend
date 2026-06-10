@@ -87,7 +87,7 @@ AgentScope 官方默认使用 `X-User-ID` header 作为占位鉴权。接入本�
 
 - 外层主应用继续执行 `ASGIAuthMiddleware`。
 - `/v1/agentscope/*` 仍需要项目 token。
-- AgentScope 内部 `get_current_user_id` 依赖应覆盖为读取项目上下文中的 `pkg.toolkit.context.get_user_id()`。
+- AgentScope 内部 `get_current_user_id` 依赖应覆盖为读取项目上下文中的 `pkg.request_context.get_user_id()`。
 - 返回给 AgentScope 的 user id 使用字符串形式，例如 `str(get_user_id())`，以匹配 AgentScope 多租户资源模型。
 
 实现时需要验证：

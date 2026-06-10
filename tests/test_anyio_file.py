@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from pkg.toolkit.file import AnyioFile
+from pkg.files import AnyioFile
 
 
 # 标记所有测试为 anyio 测试，需要安装 pytest-anyio 或配置 pytest-asyncio

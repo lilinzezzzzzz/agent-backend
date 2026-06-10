@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends
 from internal.schemas import BaseResponse
 from internal.schemas.rag import RagExternalRunReqSchema, RagExternalRunRespSchema
 from internal.services.rag import RagService, new_rag_service
-from pkg.toolkit.response import ResponsePayload, success_response
+from pkg.api_response import ResponsePayload, success_response
 
 router = APIRouter(prefix="/rag", tags=["internal rag"])
 

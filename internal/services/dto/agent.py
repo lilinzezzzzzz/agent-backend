@@ -13,7 +13,7 @@ from internal.schemas.agent import (
 )
 from internal.services.dto.order import AgentActionConfirmationDTO, InvoiceRequestDTO
 from pkg.agents import AgentFinal, AgentRunResult, AgentStepRecord, AgentToolCall
-from pkg.toolkit.string import uuid6_unique_str_id
+from pkg.ids import uuid6_unique_str_id
 
 
 @dataclass(frozen=True, slots=True)

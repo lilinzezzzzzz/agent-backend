@@ -23,7 +23,7 @@ from internal.services.dto.agent import (
     to_json_value,
 )
 from pkg.database.dao import execute_transaction
-from pkg.toolkit.string import uuid6_unique_str_id
+from pkg.ids import uuid6_unique_str_id
 from pkg.toolkit.timer import utc_now_naive
 
 

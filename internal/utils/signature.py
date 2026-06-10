@@ -1,7 +1,7 @@
 from internal.config import settings
 from pkg.logger import logger
-from pkg.toolkit.signature import SignatureAuthHandler
-from pkg.toolkit.types import lazy_proxy
+from pkg.security import SignatureAuthHandler
+from pkg.lazy_proxy import lazy_proxy
 
 _signature_auth_handler: SignatureAuthHandler | None = None
 

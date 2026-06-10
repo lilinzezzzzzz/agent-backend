@@ -248,7 +248,7 @@ class ApsSchedulerManager:
 #     default_coalesce=True,             # 合并滞后触发
 #     default_misfire_grace_time=60,     # 允许 60 秒内补跑
 # )
-# tool.register_cron_job(my_task, cron_kwargs={"minute": "*", "second": 0}, jitter=10)  # 覆盖为 ±10 秒
+# tool.register_cron(my_task, minute="*", second=0, jitter=10)  # 覆盖为 ±10 秒
 # tool.register_interval_job(heartbeat, interval_kwargs={"seconds": 30})
 # tool.register_date_job(one_shot, date_kwargs={"run_date": datetime.utcnow() + timedelta(minutes=1)}, coalesce=True)
 # tool.start()

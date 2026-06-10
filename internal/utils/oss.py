@@ -1,5 +1,5 @@
 from pkg.oss.aliyun import AliyunOSSBackend
-from pkg.toolkit.types import lazy_proxy
+from pkg.lazy_proxy import lazy_proxy
 
 _aliyun_oss: AliyunOSSBackend | None = None
 

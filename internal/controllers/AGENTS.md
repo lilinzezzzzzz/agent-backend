@@ -15,14 +15,14 @@
 - Controller 保持薄层，不承载业务规则、复杂查询、缓存编排或外部服务编排。
 - 请求体、响应体使用 `internal/schemas/` 中的 Pydantic v2 model。
 - `response_model` 统一使用 `BaseResponse[T]` / `BaseListResponse[T]` 声明响应信封（用于 OpenAPI schema 和响应校验）。
-- 实际返回值使用 `pkg.toolkit.response` 中的 payload 工厂函数：成功调用 `success_response(data=...)`，分页调用 `success_list_response(data=..., page=..., limit=..., total=...)`。这些函数返回可被 FastAPI `response_model` 校验和序列化的响应载荷，不要在正常 Controller 中直接返回 HTTP `Response`。
+- 实际返回值使用 `pkg.api_response` 中的 payload 工厂函数：成功调用 `success_response(data=...)`，分页调用 `success_list_response(data=..., page=..., limit=..., total=...)`。这些函数返回可被 FastAPI `response_model` 校验和序列化的响应载荷，不要在正常 Controller 中直接返回 HTTP `Response`。
 - `error_response(error, message=..., lang=...)` 仅用于中间件、异常处理器等必须直接构造 HTTP `Response` 的路径；业务错误在 Controller / Service 中抛 `internal.core.AppException`。
 - 当 Service 返回 dataclass / DTO 且该对象提供 `to_schema()` 时，Controller 负责调用
   `dto.to_schema()` 得到对应 response schema，再传给响应工厂函数。
 - Service DTO 定义位置遵循根目录规则，默认来自 `internal/services/dto/<domain>.py`；
   Controller 不在本层定义 DTO。
 - 业务逻辑调用 `internal/services/`，不要直接操作 ORM session。
-- 需要读当前用户时使用上下文工具，例如 `pkg.toolkit.context.get_user_id()`，不要重新解析 token。
+- 需要读当前用户时使用上下文工具，例如 `pkg.request_context.get_user_id()`，不要重新解析 token。
 - 业务错误使用 `internal.core.AppException` 和 `internal.core.errors`。
 - 路由 prefix、tags、summary 要与现有风格一致。
 - 新增公开接口时确认认证中间件白名单或路由前缀是否符合预期。
@@ -47,7 +47,7 @@ from fastapi import APIRouter, Depends
 from internal.schemas import BaseResponse
 from internal.schemas.user import UserDetailSchema
 from internal.services.user import UserService, new_user_service
-from pkg.toolkit.response import ResponsePayload, success_response
+from pkg.api_response import ResponsePayload, success_response
 
 router = APIRouter(prefix="/user", tags=["api user"])
 

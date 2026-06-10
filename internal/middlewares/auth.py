@@ -4,7 +4,7 @@ from internal.core import AppException, errors
 from internal.services.auth import new_auth_service
 from internal.utils.signature import signature_auth_handler
 from pkg.logger import logger, span_context
-from pkg.toolkit import context
+from pkg import request_context as context
 from pkg.toolkit.middleware import BaseMiddlewareContext
 
 

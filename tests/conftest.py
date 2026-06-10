@@ -18,7 +18,7 @@ import sys
 import types
 from collections.abc import AsyncGenerator, Generator
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, time, timedelta
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
@@ -71,24 +71,71 @@ if not _skip_logger_mock:
 
     # Mock pkg.logger 模块
     mock_logger_module = types.ModuleType("pkg.logger")
+    mock_logger_module.__path__ = [str(PROJECT_ROOT / "pkg" / "logger")]
     mock_logger_module.logger = mock_logger
-    mock_logger_module.init_logger = MagicMock()
 
-    # Mock LogFormat 枚举
-    class MockLogFormat(StrEnum):
-        JSON = "json"
-        TEXT = "text"
+    sys.modules["pkg.logger"] = mock_logger_module
+
+    from pkg.logger.handler import (  # noqa: PLC0415
+        LogFormat,
+        LoggerHandler,
+        RetentionType,
+        RotationType,
+        TimezoneType,
+    )
+    from pkg.logger.span import span_context, with_span  # noqa: PLC0415
+
+    def init_logger(
+        *,
+        level: str = "INFO",
+        base_log_dir: Path | None = None,
+        rotation: RotationType = time(0, 0, 0, tzinfo=UTC),
+        retention: RetentionType = timedelta(days=30),
+        compression: str | None = None,
+        timezone: TimezoneType = "UTC",
+        enqueue: bool = True,
+        log_format: LogFormat = LogFormat.TEXT,
+        write_to_file: bool = True,
+        write_to_console: bool = True,
+    ):
+        logger_manager = LoggerHandler(
+            level=level,
+            base_log_dir=base_log_dir,
+            rotation=rotation,
+            retention=retention,
+            compression=compression,
+            timezone=timezone,
+            enqueue=enqueue,
+            log_format=log_format,
+        )
+        logger_obj = logger_manager.setup(write_to_file=write_to_file, write_to_console=write_to_console)
+        mock_logger_module._logger_manager = logger_manager
+        mock_logger_module._logger = logger_obj
+        mock_logger_module.logger = logger_obj
+        return logger_obj
+
+    def get_logger_manager():
+        logger_manager = getattr(mock_logger_module, "_logger_manager", None)
+        if logger_manager is None:
+            raise RuntimeError("LoggerHandler not initialized. Call init_logger() first.")
+        return logger_manager
 
     @asynccontextmanager
     async def noop_span_context(_span_name: str):
         yield None
 
-    mock_logger_module.LogFormat = MockLogFormat
-    mock_logger_module.LoggerHandler = MagicMock  # Mock LoggerHandler class
-    mock_logger_module.span_context = noop_span_context
-
-    # 为了让 LazyProxy 正常工作，需要 mock 整个模块
-    sys.modules["pkg.logger"] = mock_logger_module
+    mock_logger_module.LogFormat = LogFormat
+    mock_logger_module.LoggerHandler = LoggerHandler
+    mock_logger_module.RotationType = RotationType
+    mock_logger_module.RetentionType = RetentionType
+    mock_logger_module.TimezoneType = TimezoneType
+    mock_logger_module.init_logger = init_logger
+    mock_logger_module.get_logger_manager = get_logger_manager
+    mock_logger_module.span_context = span_context
+    mock_logger_module.with_span = with_span
+    mock_logger_module.noop_span_context = noop_span_context
+    mock_logger_module._logger_manager = None
+    mock_logger_module._logger = None
 else:
     # logger 测试需要真实的模块，创建一个简单的 mock_logger 供其他 fixture 使用
     mock_logger = MagicMock()
@@ -99,13 +146,13 @@ else:
     mock_logger.debug = MagicMock()
     mock_logger.critical = MagicMock()
 
-# Mock pkg.toolkit.context 模块
+# Mock pkg.request_context 模块
 if not _skip_context_mock:
     class MockContextKey(StrEnum):
         USER_ID = "user_id"
         TRACE_ID = "trace_id"
 
-    mock_context = types.ModuleType("pkg.toolkit.context")
+    mock_context = types.ModuleType("pkg.request_context")
     mock_context.ContextKey = MockContextKey
     mock_context.get_user_id = MagicMock(return_value=999)
     mock_context.get_trace_id = MagicMock(return_value="test-trace-id")
@@ -115,7 +162,13 @@ if not _skip_context_mock:
     mock_context.clear = MagicMock()
     mock_context.set_val = MagicMock()
     mock_context.get_val = MagicMock(return_value=None)
-    sys.modules["pkg.toolkit.context"] = mock_context
+    sys.modules["pkg.request_context"] = mock_context
+    import pkg  # noqa: PLC0415
+
+    pkg.request_context = mock_context
+    logger_handler_module = sys.modules.get("pkg.logger.handler")
+    if logger_handler_module is not None:
+        logger_handler_module.context = mock_context
 
 # Mock snowflake ID 生成器
 _id_counter = 0
@@ -130,9 +183,24 @@ def mock_gen_id() -> int:
 mock_snowflake_generator = MagicMock()
 mock_snowflake_generator.generate = mock_gen_id
 
-mock_snowflake_module = types.ModuleType("pkg.toolkit.inter")
+
+class MockSnowflakeIDGenerator:
+    def __init__(self, node_id: int):
+        self.node_id = node_id
+
+    def generate(self) -> int:
+        return mock_gen_id()
+
+    def generate_batch(self, count: int) -> list[int]:
+        return [mock_gen_id() for _ in range(count)]
+
+
+mock_snowflake_module = types.ModuleType("pkg.ids")
 mock_snowflake_module.snowflake_id_generator = mock_snowflake_generator
-sys.modules["pkg.toolkit.inter"] = mock_snowflake_module
+mock_snowflake_module.SnowflakeIDGenerator = MockSnowflakeIDGenerator
+mock_snowflake_module.auto_snowflake_node_id = MagicMock(return_value=1)
+mock_snowflake_module.uuid6_unique_str_id = MagicMock(side_effect=lambda: f"mock-id-{mock_gen_id()}")
+sys.modules["pkg.ids"] = mock_snowflake_module
 
 # ==========================================
 # 3. 测试配置
@@ -177,6 +245,37 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         # 为所有 async 测试函数自动添加 asyncio marker
         if isinstance(item, pytest.Function) and asyncio.iscoroutinefunction(item.function):
             item.add_marker(pytest.mark.asyncio)
+
+
+@pytest.fixture(autouse=True)
+def restore_default_module_mocks(request: pytest.FixtureRequest):
+    """Restore broad test mocks that individual modules may replace during collection."""
+    test_path = str(request.node.fspath).replace("\\", "/")
+
+    if not _skip_context_mock and "test_context" not in test_path:
+        sys.modules["pkg.request_context"] = mock_context
+        import pkg  # noqa: PLC0415
+
+        pkg.request_context = mock_context
+        database_base = sys.modules.get("pkg.database.base")
+        if database_base is not None:
+            database_base.context = mock_context
+        logger_handler_module = sys.modules.get("pkg.logger.handler")
+        if logger_handler_module is not None:
+            logger_handler_module.context = mock_context
+
+    should_configure_span_logger = not _skip_logger_mock and "tests/logger" not in test_path
+    if should_configure_span_logger:
+        from pkg.logger.span import configure_span_logger  # noqa: PLC0415
+
+        configure_span_logger(mock_logger)
+
+    yield
+
+    if should_configure_span_logger:
+        from pkg.logger.span import configure_span_logger  # noqa: PLC0415
+
+        configure_span_logger(None)
 
 
 # ==========================================

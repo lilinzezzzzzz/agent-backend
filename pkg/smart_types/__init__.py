@@ -1,7 +1,6 @@
-from collections.abc import Callable
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
-from typing import Annotated, Any, cast, overload
+from typing import Annotated, Any
 
 from pydantic import BeforeValidator, PlainSerializer, WithJsonSchema
 
@@ -108,7 +107,9 @@ def _serialize_smart_decimal(v: Decimal) -> float | str:
 SmartDecimal = Annotated[
     Decimal,  # Python 内部类型始终是 Decimal
     BeforeValidator(_parse_smart_decimal),
-    PlainSerializer(_serialize_smart_decimal, return_type=float | str, when_used="json"),
+    PlainSerializer(
+        _serialize_smart_decimal, return_type=float | str, when_used="json"
+    ),
     WithJsonSchema(
         {
             "anyOf": [{"type": "number"}, {"type": "string"}],
@@ -163,7 +164,9 @@ def _serialize_smart_datetime(v: datetime) -> str:
 SmartDatetime = Annotated[
     datetime,  # <--- Python 内部类型明确为 datetime
     BeforeValidator(_parse_smart_datetime),
-    PlainSerializer(_serialize_smart_datetime, return_type=str, when_used="json-unless-none"),
+    PlainSerializer(
+        _serialize_smart_datetime, return_type=str, when_used="json-unless-none"
+    ),
     WithJsonSchema(
         {
             "type": "string",
@@ -179,6 +182,7 @@ SmartDatetime = Annotated[
 # ==========================================
 # 如果你的 Python 内部业务逻辑确实需要它就是 string，保持原样即可。
 # 如果 Python 内部需要 int，但输出需要 string，建议用类似 SmartInt 的逻辑但 serializer 恒定返回 str。
+
 
 def _parse_int_str(v: Any) -> str:
     """
@@ -206,72 +210,3 @@ IntStr = Annotated[
         }
     ),
 ]
-
-
-# ==========================================
-# 5. LazyProxy (懒加载代理)
-# ==========================================
-
-
-@overload
-def lazy_proxy[T](getter: Callable[[], T]) -> T: ...
-
-
-@overload
-def lazy_proxy[T](getter: Callable[[], T], *, __type__: type[T]) -> T: ...
-
-
-def lazy_proxy[T](getter: Callable[[], T], **kwargs: Any) -> T:
-    """
-    创建懒加载代理对象。
-
-    用法:
-        cache = lazy_proxy(_get_cache)  # 类型推断为 RedisClient
-
-    等价于:
-        cache: RedisClient = _LazyProxy(_get_cache)
-    """
-    return cast(T, _LazyProxy(getter))
-
-
-class _LazyProxy[T]:
-    """
-    通用懒加载代理，用于延迟初始化的单例对象。
-
-    解决问题：
-    - 模块导入时对象还未初始化 (None)
-    - 需要在运行时动态获取实际对象
-    - 提供完整的类型提示支持
-
-    用法示例:
-        _redis_client: Redis | None = None
-
-        def init_redis():
-            global _redis_client
-            _redis_client = Redis(...)
-
-        def _get_redis() -> Redis:
-            if _redis_client is None:
-                raise RuntimeError("Redis not initialized")
-            return _redis_client
-
-        # 方式1：使用 lazy_proxy 辅助函数（推荐，类型推断完美）
-        redis = lazy_proxy(_get_redis)
-
-        # 使用时自动转发到真实对象
-        redis.get("key")  # 等价于 _get_redis().get("key")
-    """
-
-    __slots__ = ("_getter",)
-
-    def __init__(self, getter: Callable[[], T]) -> None:
-        object.__setattr__(self, "_getter", getter)
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._getter(), name)
-
-    def __repr__(self) -> str:
-        try:
-            return repr(self._getter())
-        except RuntimeError:
-            return "<_LazyProxy: uninitialized>"

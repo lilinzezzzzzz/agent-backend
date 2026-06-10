@@ -1,7 +1,7 @@
 """Endpoint guard 规则缓存访问。"""
 
 from internal.infra.redis.connection import redis_client
-from pkg.toolkit.redis_client import RedisClient
+from pkg.redis import RedisClient
 
 
 class EndpointGuardCache:

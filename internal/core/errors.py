@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from pkg.toolkit.response import AppError
+from pkg.api_response import AppError
 
 
 class GlobalErrors:

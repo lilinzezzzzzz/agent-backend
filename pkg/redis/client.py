@@ -8,8 +8,8 @@ from typing import Any
 import anyio
 from redis.asyncio import Redis
 
+from pkg.ids import uuid6_unique_str_id
 from pkg.toolkit.json import orjson_dumps, orjson_loads
-from pkg.toolkit.string import uuid6_unique_str_id
 
 SessionProvider = Callable[[], AbstractAsyncContextManager[Redis]]
 

@@ -32,7 +32,7 @@ mock_pkg.utc_now_naive = lambda: datetime.utcnow()
 mock_pkg.unique_list = lambda x, exclude_none=False: list(set([i for i in x if i is not None] if exclude_none else x))
 
 # Mock context module
-mock_context = types.ModuleType("pkg.toolkit.context")
+mock_context = types.ModuleType("pkg.request_context")
 mock_context.get_user_id = lambda: 999
 
 mock_logger = MagicMock()
@@ -47,27 +47,36 @@ def mock_gen_id():
     return _id_counter
 
 
-mock_snowflake_module = types.ModuleType("pkg.toolkit.inter")
+mock_snowflake_module = types.ModuleType("pkg.ids")
 mock_snowflake_generator = types.SimpleNamespace()
 mock_snowflake_generator.generate = mock_gen_id
 mock_snowflake_module.snowflake_id_generator = mock_snowflake_generator
 
+_patched_module_names = ("pkg.request_context", "pkg.logger_tool", "pkg.ids")
+_previous_modules = {name: sys.modules.get(name) for name in _patched_module_names}
+
 # 不要 mock pkg 主模块，让它正常导入
 # sys.modules["pkg"] = mock_pkg
-sys.modules["pkg.toolkit.context"] = mock_context
-sys.modules["pkg.context"] = mock_context
+sys.modules["pkg.request_context"] = mock_context
 sys.modules["pkg.logger_tool"] = mock_logger
-sys.modules["pkg.toolkit.inter"] = mock_snowflake_module
+sys.modules["pkg.ids"] = mock_snowflake_module
 
 # ==========================================
 # 2. 导入目标代码
 # ==========================================
 try:
     from pkg.database import Base, BaseDao, ModelMixin, new_async_session_maker
+    from pkg.database import base as database_base
 except ImportError as e:
     print(f"Import Error: {e}")
     print(f"Looking for pkg at: {pkg_path}")
     raise e
+finally:
+    for _module_name, _module in _previous_modules.items():
+        if _module is None:
+            sys.modules.pop(_module_name, None)
+        else:
+            sys.modules[_module_name] = _module
 
 
 # ==========================================
@@ -108,6 +117,20 @@ async def db_session():
     yield session_maker
 
     await engine.dispose()
+
+
+@pytest.fixture
+def _context_user():
+    if hasattr(database_base.context, "init"):
+        database_base.context.init(user_id=999)
+    yield
+    if hasattr(database_base.context, "clear"):
+        database_base.context.clear()
+
+
+@pytest.fixture(autouse=True)
+def context_user(_context_user):
+    return None
 
 
 @pytest.fixture

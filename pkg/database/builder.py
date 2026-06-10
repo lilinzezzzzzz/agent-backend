@@ -8,7 +8,7 @@ from sqlalchemy.orm import InstrumentedAttribute, Mapped
 from pkg.database.base import ModelMixin, SessionProvider
 from pkg.database.types import ColumnKey
 from pkg.logger import logger
-from pkg.toolkit import context
+from pkg import request_context as context
 from pkg.toolkit.list import unique_list
 from pkg.toolkit.timer import utc_now_naive
 

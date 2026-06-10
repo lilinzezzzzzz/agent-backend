@@ -28,7 +28,7 @@ from internal import BASE_DIR
 from pkg.crypter.aes import aes_decrypt
 from pkg.logger import LogFormat
 from pkg.toolkit.string import mask_string
-from pkg.toolkit.types import lazy_proxy
+from pkg.lazy_proxy import lazy_proxy
 
 # =========================================================
 # 配置定义

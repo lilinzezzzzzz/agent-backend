@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING
 
 from pkg.logger.handler import LogFormat, LoggerHandler, RetentionType, RotationType, TimezoneType
 from pkg.logger.span import span_context, with_span
-from pkg.toolkit.types import lazy_proxy
+from pkg.lazy_proxy import lazy_proxy
 
 if TYPE_CHECKING:
     from loguru import Logger

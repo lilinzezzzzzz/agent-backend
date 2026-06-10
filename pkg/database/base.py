@@ -23,8 +23,8 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.orm import DeclarativeBase, InstrumentedAttribute, Mapped, mapped_column
 
 from pkg.database.types import ColumnKey
-from pkg.toolkit import context
-from pkg.toolkit.inter import snowflake_id_generator
+from pkg import request_context as context
+from pkg.ids import snowflake_id_generator
 from pkg.toolkit.json import JsonInputType, orjson_dumps, orjson_loads
 from pkg.toolkit.timer import utc_now_naive
 

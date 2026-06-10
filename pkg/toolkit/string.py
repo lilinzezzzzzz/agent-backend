@@ -3,15 +3,7 @@ import uuid
 from string import Template
 from urllib.parse import urlencode, urlunparse
 
-import uuid6
 import xxhash
-
-
-def uuid6_unique_str_id() -> str:
-    """
-    使用 Snowflake 算法生成唯一 ID。
-    """
-    return uuid6.uuid7().hex
 
 
 def hash_to_int(data: str) -> int:

@@ -12,7 +12,7 @@ from starlette.responses import JSONResponse
 
 from internal.schemas import BaseListResponse, BaseResponse
 from pkg.toolkit.json import orjson_dumps, orjson_dumps_bytes, orjson_loads
-from pkg.toolkit.response import (
+from pkg.api_response import (
     AppError,
     ResponsePayload,
     error_response,
@@ -178,7 +178,7 @@ class TestOrjsonToolkit:
 
 
 class TestResponseWrappers:
-    """测试 pkg/toolkit/response.py 的响应封装函数"""
+    """测试 pkg/api_response/__init__.py 的响应封装函数"""
 
     def test_success_response_structure(self):
         """验证成功响应的标准结构"""

@@ -10,7 +10,7 @@
 
 - 保持对 `pkg/logger`、`internal/` 的零硬依赖：
   - 默认 logger 使用标准库 `logging`；如需项目日志，通过装饰器参数注入。
-  - 不要在模块顶层 import `internal/`、`pkg.logger`、`pkg.toolkit.context` 等具体业务/基础设施。
+  - 不要在模块顶层 import `internal/`、`pkg.logger`、`pkg.request_context` 等具体业务/基础设施。
 - 装饰器参数保留 keyword-only 以便扩展，不要用位置参数堆默认值。
 - 装饰器必须保留原函数签名语义：
   - `@wraps(func)` 是硬性要求。

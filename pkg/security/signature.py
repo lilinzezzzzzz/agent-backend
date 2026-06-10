@@ -27,7 +27,8 @@ class SignatureAuthHandler:
         self.hash_algorithm = hash_algorithm
         self.timestamp_tolerance = timestamp_tolerance
         logger.success(
-            f"SignatureAuthHandler Init Successfully, secret_key={secret_key}, hash_algorithm={hash_algorithm}, timestamp_tolerance={timestamp_tolerance}"
+            "SignatureAuthHandler Init Successfully, "
+            f"hash_algorithm={hash_algorithm}, timestamp_tolerance={timestamp_tolerance}"
         )
 
     def generate_signature(self, data: dict[str, Any]) -> str:

@@ -9,7 +9,7 @@ from internal.services.dto.agent import (
     AgentStreamEventDTO,
 )
 from pkg.agents import AgentRunEvent, AgentRunEventType
-from pkg.toolkit.response import AppError
+from pkg.api_response import AppError
 
 
 def stream_event_from_run_event(event: AgentRunEvent) -> AgentStreamEventDTO:

@@ -5,13 +5,13 @@ from decimal import Decimal
 import pytest
 from pydantic import BaseModel, ValidationError
 
-from pkg.toolkit.types import (
+from pkg.lazy_proxy import lazy_proxy
+from pkg.smart_types import (
     JS_MAX_SAFE_INTEGER,
     IntStr,
     SmartDatetime,
     SmartDecimal,
     SmartInt,
-    lazy_proxy,
 )
 
 

@@ -1,3 +1,4 @@
+import contextlib
 from contextvars import ContextVar
 from enum import StrEnum
 from typing import Any
@@ -66,10 +67,8 @@ class _RequestContextManager:
 
     @staticmethod
     def clear():
-        try:
+        with contextlib.suppress(LookupError):
             _request_context_var.get().clear()
-        except LookupError:
-            pass  # 未初始化时无需清理
 
 
 _ctx_manager = _RequestContextManager()

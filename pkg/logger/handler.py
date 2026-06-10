@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 import loguru
 
 from pkg.logger.span import configure_span_logger, get_span_record_extra
-from pkg.toolkit import context
+from pkg import request_context as context
 from pkg.toolkit.json import orjson_dumps
 from pkg.toolkit.timer import format_iso_datetime
 

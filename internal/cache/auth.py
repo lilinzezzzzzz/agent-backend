@@ -3,7 +3,7 @@
 from internal.infra.redis.connection import redis_client
 from pkg.logger import logger
 from pkg.toolkit.json import orjson_dumps, orjson_loads
-from pkg.toolkit.redis_client import RedisClient
+from pkg.redis import RedisClient
 
 
 class AuthCache:

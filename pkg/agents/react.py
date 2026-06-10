@@ -78,7 +78,7 @@ from inspect import isawaitable
 from time import monotonic
 from typing import Any, Protocol
 
-from pkg.toolkit.string import uuid6_unique_str_id
+from pkg.ids import uuid6_unique_str_id
 
 ToolArgs = Mapping[str, Any]
 ActionResult = Any

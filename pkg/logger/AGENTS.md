@@ -8,7 +8,7 @@
 
 - `handler.py`：`LoggerHandler`，封装格式、分文件、rotation、retention、tz。
 - `span.py`：`span_context`、`with_span`，向日志注入 trace/span 上下文。
-- `__init__.py`：通过 `lazy_proxy` 暴露延迟初始化的 `logger` 和 `init_logger`。
+- `__init__.py`：通过 `pkg.lazy_proxy.lazy_proxy` 暴露延迟初始化的 `logger` 和 `init_logger`。
 
 ## 使用协议
 

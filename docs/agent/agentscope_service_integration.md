@@ -159,7 +159,7 @@ AGENTSCOPE_WORKSPACE_TTL_SECONDS=3600
 - `path.startswith("/v1/public")` 直接放行。
 - `path.startswith("/v1/internal")` 使用 `X-Signature`、`X-Timestamp`、`X-Nonce` 签名认证。
 - 其他 HTTP 请求默认 token 认证，读取 `Authorization`，兼容裸 token 和 `Bearer <token>`。
-- token 校验通过后，认证中间件把 `auth_metadata["id"]` 写入 `pkg.toolkit.context.ContextKey.USER_ID`。
+- token 校验通过后，认证中间件把 `auth_metadata["id"]` 写入 `pkg.request_context.ContextKey.USER_ID`。
 
 因此 `/v1/agentscope/*` 不应加入白名单，也不应挂载到 `/v1/public` 或 `/v1/internal` 下。
 
@@ -170,7 +170,7 @@ AgentScope 官方默认 `X-User-ID` 是占位依赖，不提供真实鉴权。�
 
 ```python
 from agentscope.app.deps import get_current_user_id as agentscope_get_current_user_id
-from pkg.toolkit import context
+from pkg import request_context as context
 
 
 async def get_agentscope_current_user_id() -> str:
@@ -388,7 +388,7 @@ AgentScope 官方 Agent Service 支持 credential schema 和 provider model card
 如果接入 AgentScope OpenTelemetry：
 
 - 由主应用启动时统一初始化。
-- trace id 与项目 `pkg.toolkit.context.get_trace_id()` 关联。
+- trace id 与项目 `pkg.request_context.get_trace_id()` 关联。
 - 不替代项目业务审计。
 
 ## 13. 错误处理

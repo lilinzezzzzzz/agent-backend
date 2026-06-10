@@ -1,3 +1,4 @@
+import json as _json
 import os
 import sys
 import types
@@ -18,9 +19,16 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(os.path.dirname(current_dir))
 pkg_path = os.path.join(project_root, "pkg")
 
-# 1.1 Mock pkg.toolkit.json (SQLite 原生支持 JSON，但仍需提供正确的序列化函数)
-import json as _json
+_patched_module_names = (
+    "pkg.toolkit.json",
+    "pkg.toolkit.timer",
+    "pkg.request_context",
+    "pkg.logger_tool",
+    "pkg.ids",
+)
+_previous_modules = {name: sys.modules.get(name) for name in _patched_module_names}
 
+# 1.1 Mock pkg.toolkit.json (SQLite 原生支持 JSON，但仍需提供正确的序列化函数)
 mock_json = types.ModuleType("pkg.toolkit.json")
 mock_json.orjson_dumps = lambda x, **kwargs: _json.dumps(x)
 mock_json.orjson_loads = lambda x: _json.loads(x) if isinstance(x, (str, bytes)) else x
@@ -33,13 +41,12 @@ mock_timer.utc_now_naive = lambda: datetime.now(UTC).replace(tzinfo=None)
 mock_timer.format_iso_datetime = lambda val, *, use_z=True, timespec="milliseconds": val.isoformat()
 sys.modules["pkg.toolkit.timer"] = mock_timer
 
-# 1.3 Mock pkg.toolkit.context
-mock_ctx_module = types.ModuleType("pkg.toolkit.context")
+# 1.3 Mock pkg.request_context
+mock_ctx_module = types.ModuleType("pkg.request_context")
 mock_ctx_func = MagicMock()
 mock_ctx_func.return_value = 999
 mock_ctx_module.get_user_id = mock_ctx_func
-sys.modules["pkg.toolkit.context"] = mock_ctx_module
-sys.modules["pkg.context"] = mock_ctx_module
+sys.modules["pkg.request_context"] = mock_ctx_module
 
 # 1.4 Mock 其他工具
 mock_logger = MagicMock()
@@ -55,8 +62,8 @@ def mock_gen_id():
 
 mock_snowflake.generate = mock_gen_id
 sys.modules["pkg.logger_tool"] = mock_logger
-sys.modules["pkg.toolkit.inter"] = types.ModuleType("pkg.toolkit.inter")
-sys.modules["pkg.toolkit.inter"].snowflake_id_generator = mock_snowflake
+sys.modules["pkg.ids"] = types.ModuleType("pkg.ids")
+sys.modules["pkg.ids"].snowflake_id_generator = mock_snowflake
 
 # ==========================================
 # 2. 导入目标代码
@@ -66,13 +73,20 @@ if project_root not in sys.path:
 
 try:
     from pkg.database.base import Base, JSONType, ModelMixin, new_async_session_maker
+    from pkg.database import base as database_base
     from pkg.database.dao import BaseDao
 except ImportError as e:
     try:
-        from pkg.database import Base, BaseDao, JSONType, ModelMixin, new_async_session_maker
+        from pkg.database import Base, BaseDao, JSONType, ModelMixin, base as database_base, new_async_session_maker
     except ImportError:
         print(f"CRITICAL: Cannot import from pkg.database. path={sys.path}")
         raise e
+finally:
+    for _module_name, _module in _previous_modules.items():
+        if _module is None:
+            sys.modules.pop(_module_name, None)
+        else:
+            sys.modules[_module_name] = _module
 
 
 # ==========================================
@@ -102,6 +116,20 @@ async def db_session():
     session_maker = new_async_session_maker(engine)
     yield session_maker
     await engine.dispose()
+
+
+@pytest.fixture
+def _context_user():
+    if hasattr(database_base.context, "init"):
+        database_base.context.init(user_id=999)
+    yield
+    if hasattr(database_base.context, "clear"):
+        database_base.context.clear()
+
+
+@pytest.fixture(autouse=True)
+def context_user(_context_user):
+    return None
 
 
 @pytest.fixture

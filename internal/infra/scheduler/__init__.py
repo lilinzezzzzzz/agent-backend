@@ -4,8 +4,8 @@
 """
 
 from pkg.logger import logger
-from pkg.toolkit.apscheduler import ApsSchedulerManager
-from pkg.toolkit.types import lazy_proxy
+from pkg.scheduler import ApsSchedulerManager
+from pkg.lazy_proxy import lazy_proxy
 
 _apscheduler_manager: ApsSchedulerManager | None = None
 
@@ -30,12 +30,12 @@ def _register_tasks(manager: ApsSchedulerManager):
     from internal.tasks.celery import number_sum
 
     # 示例：每 15 分钟执行一次
-    manager.register_cron(number_sum, cron_kwargs={"minute": "*/15", "second": 0})
+    manager.register_cron(number_sum, minute="*/15", second=0)
 
     # 其他任务示例（按需启用）
     # from internal.tasks.celery import clean_expired_tokens, heartbeat, warmup_cache
     # manager.register_interval(heartbeat, seconds=30)
-    # manager.register_cron(clean_expired_tokens, cron_kwargs={"hour": 3, "minute": 0})
+    # manager.register_cron(clean_expired_tokens, hour=3, minute=0)
 
 
 def _get_apscheduler_manager() -> ApsSchedulerManager:

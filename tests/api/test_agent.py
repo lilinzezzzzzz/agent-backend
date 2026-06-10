@@ -34,7 +34,7 @@ from pkg.agents import LLMActionModel
 from internal.services.dto.rag import RagEvidenceDTO, RagRetrievalDTO
 from internal.services.order import OrderService
 from pkg.vectors.contracts import RetrievalMode
-from pkg.toolkit import context
+from pkg import request_context as context
 
 
 class FakeOrderAgentService:

@@ -15,7 +15,7 @@ from internal.schemas.agent import JsonValue
 from internal.services.dto.agent import AgentRunResultDTO
 from internal.utils.background_tasks import background_task_manager
 from pkg.logger import logger
-from pkg.toolkit import context
+from pkg import request_context as context
 from pkg.toolkit.string import mask_string
 from pkg.toolkit.timer import utc_now_naive
 

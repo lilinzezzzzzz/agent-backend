@@ -23,8 +23,8 @@ from internal.services.agents import (
 )
 from internal.services.dto.agent import AgentStreamEventDTO
 from internal.utils.stream import stream_with_chunk_control
-from pkg.toolkit.context import get_user_id
-from pkg.toolkit.response import ResponsePayload, success_response, wrap_sse_event
+from pkg.request_context import get_user_id
+from pkg.api_response import ResponsePayload, success_response, wrap_sse_event
 
 router = APIRouter(prefix="/agent", tags=["api agent"])
 _AGENT_STREAM_CHUNK_TIMEOUT_SECONDS = 70.0

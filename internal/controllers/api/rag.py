@@ -5,8 +5,8 @@ from fastapi import APIRouter, Depends
 from internal.schemas import BaseResponse
 from internal.schemas.rag import RagAnswerReqSchema, RagAnswerRespSchema
 from internal.services.rag import RagService, new_rag_service
-from pkg.toolkit.context import get_user_id
-from pkg.toolkit.response import ResponsePayload, success_response
+from pkg.request_context import get_user_id
+from pkg.api_response import ResponsePayload, success_response
 
 router = APIRouter(prefix="/rag", tags=["api rag"])
 

@@ -7,8 +7,8 @@ from redis.asyncio import ConnectionPool, Redis
 
 from internal.config import settings
 from pkg.logger import logger
-from pkg.toolkit.redis_client import RedisClient
-from pkg.toolkit.types import lazy_proxy
+from pkg.redis import RedisClient
+from pkg.lazy_proxy import lazy_proxy
 
 # 全局变量，初始为 None
 _redis_pool: ConnectionPool | None = None

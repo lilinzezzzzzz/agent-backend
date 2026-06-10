@@ -9,6 +9,11 @@ from snowflake import SnowflakeGenerator
 from pkg.logger import logger
 
 
+def uuid6_unique_str_id() -> str:
+    """Generate a time-sortable UUIDv7 hex string."""
+    return uuid6.uuid7().hex
+
+
 def auto_snowflake_node_id() -> int:
     """基于机器信息自动生成 node_id (0-1023)"""
     try:
@@ -40,7 +45,7 @@ class SnowflakeIDGenerator:
 snowflake_id_generator = SnowflakeIDGenerator(node_id=auto_snowflake_node_id())
 
 
-def uuid6_unique_int_id():
+def uuid6_unique_int_id() -> int:
     """
     使用 UUIDv7 标准 (uuid6.uuid7) 生成一个 64 位的通用、时间排序的整数 ID。
 

@@ -6,12 +6,12 @@
 
 细粒度通用工具集合。每个 `.py` 文件一个明确职责：
 
-- 基础类型/字典：`types.py`、`dict.py`、`list.py`、`string.py`、`float.py`
-- 序列化/IO：`json.py`、`file.py`、`response.py`
-- 客户端：`http_cli.py`、`redis_client.py`、`grpc.py`
-- 时间/任务：`timer.py`、`celery.py`、`apscheduler.py`
-- 上下文/签名/认证：`context.py`、`signature.py`、`jwt.py`、`hasher.py`
-- 其他：`config_loader.py`、`exc.py`、`inter.py`、`middleware.py`
+- 基础集合/字符串/数值：`dict.py`、`list.py`、`string.py`、`float.py`
+- 序列化/时间：`json.py`、`timer.py`
+- 薄协议工具：`grpc.py`、`middleware.py`
+- 其他：`exc.py`
+
+外部依赖 client、生命周期管理、请求上下文、响应 contract、认证安全、ID 生成、智能类型和异步文件工具已拆到 `pkg/redis`、`pkg/http_client`、`pkg/celery_queue`、`pkg/scheduler`、`pkg/api_response`、`pkg/request_context`、`pkg/security`、`pkg/ids`、`pkg/lazy_proxy`、`pkg/smart_types`、`pkg/files`、`pkg/config_loader`。
 
 ## 编码约定
 
@@ -25,9 +25,9 @@
 ## 兼容性要求
 
 - 任何 `pkg/toolkit/*` 的公开符号（函数、类、类型别名）都可能被多处 import；重命名 / 删除 / 改签名前必须全仓检索。
-- `redis_client.RedisClient`、`http_cli`、`response.BaseResponse` / `AppError`、`context.get_user_id`、`jwt`、`signature` 属于高影响面 API，调整按 `BREAKING CHANGE` 处理。
+- 不要在 `pkg/toolkit` 新增有连接生命周期、外部协议 contract、认证安全、请求上下文、任务队列或调度器职责的模块；这些能力应放到对应 `pkg/*` 主题包。
 
 ## 验证重点
 
 - 单个工具改动优先运行 `tests/toolkit/` 下对应测试。
-- 改 `http_cli` / `redis_client` 时，同时覆盖成功、超时、重试、异常四条路径。
+- 改 Redis / HTTP 客户端时，同时覆盖成功、超时、重试、异常四条路径。

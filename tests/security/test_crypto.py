@@ -7,7 +7,7 @@ from pkg.crypter import (
     get_crypto_class,
 )
 from pkg.crypter.aes import aes_decrypt, aes_encrypt
-from pkg.toolkit.hasher import Hasher
+from pkg.security import Hasher
 
 
 @pytest.fixture

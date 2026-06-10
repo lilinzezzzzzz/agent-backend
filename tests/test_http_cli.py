@@ -4,7 +4,7 @@ import httpx
 import pytest
 import pytest_asyncio
 
-from pkg.toolkit.http_cli import AsyncHttpClient, RequestResult
+from pkg.http_client import AsyncHttpClient, RequestResult
 
 
 class TestRequestResult:

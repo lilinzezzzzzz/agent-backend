@@ -10,7 +10,7 @@ import anyio
 
 from internal.core.errors import StreamError, StreamTimeoutError
 from pkg.logger import logger
-from pkg.toolkit.response import wrap_sse_data
+from pkg.api_response import wrap_sse_data
 
 
 async def stream_with_chunk_control[T](

@@ -6,8 +6,8 @@ import anyio
 import pytest
 
 # --- 取消 conftest.py 的 mock ---
-if "pkg.toolkit.context" in sys.modules:
-    del sys.modules["pkg.toolkit.context"]
+if "pkg.request_context" in sys.modules:
+    del sys.modules["pkg.request_context"]
 
 # --- Mock 依赖 ---
 mock_logger = MagicMock()
@@ -16,7 +16,7 @@ sys.modules["pkg.async_logger"].logger = mock_logger
 
 # --- 导入你的代码 ---
 # NOTE: 必须在 mock 之后导入，因为 async_context 依赖 async_logger
-from pkg.toolkit.context import (  # noqa: E402
+from pkg.request_context import (  # noqa: E402
     clear,
     get_trace_id,
     get_user_id,
@@ -26,10 +26,17 @@ from pkg.toolkit.context import (  # noqa: E402
     set_val,
 )
 
+import pkg  # noqa: E402
+import pkg.request_context as request_context_module  # noqa: E402
+
+pkg.request_context = request_context_module
+
 
 # --- Fixture ---
 @pytest.fixture(autouse=True)
 def clean_context():
+    sys.modules["pkg.request_context"] = request_context_module
+    pkg.request_context = request_context_module
     clear()
     mock_logger.reset_mock()
     yield
@@ -80,13 +87,13 @@ def test_set_without_init_raises_error():
     """测试没有 Init 时，Set 会抛出 RuntimeError"""
     from contextvars import ContextVar
 
-    import pkg.toolkit.context
+    import pkg.request_context
 
     # 1. 保存旧的 ContextVar (避免影响其他测试)
-    old_var = pkg.toolkit.context._request_context_var
+    old_var = pkg.request_context._request_context_var
 
     # 2. 临时替换为一个全新的、未初始化的 ContextVar
-    pkg.toolkit.context._request_context_var = ContextVar("temp_test_ctx")
+    pkg.request_context._request_context_var = ContextVar("temp_test_ctx")
 
     try:
         # 3. 执行测试：直接 Set 应该抛出 RuntimeError
@@ -95,7 +102,7 @@ def test_set_without_init_raises_error():
 
     finally:
         # 4. 恢复现场
-        pkg.toolkit.context._request_context_var = old_var
+        pkg.request_context._request_context_var = old_var
 
 
 @pytest.mark.asyncio

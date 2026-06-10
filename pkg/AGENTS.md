@@ -4,7 +4,7 @@
 
 ## 层职责
 
-`pkg/` 是项目内可复用基础包，提供并发执行、数据库、日志、工具、OSS、第三方登录、向量检索等通用能力。这里的代码应尽量不依赖 `internal/` 业务层。
+`pkg/` 是项目内可复用基础包，提供并发执行、数据库、日志、工具、LLM 客户端、OSS、第三方登录、向量检索等通用能力。这里的代码应尽量不依赖 `internal/` 业务层。
 
 ## 编码约定
 
@@ -33,6 +33,7 @@
 - `pkg/crypter/AGENTS.md`：加密算法抽象和密文兼容性。
 - `pkg/database/AGENTS.md`：ORM 基类、builder、session provider。
 - `pkg/decorators/AGENTS.md`：通用装饰器，零业务依赖。
+- `pkg/llm/AGENTS.md`：OpenAI-compatible LLM 客户端、provider 能力和结构化输出契约。
 - `pkg/logger/AGENTS.md`：Loguru 封装、span 上下文、延迟初始化协议。
 - `pkg/oss/AGENTS.md`：对象存储统一契约、后端注册。
 - `pkg/third_party_auth/AGENTS.md`：第三方登录策略 + 工厂扩展。

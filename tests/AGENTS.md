@@ -4,7 +4,7 @@
 
 ## 层职责
 
-测试目录覆盖 API、Service/DAO、ORM、logger、toolkit、concurrency、vector 和 Celery 等行为。
+测试目录覆盖 API、Service/DAO、ORM、logger、toolkit、LLM、concurrency、vector 和 Celery 等行为。
 
 ## 编码约定
 

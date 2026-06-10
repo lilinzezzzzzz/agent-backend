@@ -74,6 +74,7 @@
 - Model / DAO / Cache：`internal/models/AGENTS.md`、`internal/dao/AGENTS.md`、`internal/cache/AGENTS.md`
 - Celery task / schedule：`internal/tasks/AGENTS.md`
 - Database base / query builder：`pkg/database/AGENTS.md`
+- LLM client abstraction：`pkg/llm/AGENTS.md`
 - Vector abstraction：`pkg/vectors/AGENTS.md`
 - Tests：`tests/AGENTS.md`
 

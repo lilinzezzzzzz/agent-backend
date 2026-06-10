@@ -8,7 +8,7 @@
 
 - 基础类型/字典：`types.py`、`dict.py`、`list.py`、`string.py`、`float.py`
 - 序列化/IO：`json.py`、`file.py`、`response.py`
-- 客户端：`http_cli.py`、`openai_cli.py`、`redis_client.py`、`grpc.py`
+- 客户端：`http_cli.py`、`redis_client.py`、`grpc.py`
 - 时间/任务：`timer.py`、`celery.py`、`apscheduler.py`
 - 上下文/签名/认证：`context.py`、`signature.py`、`jwt.py`、`hasher.py`
 - 其他：`config_loader.py`、`exc.py`、`inter.py`、`middleware.py`、`logger.py`
@@ -30,4 +30,4 @@
 ## 验证重点
 
 - 单个工具改动优先运行 `tests/toolkit/` 下对应测试。
-- 改 `http_cli` / `openai_cli` / `redis_client` 时，同时覆盖成功、超时、重试、异常四条路径。
+- 改 `http_cli` / `redis_client` 时，同时覆盖成功、超时、重试、异常四条路径。

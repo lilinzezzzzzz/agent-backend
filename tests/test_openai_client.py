@@ -3,9 +3,7 @@ from typing import Any
 
 import pytest
 
-# 假设您的优化后的代码位于 pkg/openai_client.py
-# 请确保您的文件结构能够正确导入
-from pkg.toolkit.openai_cli import OpenAIClient
+from pkg.llm import OpenAIClient
 
 # --- 测试配置 ---
 BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"

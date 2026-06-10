@@ -14,7 +14,7 @@ from openai.types.chat.chat_completion_chunk import (
 )
 from pydantic import AliasChoices, BaseModel, Field
 
-from pkg.toolkit.openai_cli import (
+from pkg.llm import (
     OpenAIClient,
     ProviderCapabilities,
     StructuredOutputMode,

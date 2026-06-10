@@ -1,6 +1,4 @@
 from collections.abc import AsyncGenerator, Callable, Mapping, Sequence
-from dataclasses import dataclass
-from enum import StrEnum
 from typing import Any
 
 import openai
@@ -18,88 +16,9 @@ from openai.types.chat import (
 from openai.types.chat.chat_completion_chunk import ChatCompletionChunk
 from pydantic import BaseModel
 
-
-class ThinkingMode(StrEnum):
-    AUTO = "auto"
-    ENABLED = "enabled"
-    DISABLED = "disabled"
-
-
-class StructuredOutputMode(StrEnum):
-    NATIVE = "native"
-    JSON_OBJECT = "json_object"
-    NATIVE_WITH_JSON_OBJECT_FALLBACK = "native_with_json_object_fallback"
-
-
-class ThinkingParamStyle(StrEnum):
-    NONE = "none"
-    REASONING_EFFORT = "reasoning_effort"
-    EXTRA_BODY_THINKING = "extra_body_thinking"
-
-
-class OpenAIClientError(RuntimeError):
-    """Base exception raised by OpenAIClient helper methods."""
-
-
-class StructuredOutputRefusalError(OpenAIClientError):
-    """Raised when a model refuses a structured output request."""
-
-
-class StructuredOutputParseError(OpenAIClientError):
-    """Raised when a structured output response cannot be parsed."""
-
-
-@dataclass(frozen=True)
-class ProviderCapabilities:
-    """OpenAI-compatible provider behavior switches."""
-
-    name: str
-    structured_output_mode: StructuredOutputMode = (
-        StructuredOutputMode.NATIVE_WITH_JSON_OBJECT_FALLBACK
-    )
-    thinking_param_style: ThinkingParamStyle = ThinkingParamStyle.NONE
-    supports_reasoning_effort: bool = False
-
-    def __post_init__(self) -> None:
-        object.__setattr__(
-            self,
-            "structured_output_mode",
-            StructuredOutputMode(self.structured_output_mode),
-        )
-        object.__setattr__(
-            self,
-            "thinking_param_style",
-            ThinkingParamStyle(self.thinking_param_style),
-        )
-
-
-PROVIDER_CAPABILITIES: dict[str, ProviderCapabilities] = {
-    "openai": ProviderCapabilities(
-        name="openai",
-        structured_output_mode=StructuredOutputMode.NATIVE,
-        thinking_param_style=ThinkingParamStyle.REASONING_EFFORT,
-        supports_reasoning_effort=True,
-    ),
-    "deepseek": ProviderCapabilities(
-        name="deepseek",
-        structured_output_mode=StructuredOutputMode.JSON_OBJECT,
-        thinking_param_style=ThinkingParamStyle.EXTRA_BODY_THINKING,
-        supports_reasoning_effort=True,
-    ),
-    "mimo": ProviderCapabilities(
-        name="mimo",
-        structured_output_mode=StructuredOutputMode.NATIVE_WITH_JSON_OBJECT_FALLBACK,
-        thinking_param_style=ThinkingParamStyle.EXTRA_BODY_THINKING,
-        supports_reasoning_effort=True,
-    ),
-    "xiaomi": ProviderCapabilities(
-        name="xiaomi",
-        structured_output_mode=StructuredOutputMode.NATIVE_WITH_JSON_OBJECT_FALLBACK,
-        thinking_param_style=ThinkingParamStyle.EXTRA_BODY_THINKING,
-        supports_reasoning_effort=True,
-    ),
-    "openai_compatible": ProviderCapabilities(name="openai_compatible"),
-}
+from pkg.llm.errors import StructuredOutputParseError, StructuredOutputRefusalError
+from pkg.llm.providers import PROVIDER_CAPABILITIES, ProviderCapabilities
+from pkg.llm.types import StructuredOutputMode, ThinkingMode, ThinkingParamStyle
 
 
 class OpenAIClient:

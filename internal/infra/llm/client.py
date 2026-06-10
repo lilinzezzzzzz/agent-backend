@@ -4,7 +4,7 @@ from pydantic import SecretStr
 
 from internal.config import settings
 from internal.core import AppException, errors
-from pkg.toolkit.openai_cli import OpenAIClient
+from pkg.llm import OpenAIClient
 
 
 def _provider_config_value(*, provider: str, field: str) -> str:

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Protocol
-
 from sqlalchemy import select, update
 
 from internal.core import AppException, errors
@@ -29,56 +27,10 @@ from pkg.toolkit.string import uuid6_unique_str_id
 from pkg.toolkit.timer import utc_now_naive
 
 
-class AgentStorageBackend(Protocol):
-    """Agent 会话存储后端协议。"""
-
-    async def start_run(
-        self,
-        *,
-        user_id: int,
-        session_id: str | None,
-        entrypoint: str,
-        agent_name: str,
-        question: str,
-        max_steps: int,
-        trace_id: str | None,
-    ) -> AgentRunStartDTO: ...
-
-    async def load_context(
-        self,
-        *,
-        user_id: int,
-        session_id: str,
-        max_recent_messages: int,
-        max_recent_chars: int,
-        exclude_run_id: str | None = None,
-    ) -> AgentConversationContextDTO: ...
-
-    async def complete_run(
-        self,
-        *,
-        user_id: int,
-        session_id: str,
-        run_id: str,
-        route: str | None,
-        result: AgentRunResultDTO,
-    ) -> None: ...
-
-    async def fail_run(
-        self,
-        *,
-        user_id: int,
-        session_id: str,
-        run_id: str,
-        error_code: str,
-        error_message: str,
-    ) -> None: ...
-
-
 class AgentConversationService:
     """Agent 会话存储用例服务。"""
 
-    def __init__(self, *, storage_backend: AgentStorageBackend):
+    def __init__(self, *, storage_backend: DatabaseAgentStorageBackend):
         self._storage_backend = storage_backend
 
     async def start_run(self, **kwargs) -> AgentRunStartDTO:

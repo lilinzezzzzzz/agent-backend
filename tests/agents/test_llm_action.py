@@ -2,8 +2,7 @@ from typing import Any
 
 import pytest
 
-from internal.agents import LLMActionModel, LLMReactActionMaker
-from pkg.agents import ReActAgent, StructuredTool
+from pkg.agents import LLMActionModel, LLMReactActionMaker, ReActAgent, StructuredTool
 from pkg.toolkit.json import orjson_loads
 
 

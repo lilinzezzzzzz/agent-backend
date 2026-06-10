@@ -3,7 +3,7 @@ from collections.abc import AsyncIterator
 from internal.agents.router import AgentRoute, HybridAgentRouter
 from internal.cache import AgentActionCache, new_agent_action_cache
 from internal.core import AppException, errors
-from internal.infra.llm import AgentLLMClient, new_default_llm_client
+from internal.infra.llm import OpenAIClient, new_default_llm_client
 from internal.services.agents.audit import (
     AgentAuditContext,
     AgentAuditService,
@@ -46,7 +46,7 @@ class AgentRouterService:
     def __init__(
         self,
         *,
-        llm_client: AgentLLMClient,
+        llm_client: OpenAIClient,
         order_agent_service: OrderAgentService,
         payment_agent_service: PaymentAgentService,
         audit_service: AgentAuditService,

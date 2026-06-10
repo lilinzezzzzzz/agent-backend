@@ -1,27 +1,10 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from typing import Any, Protocol
-
-from pydantic import BaseModel, SecretStr
+from pydantic import SecretStr
 
 from internal.config import settings
 from internal.core import AppException, errors
 from pkg.toolkit.openai_cli import OpenAIClient
-
-
-class AgentLLMClient(Protocol):
-    """Agent service 依赖的最小 LLM 客户端协议。"""
-
-    async def chat_completion_structured[StructuredOutputT: BaseModel](
-        self,
-        *,
-        messages: Sequence[Mapping[str, Any]],
-        response_model: type[StructuredOutputT],
-        max_tokens: int | None = None,
-        temperature: float | None = None,
-        **kwargs: Any,
-    ) -> StructuredOutputT: ...
 
 
 def _provider_config_value(*, provider: str, field: str) -> str:

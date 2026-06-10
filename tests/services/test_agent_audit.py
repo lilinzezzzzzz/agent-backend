@@ -3,14 +3,14 @@ from typing import Any
 
 import pytest
 
-from internal.agents import LLMActionModel
 from internal.services.agents.audit import (
     AgentAuditContext,
     AgentAuditService,
     AuditedAgentLLMClient,
     record_agent_audit,
 )
-from internal.services.dto.agent import AgentRunDTO, AgentStepDTO
+from internal.services.dto.agent import AgentRunResultDTO, AgentStepDTO
+from pkg.agents import LLMActionModel
 
 
 class FakeAgentAuditDao:
@@ -86,7 +86,7 @@ class FakeLLMClient:
 async def test_agent_audit_service_redacts_sensitive_payloads() -> None:
     dao = FakeAgentAuditDao()
     service = AgentAuditService(audit_dao=dao)
-    result = AgentRunDTO(
+    result = AgentRunResultDTO(
         run_id="run_audit_1",
         status="completed",
         answer="已发送到 buyer@example.com",
@@ -164,7 +164,7 @@ async def test_record_agent_audit_uses_background_task_manager(
         user_input="查询订单",
         max_steps=3,
     )
-    result = AgentRunDTO(
+    result = AgentRunResultDTO(
         run_id="run_async_audit_1",
         status="completed",
         answer="完成",
@@ -206,7 +206,7 @@ async def test_record_agent_audit_falls_back_when_background_task_manager_is_uni
         user_input="查询订单",
         max_steps=3,
     )
-    result = AgentRunDTO(
+    result = AgentRunResultDTO(
         run_id="run_sync_fallback_1",
         status="completed",
         answer="完成",
@@ -239,7 +239,7 @@ async def test_record_agent_audit_does_not_write_inline_when_background_task_man
         user_input="查询订单",
         max_steps=3,
     )
-    result = AgentRunDTO(
+    result = AgentRunResultDTO(
         run_id="run_shutdown_1",
         status="completed",
         answer="完成",

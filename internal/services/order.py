@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Protocol
 
-from internal.cache import new_agent_action_cache
+from internal.cache import AgentActionCache, new_agent_action_cache
 from internal.config import settings
 from internal.core import AppException, errors
 from internal.services.dto.order import (
@@ -17,52 +16,13 @@ from pkg.toolkit.string import uuid6_unique_str_id
 INVOICE_REQUEST_ACTION = "submit_invoice_request"
 
 
-class AgentActionStore(Protocol):
-    """OrderService 使用的 Agent 动作状态存储协议。"""
-
-    async def save_pending_action(
-        self, *, token: str, payload: dict[str, object], expires_in_seconds: int
-    ) -> bool: ...
-
-    async def get_pending_action(self, *, token: str) -> dict[str, object] | None: ...
-
-    async def delete_pending_action(self, *, token: str) -> int: ...
-
-    async def save_confirmation_result(
-        self, *, token: str, payload: dict[str, object], expires_in_seconds: int
-    ) -> bool: ...
-
-    async def get_confirmation_result(
-        self, *, token: str
-    ) -> dict[str, object] | None: ...
-
-    async def save_idempotency_result(
-        self,
-        *,
-        user_id: int,
-        idempotency_key: str,
-        payload: dict[str, object],
-        expires_in_seconds: int,
-    ) -> bool: ...
-
-    async def get_idempotency_result(
-        self, *, user_id: int, idempotency_key: str
-    ) -> dict[str, object] | None: ...
-
-    async def acquire_confirmation_lock(self, *, token: str) -> str: ...
-
-    async def release_confirmation_lock(
-        self, *, token: str, identifier: str
-    ) -> bool: ...
-
-
 class OrderService:
     """提供订单查询和需要显式确认的订单写操作。"""
 
     def __init__(
         self,
         *,
-        action_store: AgentActionStore,
+        action_store: AgentActionCache,
         confirmation_seconds: int,
         idempotency_seconds: int,
     ):

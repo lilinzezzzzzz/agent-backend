@@ -1,5 +1,6 @@
 """Reusable agent building blocks."""
 
+from pkg.agents.llm_action import LLMActionModel, LLMReactActionMaker
 from pkg.agents.react import (
     AgentAction,
     AgentActionContext,
@@ -27,6 +28,8 @@ __all__ = [
     "AgentActionContext",
     "AgentActionMaker",
     "AgentFinal",
+    "LLMActionModel",
+    "LLMReactActionMaker",
     "AgentRunEvent",
     "AgentRunEventType",
     "AgentRunResult",

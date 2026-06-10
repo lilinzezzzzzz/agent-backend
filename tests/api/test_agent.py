@@ -8,7 +8,6 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from pydantic import ValidationError
 
-from internal.agents import LLMActionModel
 from internal.agents.order import ORDER_SUPPORT_SYSTEM_PROMPT, OrderAgentBuilder
 from internal.agents.payment import PAYMENT_SUPPORT_SYSTEM_PROMPT, PaymentAgentBuilder
 from internal.agents.router import AgentRoute, AgentRouterActionModel
@@ -26,11 +25,12 @@ from internal.services.agents import (
 )
 from internal.services.dto.agent import (
     AgentChatDTO,
-    AgentRunDTO,
+    AgentRunResultDTO,
     AgentStepDTO,
     AgentStreamEventDTO,
     AgentStreamEventName,
 )
+from pkg.agents import LLMActionModel
 from internal.services.dto.rag import RagEvidenceDTO, RagRetrievalDTO
 from internal.services.order import OrderService
 from pkg.vectors.contracts import RetrievalMode
@@ -47,14 +47,14 @@ class FakeOrderAgentService:
         max_steps: int = 4,
         confirmation_token: str | None = None,
         idempotency_key: str | None = None,
-    ) -> AgentRunDTO:
+    ) -> AgentRunResultDTO:
         assert user_id == 999
         assert session_id is None
         assert question == "订单 1001 到哪了？"
         assert max_steps == 3
         assert confirmation_token is None
         assert idempotency_key is None
-        return AgentRunDTO(
+        return AgentRunResultDTO(
             run_id="run_1",
             status="completed",
             answer="订单 1001 正在运输中。",
@@ -152,14 +152,14 @@ class FakePaymentAgentService:
         max_steps: int = 4,
         confirmation_token: str | None = None,
         idempotency_key: str | None = None,
-    ) -> AgentRunDTO:
+    ) -> AgentRunResultDTO:
         assert user_id == 999
         assert session_id is None
         assert question == "支付失败怎么办？"
         assert max_steps == 3
         assert confirmation_token is None
         assert idempotency_key is None
-        return AgentRunDTO(
+        return AgentRunResultDTO(
             run_id="run_payment_1",
             status="completed",
             answer="请检查余额、限额和支付渠道状态。",
@@ -204,9 +204,9 @@ class RecordingOrderAgentService:
     def __init__(self):
         self.calls: list[dict[str, Any]] = []
 
-    async def answer_order_support_question(self, **kwargs: Any) -> AgentRunDTO:
+    async def answer_order_support_question(self, **kwargs: Any) -> AgentRunResultDTO:
         self.calls.append(kwargs)
-        return AgentRunDTO.final(answer="订单 Agent 已处理。")
+        return AgentRunResultDTO.final(answer="订单 Agent 已处理。")
 
     async def stream_order_support_question(
         self, **kwargs: Any
@@ -219,9 +219,9 @@ class RecordingPaymentAgentService:
     def __init__(self):
         self.calls: list[dict[str, Any]] = []
 
-    async def answer_payment_support_question(self, **kwargs: Any) -> AgentRunDTO:
+    async def answer_payment_support_question(self, **kwargs: Any) -> AgentRunResultDTO:
         self.calls.append(kwargs)
-        return AgentRunDTO.final(answer="支付 Agent 已处理。")
+        return AgentRunResultDTO.final(answer="支付 Agent 已处理。")
 
     async def stream_payment_support_question(
         self, **kwargs: Any

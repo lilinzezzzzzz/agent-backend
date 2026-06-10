@@ -1,6 +1,6 @@
-from internal.infra.llm.client import AgentLLMClient, new_default_llm_client
+from internal.infra.llm.client import OpenAIClient, new_default_llm_client
 
 __all__ = [
-    "AgentLLMClient",
+    "OpenAIClient",
     "new_default_llm_client",
 ]

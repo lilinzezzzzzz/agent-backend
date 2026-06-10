@@ -1,7 +1,6 @@
 from collections.abc import Mapping
 from typing import Any
 
-from internal.agents import LLMReactActionMaker
 from internal.agents.order.prompt import ORDER_SUPPORT_SYSTEM_PROMPT
 from internal.agents.order.tools import (
     build_calculate_refund_amount_tool,
@@ -10,10 +9,10 @@ from internal.agents.order.tools import (
     build_prepare_invoice_request_tool,
     build_search_order_knowledge_tool,
 )
-from internal.infra.llm import AgentLLMClient
+from internal.infra.llm import OpenAIClient
 from internal.services.order import OrderService
 from internal.services.rag import RagService
-from pkg.agents import ReActAgent, StructuredTool
+from pkg.agents import LLMReactActionMaker, ReActAgent, StructuredTool
 
 
 class OrderAgentBuilder:
@@ -22,7 +21,7 @@ class OrderAgentBuilder:
     def __init__(
         self,
         *,
-        llm_client: AgentLLMClient,
+        llm_client: OpenAIClient,
         order_service: OrderService,
         rag_service: RagService,
         user_id: int,

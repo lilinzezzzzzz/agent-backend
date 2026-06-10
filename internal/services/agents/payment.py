@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator
 
 from internal.agents.payment import PaymentAgentBuilder
 from internal.core import AppException, errors
-from internal.infra.llm import AgentLLMClient, new_default_llm_client
+from internal.infra.llm import OpenAIClient, new_default_llm_client
 from internal.services.agents.audit import (
     AgentAuditContext,
     AgentAuditService,
@@ -33,7 +33,7 @@ class PaymentAgentService:
     def __init__(
         self,
         *,
-        llm_client: AgentLLMClient,
+        llm_client: OpenAIClient,
         rag_service: RagService,
         audit_service: AgentAuditService,
         conversation_service: AgentConversationService | None = None,

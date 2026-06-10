@@ -4,7 +4,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
-from internal.infra.llm import AgentLLMClient
+from internal.infra.llm import OpenAIClient
 
 AGENT_ROUTER_SYSTEM_PROMPT = """你是业务 Agent Router，只负责识别用户问题应交给哪个业务域。
 你必须只输出约定的结构化结果，不回答用户问题。
@@ -35,7 +35,7 @@ class AgentRouterActionModel(BaseModel):
 class LLMAgentRouter:
     """使用结构化 LLM 输出识别业务域。"""
 
-    def __init__(self, *, llm_client: AgentLLMClient):
+    def __init__(self, *, llm_client: OpenAIClient):
         self._llm_client = llm_client
 
     async def route(self, *, question: str) -> AgentRoute:
@@ -145,7 +145,7 @@ class RuleBasedAgentRouter:
 class HybridAgentRouter:
     """规则优先、LLM 兜底的业务域 Router。"""
 
-    def __init__(self, *, llm_client: AgentLLMClient):
+    def __init__(self, *, llm_client: OpenAIClient):
         self._rule_router = RuleBasedAgentRouter()
         self._llm_router = LLMAgentRouter(llm_client=llm_client)
 

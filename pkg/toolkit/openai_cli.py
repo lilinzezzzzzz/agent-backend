@@ -274,6 +274,7 @@ class OpenAIClient:
         if (
             self.provider_capabilities.thinking_param_style
             == ThinkingParamStyle.EXTRA_BODY_THINKING
+            and thinking_mode is not None
             and thinking_mode in {ThinkingMode.ENABLED, ThinkingMode.DISABLED}
         ):
             body["thinking"] = {"type": thinking_mode.value}

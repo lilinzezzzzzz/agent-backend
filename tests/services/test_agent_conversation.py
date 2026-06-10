@@ -6,7 +6,7 @@ from internal.core import AppException, errors
 from internal.dao.agent_conversation import AgentMessageDao, AgentRunDao, AgentRunStepDao, AgentSessionDao
 from internal.models.agent_conversation import AgentMessage, AgentRun, AgentRunStep, AgentSession
 from internal.services.agents.conversation import AgentConversationService, DatabaseAgentStorageBackend
-from internal.services.dto.agent import AgentRunDTO, AgentStepDTO
+from internal.services.dto.agent import AgentRunResultDTO, AgentStepDTO
 
 
 def _new_conversation_service(db_session) -> AgentConversationService:
@@ -44,7 +44,7 @@ async def test_agent_conversation_service_creates_and_completes_run(db_session) 
         max_recent_chars=12000,
         exclude_run_id=started.run_id,
     )
-    result = AgentRunDTO(
+    result = AgentRunResultDTO(
         session_id=started.session_id,
         run_id=started.run_id,
         status="completed",

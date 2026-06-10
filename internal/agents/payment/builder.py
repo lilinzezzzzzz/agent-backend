@@ -1,16 +1,15 @@
 from collections.abc import Mapping
 from typing import Any
 
-from internal.agents import LLMReactActionMaker
 from internal.agents.payment.prompt import PAYMENT_SUPPORT_SYSTEM_PROMPT
 from internal.agents.payment.tools import (
     build_calculate_payment_total_tool,
     build_get_supported_payment_methods_tool,
     build_search_payment_knowledge_tool,
 )
-from internal.infra.llm import AgentLLMClient
+from internal.infra.llm import OpenAIClient
 from internal.services.rag import RagService
-from pkg.agents import ReActAgent, StructuredTool
+from pkg.agents import LLMReactActionMaker, ReActAgent, StructuredTool
 
 
 class PaymentAgentBuilder:
@@ -19,7 +18,7 @@ class PaymentAgentBuilder:
     def __init__(
         self,
         *,
-        llm_client: AgentLLMClient,
+        llm_client: OpenAIClient,
         rag_service: RagService,
         user_id: int,
         max_steps: int,

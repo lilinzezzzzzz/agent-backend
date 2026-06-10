@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from typing import Any, Protocol
+from typing import Any
 
 import anyio
 from pydantic import BaseModel, Field
@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from internal.config import settings
 from internal.core import AppException, errors
 from internal.dao.rag import RagChunkMetadata, RagMetadataDao, new_rag_metadata_dao
-from internal.infra.llm import AgentLLMClient
+from internal.infra.llm import OpenAIClient
 from internal.services.dto.rag import (
     PreparedRetrievalQueryDTO,
     RagAnswerDTO,
@@ -50,16 +50,6 @@ _NO_EVIDENCE_ERROR = "rag_no_evidence"
 _INVALID_CITATION_ERROR = "rag_invalid_citation"
 
 
-class RagScopeResolver(Protocol):
-    def resolve_allowed_domains(
-        self, *, user_id: int, requested_context: Mapping[str, Any]
-    ) -> set[str]: ...
-
-    def resolve_allowed_kb_ids(
-        self, *, user_id: int, requested_context: Mapping[str, Any]
-    ) -> set[int]: ...
-
-
 class SettingsRagScopeResolver:
     """Resolve RAG visibility from server-side settings."""
 
@@ -84,10 +74,10 @@ class RagService:
     def __init__(
         self,
         *,
-        llm_client: AgentLLMClient,
+        llm_client: OpenAIClient,
         embedder: Any,
         metadata_dao: RagMetadataDao,
-        scope_resolver: RagScopeResolver | None = None,
+        scope_resolver: SettingsRagScopeResolver | None = None,
         repository: ChunkVectorRepository | None = None,
         repository_factory: RagRepositoryFactory | None = None,
         max_context_chars: int | None = None,

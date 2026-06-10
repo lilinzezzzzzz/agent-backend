@@ -148,6 +148,8 @@ submit_business_action
 `pkg.agents.ReActAgent` 提供：
 
 - `AgentActionMaker`：根据当前上下文生成下一步动作
+- `LLMReactActionMaker`：把结构化 LLM 输出转换成 `AgentToolCall` / `AgentFinal`
+- `LLMActionModel`：LLM structured output 的动作 schema
 - `AgentToolCall`：请求调用一个结构化工具
 - `AgentFinal`：返回最终答案并结束运行
 - `StructuredTool`：声明工具名、描述、参数 schema 和 handler

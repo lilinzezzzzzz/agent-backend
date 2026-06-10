@@ -9,6 +9,7 @@
 
 - `react.py`：结构化工具定义、Action Maker 协议、有限步执行器、运行状态记录和
   LLM payload 解析。
+- `llm_action.py`：基于结构化 LLM 输出的通用 ReAct action maker 和动作 schema。
 - `__init__.py`：导出外部可复用的 Agent 类型、异常和 helper。
 
 该包只负责 Agent 编排基础能力，不绑定具体业务场景、具体 LLM Provider、

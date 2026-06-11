@@ -29,7 +29,9 @@ mock_pkg.orjson_dumps = lambda x: "json"
 mock_pkg.orjson_loads = lambda x: {}
 mock_pkg.orjson_loads_types = (str, bytes)
 mock_pkg.utc_now_naive = lambda: datetime.utcnow()
-mock_pkg.unique_list = lambda x, exclude_none=False: list(set([i for i in x if i is not None] if exclude_none else x))
+mock_pkg.unique_list = lambda x, exclude_none=False: list(
+    set([i for i in x if i is not None] if exclude_none else x)
+)
 
 # Mock context module
 mock_context = types.ModuleType("pkg.request_context")
@@ -101,6 +103,7 @@ class UserDao(BaseDao[User]):
 # 4. Pytest Fixtures (关键修改区域)
 # ==========================================
 
+
 # 修改点：使用 @pytest_asyncio.fixture 替代 @pytest.fixture
 # 并且显式指定 loop_scope="function" 以符合新版规范
 @pytest_asyncio.fixture(loop_scope="function")
@@ -143,6 +146,7 @@ def user_dao(db_session):
 # ==========================================
 # 5. 测试用例
 # ==========================================
+
 
 @pytest.mark.asyncio
 async def test_create_and_insert_strictness(user_dao, db_session):
@@ -251,9 +255,7 @@ async def test_instance_model_must_match_dao_model(user_dao):
 async def test_query_builder(user_dao, db_session):
     """测试查询构建器"""
     # 准备数据
-    await user_dao.insert_rows(
-        rows=[{"username": f"u{i}"} for i in range(1, 6)]
-    )
+    await user_dao.insert_rows(rows=[{"username": f"u{i}"} for i in range(1, 6)])
 
     # Test IN with values
     res = await user_dao.querier.in_(User.username, ["u1", "u2"]).all()
@@ -267,7 +269,9 @@ async def test_query_builder(user_dao, db_session):
     assert "cannot be empty" in str(exc.value)
 
     # Test Pagination
-    page_res = await user_dao.querier_unsorted.asc_(User.id).paginate(page=1, limit=2).all()
+    page_res = (
+        await user_dao.querier_unsorted.asc_(User.id).paginate(page=1, limit=2).all()
+    )
     assert len(page_res) == 2
     assert page_res[0].username == "u1"
 
@@ -276,7 +280,9 @@ async def test_query_builder(user_dao, db_session):
 async def test_soft_delete(user_dao, db_session):
     """测试软删除"""
     user = User.create(username="del_me")
+    active_user = User.create(username="keep_me")
     await user_dao.insert(user)
+    await user_dao.insert(active_user)
 
     await user_dao.ins_updater(user).soft_delete().execute()
 
@@ -284,6 +290,32 @@ async def test_soft_delete(user_dao, db_session):
     assert await user_dao.querier.eq_(User.id, user.id).first() is None
     # inc_deleted 查出
     assert await user_dao.querier_inc_deleted.eq_(User.id, user.id).first() is not None
+    # 显式筛选已删除和未删除记录
+    assert (
+        await user_dao.querier_inc_deleted.is_deleted().eq_(User.id, user.id).first()
+        is not None
+    )
+    assert (
+        await user_dao.querier_inc_deleted.is_not_deleted()
+        .eq_(User.id, user.id)
+        .first()
+        is None
+    )
+    assert (
+        await user_dao.querier_inc_deleted.is_not_deleted()
+        .eq_(User.id, active_user.id)
+        .first()
+        is not None
+    )
+
+    deleted_count = (
+        await user_dao.col_counter(User.id, include_deleted=True).is_deleted().count()
+    )
+    active_count = await user_dao.col_counter(User.id).is_not_deleted().count()
+    all_count = await user_dao.counter_inc_deleted.count()
+    assert deleted_count == 1
+    assert active_count == 1
+    assert all_count == 2
 
 
 @pytest.mark.asyncio

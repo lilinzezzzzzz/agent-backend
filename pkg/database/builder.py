@@ -96,14 +96,27 @@ class BaseBuilder[T: ModelMixin]:
     def is_null(self, column: InstrumentedAttribute) -> Self:
         return self.where(column.is_(None))
 
+    def is_not_deleted(self) -> Self:
+        """仅保留未软删除记录。"""
+        if deleted_column := self._model_cls.get_column_or_none(
+            self._model_cls.deleted_at_column_name()
+        ):
+            self.where(deleted_column.is_(None))
+        return self
+
+    def is_deleted(self) -> Self:
+        """仅保留已软删除记录。"""
+        if deleted_column := self._model_cls.get_column_or_none(
+            self._model_cls.deleted_at_column_name()
+        ):
+            self.where(deleted_column.is_not(None))
+        return self
+
     def or_(self, *conditions: ColumnElement[bool]) -> Self:
         return self.where(or_(*conditions)) if conditions else self
 
     def _apply_delete_at_is_none(self) -> None:
-        if deleted_column := self._model_cls.get_column_or_none(
-            self._model_cls.deleted_at_column_name()
-        ):
-            self._stmt = self.stmt.where(deleted_column.is_(None))
+        self.is_not_deleted()
 
 
 class QueryBuilder[T: ModelMixin](BaseBuilder[T]):

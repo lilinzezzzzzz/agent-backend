@@ -98,19 +98,29 @@ class BaseDao[T: ModelMixin]:
     @property
     def querier_inc_deleted(self) -> QueryBuilder[T]:
         """包含已删除记录的查询器（按更新时间倒序）"""
-        return QueryBuilder(self.model_cls, session_provider=self._read_session_provider, include_deleted=True).desc_(
-            self.model_cls.updated_at
-        )
+        return QueryBuilder(
+            self.model_cls,
+            session_provider=self._read_session_provider,
+            include_deleted=True,
+        ).desc_(self.model_cls.updated_at)
 
     @property
     def querier_unsorted(self) -> QueryBuilder[T]:
         """无排序查询器（排除已删除）"""
-        return QueryBuilder(self.model_cls, session_provider=self._read_session_provider, include_deleted=False)
+        return QueryBuilder(
+            self.model_cls,
+            session_provider=self._read_session_provider,
+            include_deleted=False,
+        )
 
     @property
     def querier_inc_deleted_unsorted(self) -> QueryBuilder[T]:
         """无排序查询器（包含已删除）"""
-        return QueryBuilder(self.model_cls, session_provider=self._read_session_provider, include_deleted=True)
+        return QueryBuilder(
+            self.model_cls,
+            session_provider=self._read_session_provider,
+            include_deleted=True,
+        )
 
     def col_querier(
         self,
@@ -145,7 +155,11 @@ class BaseDao[T: ModelMixin]:
     def sub_querier(self, subquery: Subquery) -> QueryBuilder[T]:
         """创建子查询查询器"""
         alias = aliased(self.model_cls, subquery)
-        return QueryBuilder(self.model_cls, session_provider=self._read_session_provider, custom_stmt=select(alias))
+        return QueryBuilder(
+            self.model_cls,
+            session_provider=self._read_session_provider,
+            custom_stmt=select(alias),
+        )
 
     # ==========================================================================
     # 查询器（写库 - 强制读主库，用于写后读一致性场景）
@@ -154,14 +168,20 @@ class BaseDao[T: ModelMixin]:
     @property
     def write_querier(self) -> QueryBuilder[T]:
         """强制从主库查询（按更新时间倒序）"""
-        return QueryBuilder(self.model_cls, session_provider=self._session_provider, include_deleted=False).desc_(
-            self.model_cls.updated_at
-        )
+        return QueryBuilder(
+            self.model_cls,
+            session_provider=self._session_provider,
+            include_deleted=False,
+        ).desc_(self.model_cls.updated_at)
 
     @property
     def write_querier_unsorted(self) -> QueryBuilder[T]:
         """强制从主库查询（无排序）"""
-        return QueryBuilder(self.model_cls, session_provider=self._session_provider, include_deleted=False)
+        return QueryBuilder(
+            self.model_cls,
+            session_provider=self._session_provider,
+            include_deleted=False,
+        )
 
     # ==========================================================================
     # 计数器
@@ -176,17 +196,28 @@ class BaseDao[T: ModelMixin]:
             include_deleted=False,
         )
 
+    @property
+    def counter_inc_deleted(self) -> CountBuilder[T]:
+        """包含已删除记录的计数器"""
+        return CountBuilder(
+            self.model_cls,
+            session_provider=self._session_provider,
+            include_deleted=True,
+        )
+
     def col_counter(
         self,
         count_column: InstrumentedAttribute,
         *,
         is_distinct: bool = False,
+        include_deleted: bool = False,
     ) -> CountBuilder[T]:
         """创建统计指定列的计数器
 
         Args:
             count_column: 要统计的列
             is_distinct: 是否去重统计（COUNT DISTINCT）
+            include_deleted: 是否包含已删除记录
 
         Returns:
             CountBuilder，统计指定列的数量
@@ -206,6 +237,7 @@ class BaseDao[T: ModelMixin]:
             self.model_cls,
             session_provider=self._session_provider,
             custom_stmt=custom_stmt,
+            include_deleted=include_deleted,
         )
 
     # ==========================================================================
@@ -215,7 +247,9 @@ class BaseDao[T: ModelMixin]:
     @property
     def updater(self) -> UpdateBuilder[T]:
         """创建更新构建器"""
-        return UpdateBuilder(model_cls=self.model_cls, session_provider=self._session_provider)
+        return UpdateBuilder(
+            model_cls=self.model_cls, session_provider=self._session_provider
+        )
 
     def ins_updater(self, ins: T) -> UpdateBuilder[T]:
         """创建基于实例的更新构建器"""
@@ -227,7 +261,11 @@ class BaseDao[T: ModelMixin]:
     # ==========================================================================
 
     async def query_by_primary_id(
-        self, primary_id: int, *, creator_id: int | None = None, include_deleted: bool = False
+        self,
+        primary_id: int,
+        *,
+        creator_id: int | None = None,
+        include_deleted: bool = False,
     ) -> T | None:
         """根据主键 ID 查询单条记录"""
         qb = self.querier_inc_deleted if include_deleted else self.querier
@@ -244,11 +282,15 @@ class BaseDao[T: ModelMixin]:
     # 实例操作（执行模型构造出的写语句）
     # ==========================================================================
 
-    async def _execute_stmt(self, stmt: Executable | None, *, error_context: str) -> None:
+    async def _execute_stmt(
+        self, stmt: Executable | None, *, error_context: str
+    ) -> None:
         if stmt is None:
             return
 
-        await self.model_cls.execute_stmt(stmt, self._session_provider, error_context=error_context)
+        await self.model_cls.execute_stmt(
+            stmt, self._session_provider, error_context=error_context
+        )
 
     async def insert(self, instance: T) -> None:
         """插入新实例"""
@@ -307,7 +349,9 @@ class BaseDao[T: ModelMixin]:
             return None
 
         defaults = self.model_cls.get_context_defaults()
-        db_values = [self.model_cls.fill_dict_insert_fields(row, defaults) for row in rows]
+        db_values = [
+            self.model_cls.fill_dict_insert_fields(row, defaults) for row in rows
+        ]
         return insert(self.model_cls).values(db_values)
 
     async def insert_rows(self, *, rows: list[dict[str, Any]]) -> None:

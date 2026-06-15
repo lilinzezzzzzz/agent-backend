@@ -277,6 +277,21 @@ async def test_query_builder(user_dao, db_session):
 
 
 @pytest.mark.asyncio
+async def test_query_builder_like_treats_pattern_as_literal_text(user_dao):
+    await user_dao.insert_rows(
+        rows=[
+            {"username": "prefix-100%_done-suffix"},
+            {"username": "prefix-100x_done-suffix"},
+            {"username": "prefix-100%xdone-suffix"},
+        ]
+    )
+
+    result = await user_dao.querier.like(User.username, "100%_done").all()
+
+    assert [user.username for user in result] == ["prefix-100%_done-suffix"]
+
+
+@pytest.mark.asyncio
 async def test_soft_delete(user_dao, db_session):
     """测试软删除"""
     user = User.create(username="del_me")

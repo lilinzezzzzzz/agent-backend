@@ -140,3 +140,33 @@ def mask_string(
 
     suffix = text[-suffix_length:] if suffix_length else ""
     return f"{text[:prefix_length]}{mask}{suffix}"
+
+
+def escape_like_pattern(text: str, escape_char: str = "\\") -> str:
+    """转义 SQL LIKE 查询中的特殊字符。
+
+    LIKE 模式中 % 和 _ 是通配符，需要进行转义以实现精确匹配。
+
+    Args:
+        text: 需要转义的字符串
+        escape_char: 转义字符，默认为反斜杠
+
+    Returns:
+        转义后的字符串
+
+    Examples:
+        >>> escape_like_pattern("test_1")
+        'test\\_1'
+        >>> escape_like_pattern("100%")
+        '100\\%'
+        >>> escape_like_pattern("path\\to\\file")
+        'path\\\\to\\\\file'
+    """
+    if not text:
+        return ""
+    # 先转义转义字符本身，再转义 % 和 _
+    return (
+        text.replace(escape_char, escape_char * 2)
+        .replace("%", f"{escape_char}%")
+        .replace("_", f"{escape_char}_")
+    )

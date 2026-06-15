@@ -10,6 +10,7 @@ from pkg.database.types import ColumnKey
 from pkg.logger import logger
 from pkg import request_context as context
 from pkg.toolkit.list import unique_list
+from pkg.toolkit.string import escape_like_pattern
 from pkg.toolkit.timer import utc_now_naive
 
 """
@@ -90,8 +91,10 @@ class BaseBuilder[T: ModelMixin]:
 
         return self.where(column.in_(unique))
 
-    def like(self, column: InstrumentedAttribute, pattern: str) -> Self:
-        return self.where(column.like(f"%{pattern}%"))
+    def like(self, column: InstrumentedAttribute | Mapped, pattern: str) -> Self:
+        escape_char = "\\"
+        escaped_pattern = escape_like_pattern(pattern, escape_char=escape_char)
+        return self.where(column.like(f"%{escaped_pattern}%", escape=escape_char))
 
     def is_null(self, column: InstrumentedAttribute) -> Self:
         return self.where(column.is_(None))

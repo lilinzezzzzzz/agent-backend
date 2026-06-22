@@ -12,6 +12,10 @@ from internal.config import settings
 from internal.core import AppException, errors
 from internal.dao.rag import RagChunkMetadata, RagMetadataDao, new_rag_metadata_dao
 from internal.infra.llm import OpenAIClient
+from internal.rag.repositories.chunk_vector import (
+    ChunkVectorRepository,
+    new_chunk_repository,
+)
 from internal.services.dto.rag import (
     PreparedRetrievalQueryDTO,
     RagAnswerDTO,
@@ -20,10 +24,9 @@ from internal.services.dto.rag import (
     RagExternalRunDTO,
     RagRetrievalDTO,
 )
-from internal.rag.repositories.chunk_vector import ChunkVectorRepository, new_chunk_repository
-from pkg.logger import logger
 from pkg import request_context as context
 from pkg.ids import uuid6_unique_str_id
+from pkg.logger import logger
 from pkg.vectors.contracts import (
     FilterCondition,
     FilterOperator,

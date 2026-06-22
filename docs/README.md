@@ -39,6 +39,7 @@ RAG 工程架构、技术选型和 Agentic RAG 方案。
 - [RAG 工程分类与技术选型](rag/rag-engineering-classification-selection.md)
 - [Lightweight Agentic RAG 技术方案](rag/lightweight-agentic-rag.md)
 - [知识库 / 文档 / Chunk ORM 管理后台技术方案](rag/kb_orm_admin_design.md)
+- [PDF 文档解析与入库技术方案](rag/pdf_ingestion_design.md)
 
 ## 根目录
 

@@ -22,8 +22,8 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.orm import DeclarativeBase, InstrumentedAttribute, Mapped, mapped_column
 
-from pkg.database.types import ColumnKey
 from pkg import request_context as context
+from pkg.database.types import ColumnKey
 from pkg.ids import snowflake_id_generator
 from pkg.toolkit.json import JsonInputType, orjson_dumps, orjson_loads
 from pkg.toolkit.timer import utc_now_naive
@@ -84,12 +84,11 @@ class ModelMixin(Base):
     # --- 字段定义 ---
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     creator_id: Mapped[int] = mapped_column(BigInteger)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=False))
-
     updater_id: Mapped[int | None] = mapped_column(BigInteger, default=None)
     updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=False), default=None
     )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=False))
     deleted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=False), default=None
     )

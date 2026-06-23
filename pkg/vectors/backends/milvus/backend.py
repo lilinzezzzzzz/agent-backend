@@ -516,24 +516,27 @@ class MilvusBackend(BaseVectorBackend):
         request: SearchRequest,
         limit: int,
     ) -> dict[str, object]:
-        search_params = dict(self._default_search_params)
-        if "metric_type" not in search_params:
-            search_params["metric_type"] = map_metric_type(spec.metric_type)
-        if "params" not in search_params:
-            search_params["params"] = {}
-
+        default_search_params = dict(self._default_search_params)
         request_search_params = dict(request.search_params)
-        request_params = request_search_params.pop("params", None)
-        search_params.update(request_search_params)
-        if request_params is not None:
-            default_params = search_params.get("params")
-            if isinstance(default_params, dict) and isinstance(request_params, dict):
-                search_params["params"] = {**default_params, **request_params}
-            else:
-                search_params["params"] = request_params
 
-        self._set_default_hnsw_ef(spec=spec, search_params=search_params, limit=limit)
-        return search_params
+        default_params = default_search_params.pop("params", {})
+        request_has_params = "params" in request_search_params
+        request_params = request_search_params.pop("params", {})
+
+        final_search_params: dict[str, Any] = {
+            "metric_type": spec.metric_type.value.upper(),
+            **default_search_params,
+            **request_search_params,
+        }
+
+        if isinstance(default_params, dict) and isinstance(request_params, dict):
+            params: object = {**default_params, **request_params}
+        else:
+            params = request_params if request_has_params else default_params
+        final_search_params["params"] = params
+
+        self._set_default_hnsw_ef(spec=spec, search_params=final_search_params, limit=limit)
+        return final_search_params
 
     def _set_default_hnsw_ef(
         self,

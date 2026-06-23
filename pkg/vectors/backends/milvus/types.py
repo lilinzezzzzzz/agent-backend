@@ -12,10 +12,10 @@ from pkg.vectors.contracts import RetrievalMode
 
 MILVUS_HOST = "localhost"
 MILVUS_PORT = 19530
+DEFAULT_HNSW_SEARCH_EF = 64
 
 
 class MilvusDenseIndexType(StrEnum):
-    AUTOINDEX = "AUTOINDEX"
     FLAT = "FLAT"
     HNSW = "HNSW"
     IVF_FLAT = "IVF_FLAT"
@@ -54,11 +54,6 @@ class MilvusSparseInvertedIndexParams(IndexParams):
     drop_ratio_build: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
-class MilvusAutoIndexConfig(IndexConfig, extra="forbid"):
-    index_type: Literal[MilvusDenseIndexType.AUTOINDEX] = MilvusDenseIndexType.AUTOINDEX
-    params: EmptyIndexParams = Field(default_factory=EmptyIndexParams)
-
-
 class MilvusFlatIndexConfig(IndexConfig, extra="forbid"):
     index_type: Literal[MilvusDenseIndexType.FLAT] = MilvusDenseIndexType.FLAT
     params: EmptyIndexParams = Field(default_factory=EmptyIndexParams)
@@ -90,8 +85,7 @@ class MilvusDiskAnnIndexConfig(IndexConfig, extra="forbid"):
 
 
 type MilvusIndexConfig = Annotated[
-    MilvusAutoIndexConfig
-    | MilvusFlatIndexConfig
+    MilvusFlatIndexConfig
     | MilvusHnswIndexConfig
     | MilvusIvfFlatIndexConfig
     | MilvusIvfSq8IndexConfig
@@ -128,7 +122,7 @@ class MilvusCollectionSpec(CollectionSpec, extra="forbid"):
     """Milvus collection 规格定义。"""
 
     text_max_length: int = Field(default=65_535, gt=0)
-    index_config: MilvusIndexConfig = Field(default_factory=MilvusAutoIndexConfig)
+    index_config: MilvusIndexConfig = Field(default_factory=MilvusHnswIndexConfig)
     full_text_search: FullTextSearchSpec = Field(default_factory=FullTextSearchSpec)
     consistency_level: MilvusConsistencyLevel = MilvusConsistencyLevel.SESSION
     enable_dynamic_field: bool = False
@@ -160,10 +154,10 @@ class SearchExecutionPlan:
 
 
 __all__ = [
+    "DEFAULT_HNSW_SEARCH_EF",
     "FullTextSearchSpec",
     "MILVUS_HOST",
     "MILVUS_PORT",
-    "MilvusAutoIndexConfig",
     "MilvusCollectionSpec",
     "MilvusConsistencyLevel",
     "MilvusDenseIndexType",

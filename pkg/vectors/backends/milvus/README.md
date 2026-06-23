@@ -123,7 +123,7 @@ backend = MilvusBackend(
     timeout=10.0,
     default_search_params={
         "metric_type": "COSINE",
-        "params": {"nprobe": 16},
+        "params": {"ef": 128},
     },
 )
 ```
@@ -150,6 +150,9 @@ spec = MilvusCollectionSpec(
     metric_type=MetricType.COSINE,
 )
 ```
+
+默认 dense index 使用 `HNSW`。`AUTOINDEX` 不再作为可用配置；如果没有显式传
+`search_params.params.ef`，backend 会为 HNSW dense 检索自动设置 `ef=max(64, limit)`。
 
 启用 BM25 / full-text / hybrid：
 
@@ -342,7 +345,7 @@ request = SearchRequest(
     top_k=10,
     search_params={
         "metric_type": "COSINE",
-        "params": {"nprobe": 32},
+        "params": {"ef": 128},
     },
 )
 ```

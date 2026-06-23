@@ -208,8 +208,9 @@ def build_index_params(*, client: MilvusClient, spec: CollectionSpec):
     spec = require_milvus_spec(spec=spec)
     index_params = client.prepare_index_params()
     index_config = spec.index_config
-    index_type = str(index_config.index_type or MilvusDenseIndexType.AUTOINDEX).upper()
-    if index_type not in {index.value for index in MilvusDenseIndexType}:
+    index_type = str(index_config.index_type or MilvusDenseIndexType.HNSW).upper()
+    supported_dense_index_types = {index.value for index in MilvusDenseIndexType}
+    if index_type not in supported_dense_index_types:
         raise ValueError(f"Milvus backend 不支持的 dense index_type: {index_type}")
     index_params.add_index(
         field_name=spec.vector_field,

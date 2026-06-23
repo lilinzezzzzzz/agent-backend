@@ -11,12 +11,7 @@ from pkg.vectors.backends.base import (
     ScalarFieldSpec,
     VectorBackend,
 )
-from pkg.vectors.backends.milvus.types import (
-    FullTextSearchSpec,
-    MilvusCollectionSpec,
-    MilvusHnswIndexConfig,
-    MilvusHnswIndexParams,
-)
+from pkg.vectors.backends.milvus.types import MilvusCollectionSpec
 from pkg.vectors.contracts import (
     FilterCondition,
     FilterOperator,
@@ -55,26 +50,34 @@ class ChunkVectorRepository(BaseVectorRepository[ChunkVectorDocument]):
         dimension: int = 1024,
     ) -> None:
         super().__init__(backend=backend, embedder=embedder, scope_value=scope_value)
-        self._collection_spec = MilvusCollectionSpec(
-            name=collection_name,
-            dimension=dimension,
-            metric_type=MetricType.COSINE,
-            payload_field=None,
-            scalar_fields=[
-                ScalarFieldSpec(name="doc_id", data_type=ScalarDataType.INT64),
-                ScalarFieldSpec(
-                    name="kb_id", data_type=ScalarDataType.INT64, nullable=True
-                ),
-                ScalarFieldSpec(
-                    name="domain", data_type=ScalarDataType.STRING, max_length=64
-                ),
-                ScalarFieldSpec(name="chunk_index", data_type=ScalarDataType.INT64),
-            ],
-            index_config=MilvusHnswIndexConfig(
-                params=MilvusHnswIndexParams(M=30, efConstruction=200)
-            ),
-            full_text_search=FullTextSearchSpec(enabled=True),
-            description="Knowledge chunk vector collection",
+        self._collection_spec = MilvusCollectionSpec.model_validate(
+            {
+                "name": collection_name,
+                "dimension": dimension,
+                "metric_type": MetricType.COSINE,
+                "payload_field": None,
+                "scalar_fields": [
+                    ScalarFieldSpec(name="doc_id", data_type=ScalarDataType.INT64),
+                    ScalarFieldSpec(
+                        name="kb_id", data_type=ScalarDataType.INT64, nullable=True
+                    ),
+                    ScalarFieldSpec(
+                        name="domain",
+                        data_type=ScalarDataType.STRING,
+                        max_length=64,
+                    ),
+                    ScalarFieldSpec(
+                        name="chunk_index",
+                        data_type=ScalarDataType.INT64,
+                    ),
+                ],
+                "index_config": {
+                    "index_type": "HNSW",
+                    "params": {"M": 30, "efConstruction": 200},
+                },
+                "full_text_search": {"enabled": True},
+                "description": "Knowledge chunk vector collection",
+            }
         )
 
     @property

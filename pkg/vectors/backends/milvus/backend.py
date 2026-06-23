@@ -41,7 +41,13 @@ from .schema import (
     map_metric_type,
     validate_collection_description,
 )
-from .types import MilvusCollectionSpec, SearchBranchPlan, SearchExecutionPlan
+from .types import (
+    DEFAULT_HNSW_SEARCH_EF,
+    MilvusCollectionSpec,
+    MilvusDenseIndexType,
+    SearchBranchPlan,
+    SearchExecutionPlan,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -508,14 +514,39 @@ class MilvusBackend(BaseVectorBackend):
         *,
         spec: MilvusCollectionSpec,
         request: SearchRequest,
+        limit: int,
     ) -> dict[str, object]:
         search_params = dict(self._default_search_params)
         if "metric_type" not in search_params:
             search_params["metric_type"] = map_metric_type(spec.metric_type)
         if "params" not in search_params:
             search_params["params"] = {}
-        search_params.update(request.search_params)
+
+        request_search_params = dict(request.search_params)
+        request_params = request_search_params.pop("params", None)
+        search_params.update(request_search_params)
+        if request_params is not None:
+            default_params = search_params.get("params")
+            if isinstance(default_params, dict) and isinstance(request_params, dict):
+                search_params["params"] = {**default_params, **request_params}
+            else:
+                search_params["params"] = request_params
+
+        self._set_default_hnsw_ef(spec=spec, search_params=search_params, limit=limit)
         return search_params
+
+    def _set_default_hnsw_ef(
+        self,
+        *,
+        spec: MilvusCollectionSpec,
+        search_params: dict[str, object],
+        limit: int,
+    ) -> None:
+        index_type = str(spec.index_config.index_type).upper()
+        params = search_params.get("params")
+        if index_type != MilvusDenseIndexType.HNSW.value or not isinstance(params, dict) or "ef" in params:
+            return
+        params["ef"] = max(DEFAULT_HNSW_SEARCH_EF, limit)
 
     def _build_search_plan(
         self,
@@ -546,7 +577,7 @@ class MilvusBackend(BaseVectorBackend):
                         anns_field=spec.vector_field,
                         data=[request.vector],
                         search_params=self._build_search_params(
-                            spec=spec, request=request
+                            spec=spec, request=request, limit=request.top_k
                         ),
                         limit=request.top_k,
                     ),
@@ -583,7 +614,7 @@ class MilvusBackend(BaseVectorBackend):
                 name=RetrievalMode.DENSE.value,
                 anns_field=spec.vector_field,
                 data=[request.vector],
-                search_params=self._build_search_params(spec=spec, request=request),
+                search_params=self._build_search_params(spec=spec, request=request, limit=candidate_limit),
                 limit=candidate_limit,
             ),
             SearchBranchPlan(

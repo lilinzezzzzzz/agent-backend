@@ -31,7 +31,9 @@ def _extract_bearer_token(authorization: str | None) -> str | None:
     return authorization
 
 
-@router.post("/login", response_model=BaseResponse[UserLoginRespSchema], summary="用户登录")
+@router.post(
+    "/login", response_model=BaseResponse[UserLoginRespSchema], summary="用户登录"
+)
 async def login(
     req: UserLoginReqSchema,
     auth_service: AuthServiceDep,
@@ -60,7 +62,9 @@ async def login(
     return success_response(data=login_data.to_schema())
 
 
-@router.post("/logout", response_model=BaseResponse[UserLogoutRespSchema], summary="用户登出")
+@router.post(
+    "/logout", response_model=BaseResponse[UserLogoutRespSchema], summary="用户登出"
+)
 async def logout(
     auth_service: AuthServiceDep,
     authorization: str | None = Header(None),
@@ -91,7 +95,9 @@ async def logout(
     return success_response(data=UserLogoutRespSchema(message="登出成功"))
 
 
-@router.post("/register", response_model=BaseResponse[UserLoginRespSchema], summary="用户注册")
+@router.post(
+    "/register", response_model=BaseResponse[UserLoginRespSchema], summary="用户注册"
+)
 async def register(
     req: UserRegisterReqSchema,
     auth_service: AuthServiceDep,
@@ -123,7 +129,9 @@ async def register(
     return success_response(data=login_data.to_schema())
 
 
-@router.get("/me", response_model=BaseResponse[UserDetailSchema], summary="获取当前用户信息")
+@router.get(
+    "/me", response_model=BaseResponse[UserDetailSchema], summary="获取当前用户信息"
+)
 async def get_current_user(auth_service: AuthServiceDep) -> ResponsePayload:
     """获取当前用户信息。
 

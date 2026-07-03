@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from internal.core import AppException, errors
-from internal.services.dto.agent import (
+from internal.schemas.agent import (
     AgentRunResultDTO,
     AgentStepDTO,
     AgentStreamEventDTO,
@@ -38,7 +38,9 @@ def stream_event_from_run_event(event: AgentRunEvent) -> AgentStreamEventDTO:
     raise RuntimeError(f"unsupported agent run event: {event.type}")
 
 
-def stream_events_from_result(result: AgentRunResultDTO) -> Iterable[AgentStreamEventDTO]:
+def stream_events_from_result(
+    result: AgentRunResultDTO,
+) -> Iterable[AgentStreamEventDTO]:
     """把一次性 Agent 结果转换为流式事件序列。"""
     yield AgentStreamEventDTO.run_started(run_id=result.run_id)
     for step in result.steps:

@@ -22,7 +22,7 @@ from internal.services.agents.stream import (
     service_unavailable_stream_event,
     stream_event_from_run_event,
 )
-from internal.services.dto.agent import AgentRunResultDTO, AgentStreamEventDTO
+from internal.schemas.agent import AgentRunResultDTO, AgentStreamEventDTO
 from internal.services.rag import RagService, new_rag_service
 from pkg.logger import logger
 from pkg import request_context as context
@@ -135,7 +135,9 @@ class PaymentAgentService:
                 audit_writer=self._audit_service,
                 audit_context=audit_context,
                 result=failed_agent_result(
-                    run_id=run_start.run_id if run_start is not None else uuid6_unique_str_id(),
+                    run_id=run_start.run_id
+                    if run_start is not None
+                    else uuid6_unique_str_id(),
                     error_type=f"AppException:{exc.error.code}",
                     message=exc.message,
                 ),
@@ -155,7 +157,9 @@ class PaymentAgentService:
                 audit_writer=self._audit_service,
                 audit_context=audit_context,
                 result=failed_agent_result(
-                    run_id=run_start.run_id if run_start is not None else uuid6_unique_str_id(),
+                    run_id=run_start.run_id
+                    if run_start is not None
+                    else uuid6_unique_str_id(),
                     error_type=type(exc).__name__,
                 ),
             )

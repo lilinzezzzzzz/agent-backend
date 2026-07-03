@@ -11,9 +11,9 @@ Service 层承载业务用例、领域规则、跨 DAO 编排、缓存一致性�
 - 对外提供清晰的业务方法，方法名以业务动作表达，不暴露 SQL 或缓存实现细节。
 - 通过 `internal/dao/` 访问数据库或缓存。
 - 多个 DAO 协作时，在 Service 中统一处理事务边界、幂等性和错误转换。
-- 输入输出优先使用明确类型；Service 对外返回业务数据 DTO，优先使用 dataclass、namedtuple
-  或 TypedDict，不直接返回响应信封。
-- Service 对外返回的业务 DTO 统一定义在 `internal/services/dto/<domain>.py`，
+- 输入输出优先使用明确类型；Service 对外返回业务数据 DTO，优先使用
+  `dataclass(frozen=True, slots=True)`、namedtuple 或 TypedDict，不直接返回响应信封。
+- Service 直接返回给 Router 并用于响应映射的轻量 DTO 统一定义在 `internal/schemas/<domain>.py`，
   按业务域拆文件；只在单个 Service 方法内部使用的临时私有数据结构可以留在当前文件。
 - 业务 DTO 可以提供无副作用的 `to_schema()` 方法，把业务数据转换为
   `internal/schemas/` 中的 API response schema；该方法只能做字段映射，不访问数据库、
@@ -29,7 +29,7 @@ Service 层承载业务用例、领域规则、跨 DAO 编排、缓存一致性�
 ```python
 from internal.core import AppException, errors
 from internal.dao.user import UserDao, new_user_dao
-from internal.services.dto.user import UserDetailDTO
+from internal.schemas.user import UserDetailDTO
 
 
 class UserService:

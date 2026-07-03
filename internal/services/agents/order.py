@@ -23,7 +23,7 @@ from internal.services.agents.stream import (
     stream_event_from_run_event,
     stream_events_from_result,
 )
-from internal.services.dto.agent import AgentRunResultDTO, AgentStreamEventDTO
+from internal.schemas.agent import AgentRunResultDTO, AgentStreamEventDTO
 from internal.services.order import OrderService, new_order_service
 from internal.services.rag import RagService, new_rag_service
 from pkg.logger import logger
@@ -181,7 +181,9 @@ class OrderAgentService:
                 audit_writer=self._audit_service,
                 audit_context=audit_context,
                 result=failed_agent_result(
-                    run_id=run_start.run_id if run_start is not None else uuid6_unique_str_id(),
+                    run_id=run_start.run_id
+                    if run_start is not None
+                    else uuid6_unique_str_id(),
                     error_type=f"AppException:{exc.error.code}",
                     message=exc.message,
                 ),
@@ -202,7 +204,9 @@ class OrderAgentService:
                 audit_writer=self._audit_service,
                 audit_context=audit_context,
                 result=failed_agent_result(
-                    run_id=run_start.run_id if run_start is not None else uuid6_unique_str_id(),
+                    run_id=run_start.run_id
+                    if run_start is not None
+                    else uuid6_unique_str_id(),
                     error_type=type(exc).__name__,
                 ),
             )
@@ -248,7 +252,9 @@ class OrderAgentService:
                     confirmation_token=confirmation_token,
                     idempotency_key=idempotency_key,
                 )
-                confirmation_result = AgentRunResultDTO.from_confirmed_invoice(confirmed)
+                confirmation_result = AgentRunResultDTO.from_confirmed_invoice(
+                    confirmed
+                )
                 run_id = confirmation_result.run_id
                 await record_agent_audit(
                     audit_writer=self._audit_service,

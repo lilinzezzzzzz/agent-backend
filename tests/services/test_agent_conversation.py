@@ -3,10 +3,23 @@ from __future__ import annotations
 import pytest
 
 from internal.core import AppException, errors
-from internal.dao.agent_conversation import AgentMessageDao, AgentRunDao, AgentRunStepDao, AgentSessionDao
-from internal.models.agent_conversation import AgentMessage, AgentRun, AgentRunStep, AgentSession
-from internal.services.agents.conversation import AgentConversationService, DatabaseAgentStorageBackend
-from internal.services.dto.agent import AgentRunResultDTO, AgentStepDTO
+from internal.dao.agent_conversation import (
+    AgentMessageDao,
+    AgentRunDao,
+    AgentRunStepDao,
+    AgentSessionDao,
+)
+from internal.models.agent_conversation import (
+    AgentMessage,
+    AgentRun,
+    AgentRunStep,
+    AgentSession,
+)
+from internal.services.agents.conversation import (
+    AgentConversationService,
+    DatabaseAgentStorageBackend,
+)
+from internal.schemas.agent import AgentRunResultDTO, AgentStepDTO
 
 
 def _new_conversation_service(db_session) -> AgentConversationService:
@@ -74,10 +87,16 @@ async def test_agent_conversation_service_creates_and_completes_run(db_session) 
     message_dao = AgentMessageDao(session_provider=db_session)
     run_dao = AgentRunDao(session_provider=db_session)
     step_dao = AgentRunStepDao(session_provider=db_session)
-    session = await session_dao.querier_unsorted.eq_(AgentSession.session_id, started.session_id).first()
-    messages = await message_dao.querier_unsorted.eq_(AgentMessage.session_id, started.session_id).all()
+    session = await session_dao.querier_unsorted.eq_(
+        AgentSession.session_id, started.session_id
+    ).first()
+    messages = await message_dao.querier_unsorted.eq_(
+        AgentMessage.session_id, started.session_id
+    ).all()
     run = await run_dao.querier_unsorted.eq_(AgentRun.run_id, started.run_id).first()
-    steps = await step_dao.querier_unsorted.eq_(AgentRunStep.run_id, started.run_id).all()
+    steps = await step_dao.querier_unsorted.eq_(
+        AgentRunStep.run_id, started.run_id
+    ).all()
 
     assert context.recent_messages == ()
     assert session is not None
@@ -87,13 +106,17 @@ async def test_agent_conversation_service_creates_and_completes_run(db_session) 
     assert run.status == "completed"
     assert run.route == "order"
     assert run.trace_id == "trace-agent"
-    assert [message.role for message in sorted(messages, key=lambda item: item.created_at)] == ["user", "assistant"]
+    assert [
+        message.role for message in sorted(messages, key=lambda item: item.created_at)
+    ] == ["user", "assistant"]
     assert steps[0].tool == "get_order_status"
     assert steps[0].action_result == {"ok": True, "status": "运输中"}
 
 
 @pytest.mark.asyncio
-async def test_agent_conversation_service_rejects_session_from_another_user(db_session) -> None:
+async def test_agent_conversation_service_rejects_session_from_another_user(
+    db_session,
+) -> None:
     service = _new_conversation_service(db_session)
     started = await service.start_run(
         user_id=999,

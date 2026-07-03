@@ -21,7 +21,7 @@ from internal.services.agents import (
     new_order_agent_service,
     new_payment_agent_service,
 )
-from internal.services.dto.agent import AgentStreamEventDTO
+from internal.schemas.agent import AgentStreamEventDTO
 from internal.utils.stream import stream_with_chunk_control
 from pkg.request_context import get_user_id
 from pkg.api_response import ResponsePayload, success_response, wrap_sse_event

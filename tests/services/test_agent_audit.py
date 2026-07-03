@@ -9,7 +9,7 @@ from internal.services.agents.audit import (
     AuditedAgentLLMClient,
     record_agent_audit,
 )
-from internal.services.dto.agent import AgentRunResultDTO, AgentStepDTO
+from internal.schemas.agent import AgentRunResultDTO, AgentStepDTO
 from pkg.agents import LLMActionModel
 
 

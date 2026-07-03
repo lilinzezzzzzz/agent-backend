@@ -19,8 +19,8 @@
 - `error_response(error, message=..., lang=...)` 仅用于中间件、异常处理器等必须直接构造 HTTP `Response` 的路径；业务错误在 Controller / Service 中抛 `internal.core.AppException`。
 - 当 Service 返回 dataclass / DTO 且该对象提供 `to_schema()` 时，Controller 负责调用
   `dto.to_schema()` 得到对应 response schema，再传给响应工厂函数。
-- Service DTO 定义位置遵循根目录规则，默认来自 `internal/services/dto/<domain>.py`；
-  Controller 不在本层定义 DTO。
+- Service 返回给 Router 并用于响应映射的轻量 DTO 定义位置遵循根目录规则，默认来自
+  `internal/schemas/<domain>.py`；Controller 不在本层定义 DTO。
 - 业务逻辑调用 `internal/services/`，不要直接操作 ORM session。
 - 需要读当前用户时使用上下文工具，例如 `pkg.request_context.get_user_id()`，不要重新解析 token。
 - 业务错误使用 `internal.core.AppException` 和 `internal.core.errors`。

@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+
 from pydantic import BaseModel, Field
 
 from internal.schemas import BaseListResponse
@@ -21,7 +23,9 @@ class UserRegisterReqSchema(BaseModel):
 class ThirdPartyLoginReqSchema(BaseModel):
     """第三方登录请求基类"""
 
-    platform: str = Field(..., description="第三方平台名称", examples=["wechat", "alipay"])
+    platform: str = Field(
+        ..., description="第三方平台名称", examples=["wechat", "alipay"]
+    )
     code: str = Field(..., description="授权码", min_length=1, max_length=256)
 
 
@@ -34,13 +38,17 @@ class WeChatLoginReqSchema(BaseModel):
 class AlipayLoginReqSchema(BaseModel):
     """支付宝登录请求"""
 
-    auth_code: str = Field(..., description="支付宝授权码", min_length=1, max_length=256)
+    auth_code: str = Field(
+        ..., description="支付宝授权码", min_length=1, max_length=256
+    )
 
 
 class ThirdPartyBindPhoneReqSchema(BaseModel):
     """第三方账号绑定手机号请求"""
 
-    platform: str = Field(..., description="第三方平台名称", examples=["wechat", "alipay"])
+    platform: str = Field(
+        ..., description="第三方平台名称", examples=["wechat", "alipay"]
+    )
     phone: str = Field(..., description="手机号", pattern=r"^1[3-9]\d{9}$")
     sms_code: str = Field(..., description="短信验证码", min_length=4, max_length=8)
 
@@ -70,3 +78,28 @@ class UserDetailSchema(BaseModel):
 
 class UserListResponseSchema(BaseListResponse[UserDetailSchema]):
     """用户列表响应"""
+
+
+@dataclass(frozen=True, slots=True)
+class AuthUserDTO:
+    """认证用例返回给 Router 的用户数据。"""
+
+    id: int
+    name: str
+    phone: str
+
+    def to_schema(self) -> UserDetailSchema:
+        """转换为 API 响应 schema。"""
+        return UserDetailSchema(id=self.id, name=self.name, phone=self.phone)
+
+
+@dataclass(frozen=True, slots=True)
+class UserLoginDTO:
+    """认证成功后返回给 Router 的数据。"""
+
+    user: AuthUserDTO
+    token: str
+
+    def to_schema(self) -> UserLoginRespSchema:
+        """转换为 API 响应 schema。"""
+        return UserLoginRespSchema(user=self.user.to_schema(), token=self.token)

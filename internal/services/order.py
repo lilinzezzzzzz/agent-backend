@@ -5,7 +5,7 @@ from collections.abc import Mapping
 from internal.cache import AgentActionCache, new_agent_action_cache
 from internal.config import settings
 from internal.core import AppException, errors
-from internal.services.dto.order import (
+from internal.schemas.order import (
     AgentActionConfirmationDTO,
     InvoiceRequestDTO,
     OrderStatusDTO,

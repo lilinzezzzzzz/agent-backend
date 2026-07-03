@@ -11,7 +11,7 @@ from internal.schemas.user import (
     UserRegisterReqSchema,
     WeChatLoginReqSchema,
 )
-from internal.services.dto.auth import AuthUserDTO, UserLoginDTO
+from internal.schemas.user import AuthUserDTO, UserLoginDTO
 
 
 class FakeAuthService:
@@ -23,7 +23,9 @@ class FakeAuthService:
             token="tk_login",
         )
 
-    async def register(self, *, username: str, phone: str, password: str) -> UserLoginDTO:
+    async def register(
+        self, *, username: str, phone: str, password: str
+    ) -> UserLoginDTO:
         assert username == "newuser"
         assert phone == "13800138001"
         assert password == "password123"
@@ -56,7 +58,9 @@ def _response_payload(response) -> dict:
 async def auth_client():
     app = FastAPI()
     app.include_router(auth_controller.router, prefix="/v1")
-    app.dependency_overrides[auth_controller.new_auth_service] = lambda: FakeAuthService()
+    app.dependency_overrides[auth_controller.new_auth_service] = lambda: (
+        FakeAuthService()
+    )
 
     async with AsyncClient(
         transport=ASGITransport(app=app),
@@ -93,7 +97,9 @@ class TestAuthEndpoints:
     @pytest.mark.asyncio
     async def test_logout(self, auth_client):
         """测试登出"""
-        response = await auth_client.post("/v1/auth/logout", headers={"Authorization": "Bearer tk_logout"})
+        response = await auth_client.post(
+            "/v1/auth/logout", headers={"Authorization": "Bearer tk_logout"}
+        )
         assert response.status_code == 200
         assert response.json()["code"] == 20000
 
@@ -135,7 +141,9 @@ class TestAuthControllerResponseModels:
 
     @pytest.mark.asyncio
     async def test_logout_uses_success_envelope(self):
-        response = await auth_controller.logout(FakeAuthService(), authorization="Bearer tk_logout")
+        response = await auth_controller.logout(
+            FakeAuthService(), authorization="Bearer tk_logout"
+        )
 
         assert _response_payload(response) == {
             "code": 20000,

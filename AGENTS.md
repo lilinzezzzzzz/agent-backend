@@ -32,9 +32,10 @@
 - `{Resource}Dao`：持久化访问对象，封装对应 ORM model 的查询和写入，例如 `AccountDao`、`OrderDao`。
 - `{Resource}Service`：业务用例入口，承载领域规则、跨 DAO / 缓存 / 外部服务编排，例如
   `AccountService`、`OrderService`。
-- `{Action}DTO` 或 `{Resource}{Action}DTO`：Service 返回给 Controller 的业务数据；Service 对外返回业务 DTO 时
-  优先使用 dataclass 定义，命名使用 `*DTO` 后缀，统一放在 `internal/services/dto/<domain>.py`，例如
-  `LoginDTO`、`AccountLoginDTO`、`OrderSummaryDTO`。
+- `{Action}DTO` 或 `{Resource}{Action}DTO`：Service 直接返回给 Router 并用于响应映射的轻量数据；
+  优先使用 dataclass 定义，命名使用 `*DTO` 后缀，统一放在 `internal/schemas/<domain>.py`，例如
+  `LoginDTO`、`AccountLoginDTO`、`OrderSummaryDTO`。DTO 只能做数据承载和纯字段映射，不访问数据库、
+  缓存、上下文或外部服务。
 - `{Action}ReqSchema` 或 `{Resource}{Action}ReqSchema`：API request schema，用于请求体、查询参数或路径参数的
   传输层校验，例如 `LoginReqSchema`、`AccountLoginReqSchema`。
 - `{Action}RespSchema` 或 `{Resource}{Action}RespSchema`：API response schema，用于 `response_model`、响应数据结构和
@@ -67,7 +68,6 @@
 
 - Controller / response envelope：`internal/controllers/AGENTS.md`
 - Service 和依赖注入：`internal/services/AGENTS.md`
-- Service DTO：`internal/services/dto/AGENTS.md`
 - Schema：`internal/schemas/AGENTS.md`
 - Middleware / auth / request context：`internal/middlewares/AGENTS.md`
 - Infra provider / lifecycle：`internal/infra/AGENTS.md`

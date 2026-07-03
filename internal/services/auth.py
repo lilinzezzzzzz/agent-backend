@@ -7,7 +7,7 @@ from internal.cache.auth import AuthCache, new_auth_cache
 from internal.config import settings
 from internal.core import AppException, errors
 from internal.models.user import User
-from internal.services.dto.auth import AuthUserDTO, UserLoginDTO
+from internal.schemas.user import AuthUserDTO, UserLoginDTO
 from internal.services.user import UserService, new_user_service
 from pkg.logger import logger
 from pkg.third_party_auth import WeChatAuthStrategy, WeChatConfig
@@ -61,7 +61,9 @@ class AuthService:
         logger.info(f"User {user.id} logged in successfully, token: {token[:10]}...")
         return UserLoginDTO(user=self._build_user_dto(user), token=token)
 
-    async def register(self, *, username: str, phone: str, password: str) -> UserLoginDTO:
+    async def register(
+        self, *, username: str, phone: str, password: str
+    ) -> UserLoginDTO:
         """创建用户并创建登录会话。"""
         try:
             user = await self._user_service.create_user(
@@ -78,7 +80,9 @@ class AuthService:
             raise
         except Exception as exc:
             logger.error(f"Register user failed: {exc}")
-            raise AppException(errors.InternalServerError, message="注册失败，请稍后重试") from exc
+            raise AppException(
+                errors.InternalServerError, message="注册失败，请稍后重试"
+            ) from exc
 
         logger.info(f"User {user.id} registered successfully, token: {token[:10]}...")
         return UserLoginDTO(user=self._build_user_dto(user), token=token)
@@ -135,7 +139,9 @@ class AuthService:
             raise
         except Exception as exc:
             logger.error(f"WeChat login unexpected error: {exc}")
-            raise AppException(errors.InternalServerError, message="微信登录失败，请稍后重试") from exc
+            raise AppException(
+                errors.InternalServerError, message="微信登录失败，请稍后重试"
+            ) from exc
         finally:
             await strategy.close()
 
@@ -146,11 +152,17 @@ class AuthService:
         """验证 token，成功返回 user_metadata，失败抛出 AppException"""
         user_metadata: dict | None = await self._auth_cache.get_user_metadata(token)
         if user_metadata is None:
-            raise AppException(errors.Unauthorized, message="Token verification failed: token not found")
+            raise AppException(
+                errors.Unauthorized,
+                message="Token verification failed: token not found",
+            )
 
         user_id = user_metadata.get("id")
         if not user_id:
-            raise AppException(errors.Unauthorized, message="Token verification failed: user_id is None")
+            raise AppException(
+                errors.Unauthorized,
+                message="Token verification failed: user_id is None",
+            )
 
         # 检查有没有在token 列表里
         token_list: list = await self._auth_cache.get_user_token_list(user_id)

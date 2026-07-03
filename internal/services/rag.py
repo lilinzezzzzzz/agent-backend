@@ -16,7 +16,7 @@ from internal.rag.repositories.chunk_vector import (
     ChunkVectorRepository,
     new_chunk_repository,
 )
-from internal.services.dto.rag import (
+from internal.schemas.rag import (
     PreparedRetrievalQueryDTO,
     RagAnswerDTO,
     RagCitationDTO,

@@ -14,7 +14,7 @@ from internal.dao.agent_conversation import (
     new_agent_session_dao,
 )
 from internal.models.agent_conversation import AgentMessage, AgentRun, AgentSession
-from internal.services.dto.agent import (
+from internal.schemas.agent import (
     AgentConversationContextDTO,
     AgentMessageDTO,
     AgentRunResultDTO,
@@ -361,7 +361,9 @@ async def _execute_storage_transaction(session_provider, callback) -> None:
         raise
 
 
-async def _get_session_for_update(*, sess, session_id: str, user_id: int) -> AgentSession | None:
+async def _get_session_for_update(
+    *, sess, session_id: str, user_id: int
+) -> AgentSession | None:
     result = await sess.execute(
         select(AgentSession).where(
             AgentSession.session_id == session_id,

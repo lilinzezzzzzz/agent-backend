@@ -12,7 +12,7 @@
 
 ## 编码约定
 
-- 不在本层实现 Controller、API schema、响应信封或 Service DTO。
+- 不在本层实现 Controller、API schema、响应信封或返回给 Router 的轻量 DTO。
 - 不在本层直接访问数据库、Redis、Celery 或第三方业务系统；工具需要业务能力时，通过
   Service 或明确协议注入。
 - 业务 Agent 按领域放在 `internal/agents/<domain>/`，领域目录内通常包含

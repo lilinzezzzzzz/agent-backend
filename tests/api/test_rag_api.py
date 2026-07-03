@@ -9,7 +9,7 @@ from httpx import ASGITransport, AsyncClient
 
 from internal.controllers.api import rag as rag_controller
 from internal.controllers.internal import rag as internal_rag_controller
-from internal.services.dto.rag import (
+from internal.schemas.rag import (
     RagAnswerDTO,
     RagCitationDTO,
     RagRetrievalDTO,

@@ -29,7 +29,7 @@ from internal.services.agents.stream import (
     service_unavailable_stream_event,
     stream_events_from_result,
 )
-from internal.services.dto.agent import (
+from internal.schemas.agent import (
     AgentChatDTO,
     AgentRunResultDTO,
     AgentStreamEventDTO,

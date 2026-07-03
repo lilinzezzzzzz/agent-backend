@@ -23,7 +23,7 @@ from internal.services.agents import (
     OrderAgentService,
     PaymentAgentService,
 )
-from internal.services.dto.agent import (
+from internal.schemas.agent import (
     AgentChatDTO,
     AgentRunResultDTO,
     AgentStepDTO,
@@ -31,7 +31,7 @@ from internal.services.dto.agent import (
     AgentStreamEventName,
 )
 from pkg.agents import LLMActionModel
-from internal.services.dto.rag import RagEvidenceDTO, RagRetrievalDTO
+from internal.schemas.rag import RagEvidenceDTO, RagRetrievalDTO
 from internal.services.order import OrderService
 from pkg.vectors.contracts import RetrievalMode
 from pkg import request_context as context
@@ -774,7 +774,9 @@ async def test_agent_router_service_bypasses_llm_for_confirmation() -> None:
 
 
 @pytest.mark.asyncio
-async def test_agent_router_service_routes_confirmation_by_pending_action_route() -> None:
+async def test_agent_router_service_routes_confirmation_by_pending_action_route() -> (
+    None
+):
     llm_client = FakeLLMClient([])
     order_agent_service = RecordingOrderAgentService()
     payment_agent_service = RecordingPaymentAgentService()
@@ -802,7 +804,10 @@ async def test_agent_router_service_routes_confirmation_by_pending_action_route(
     assert result.route == "payment"
     assert llm_client.calls == []
     assert order_agent_service.calls == []
-    assert payment_agent_service.calls[0]["confirmation_token"] == "payment-confirmation-token"
+    assert (
+        payment_agent_service.calls[0]["confirmation_token"]
+        == "payment-confirmation-token"
+    )
 
 
 @pytest.mark.asyncio

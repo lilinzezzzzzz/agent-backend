@@ -8,12 +8,14 @@ import sys
 import pytest
 from celery.result import AsyncResult
 
-from internal.tasks.celery import number_sum
 from internal.infra.celery import celery_app, celery_client
+from internal.tasks.celery import number_sum
 from pkg.logger import init_logger
 
 # 初始化日志系统（测试环境必须）
 init_logger(level="INFO")
+
+_TEST_TRACE_ID = "test-celery-trace"
 
 
 class TestCeleryTasks:
@@ -112,6 +114,7 @@ class TestCeleryTasks:
         """
         task_result = celery_client.submit(
             task_name="internal.tasks.celery_tasks.number_sum",
+            trace_id=_TEST_TRACE_ID,
             args=(50, 60),
         )
 
@@ -128,6 +131,7 @@ class TestCeleryTasks:
         """
         task_result = celery_client.submit(
             task_name="internal.tasks.celery_tasks.number_sum",
+            trace_id=_TEST_TRACE_ID,
             args=(100, 100),
             queue="default",  # 使用默认队列
             priority=5,
@@ -145,6 +149,7 @@ class TestCeleryTasks:
         """
         task_result = celery_client.submit(
             task_name="internal.tasks.celery_tasks.number_sum",
+            trace_id=_TEST_TRACE_ID,
             args=(1, 2),
         )
 
@@ -162,26 +167,6 @@ class TestCeleryTasks:
         except Exception as e:
             pytest.skip(f"Celery Worker 未启动或不可用: {e}")
 
-    def test_celery_client_submit_with_custom_task_id(self):
-        """
-        测试使用自定义 task_id 提交任务
-        """
-        custom_id = "test-custom-task-id-12345"
-        task_result = celery_client.submit(
-            task_name="internal.tasks.celery_tasks.number_sum",
-            args=(10, 10),
-            task_id=custom_id,
-        )
-
-        # 验证 task_id 是否为自定义值
-        assert task_result.id == custom_id
-
-        try:
-            result = task_result.get(timeout=10)
-            assert result == 20
-        except Exception as e:
-            pytest.skip(f"Celery Worker 未启动或不可用: {e}")
-
     def test_celery_client_submit_with_countdown(self):
         """
         测试使用 countdown 延迟执行任务
@@ -191,6 +176,7 @@ class TestCeleryTasks:
         start_time = time.time()
         task_result = celery_client.submit(
             task_name="internal.tasks.celery_tasks.number_sum",
+            trace_id=_TEST_TRACE_ID,
             args=(5, 5),
             countdown=2,  # 延迟 2 秒执行
         )
@@ -280,6 +266,7 @@ class TestCeleryTasks:
         # 提交一个延迟执行的任务
         task_result = celery_client.submit(
             task_name="internal.tasks.celery_tasks.number_sum",
+            trace_id=_TEST_TRACE_ID,
             args=(100, 100),
             countdown=60,  # 60 秒后执行
         )

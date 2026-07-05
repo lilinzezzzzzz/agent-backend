@@ -73,23 +73,39 @@ class CeleryClient:
     # ------------------------------
     # 1. 提交任务 (Submit)
     # ------------------------------
+    @staticmethod
+    def _build_task_id(*, task_name: str, trace_id: str) -> str:
+        """构造包含任务标签和调用链信息的 Celery task ID。"""
+        task_tag = task_name.rsplit(".", maxsplit=1)[-1]
+        if not task_tag:
+            raise ValueError("task_name must contain a non-empty task tag")
+        return f"{task_tag}_{trace_id}_{uuid()}"
+
     def submit(
         self,
         *,
         task_name: str,
+        trace_id: str,
         args: tuple | list | None = None,
         kwargs: dict | None = None,
-        task_id: str | None = None,
         queue: str | None = None,
         priority: int | None = None,
         countdown: int | float | None = None,
         eta: datetime | None = None,
         **options: Any,
     ) -> AsyncResult:
+        """提交异步任务，并关联当前 trace_id。
+
+        Args:
+            task_name: 完整 Celery task name。
+            trace_id: 调用方提供的调用链标识。
         """
-        提交异步任务 (Apply Async Wrapper)
-        """
-        task_id = task_id or uuid()
+        if "task_id" in options:
+            raise TypeError("task_id is generated automatically and cannot be provided")
+        if not trace_id:
+            raise ValueError("trace_id is mandatory and cannot be empty")
+
+        task_id = self._build_task_id(task_name=task_name, trace_id=trace_id)
         args = tuple(args) if args else ()
         kwargs = kwargs or {}
 
@@ -98,6 +114,10 @@ class CeleryClient:
 
         # 注入其他显式参数
         exec_options["task_id"] = task_id
+        headers = exec_options.get("headers")
+        if headers is not None and not isinstance(headers, Mapping):
+            raise TypeError("headers must be a mapping")
+        exec_options["headers"] = {**dict(headers or {}), "trace_id": trace_id}
         if priority is not None:
             exec_options["priority"] = priority
         if countdown is not None:

@@ -128,3 +128,15 @@ CREATE TABLE IF NOT EXISTS `agent_run_step` (
     INDEX `idx_agent_run_step_user_created` (`user_id`, `created_at`, `id`),
     INDEX `idx_agent_run_step_tool` (`tool`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Agent 运行步骤表';
+
+CREATE TABLE IF NOT EXISTS `scoped_operation_locks` (
+    `id` BIGINT NOT NULL COMMENT '主键 ID',
+    `operation_scope` VARCHAR(64) NOT NULL COMMENT '锁作用域',
+    `resource_key` VARCHAR(128) NOT NULL COMMENT 'scope 内资源键',
+    `creator_id` BIGINT DEFAULT NULL COMMENT '创建人 ID',
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    `deleted_at` DATETIME DEFAULT NULL COMMENT '删除时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_scoped_op_lock_key` (`operation_scope`, `resource_key`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='通用事务互斥锁';

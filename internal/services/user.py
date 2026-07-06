@@ -70,7 +70,10 @@ class UserService:
             account=account,
             phone=phone,
             password_hash=password_hash,
+            creator_id=0,
         )
+
+        await self._user_dao.insert(user)
 
         return user
 

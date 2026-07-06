@@ -152,17 +152,11 @@ def warmup_cache(self):
 
 
 @celery_client.app.task(bind=True, name="internal.tasks.celery_tasks.number_sum")
-def number_sum(self, x: int | list[int], y: int):
+def number_sum(self, x: int, y: int):
     """
     示例异步任务
-    支持处理单个数字加法，或 Chord 回调的列表求和
     """
     try:
-        # 兼容 Chord 回调逻辑
-        if isinstance(x, list):
-            logger.info(f"Received list input from chord: {x}, aggregating...")
-            x = sum(x)
-
         result = x + y
         logger.info(f"计算两个数字的和: {x} + {y} = {result}")
         return result

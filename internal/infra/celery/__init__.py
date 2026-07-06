@@ -10,11 +10,10 @@
 """
 
 from collections.abc import Callable, Coroutine
-from pathlib import Path
-
 import anyio
 from celery import Celery
 
+from internal import BASE_LOG_DIR
 from internal.config import init_settings, settings
 from internal.infra.database import close_async_db, init_async_db, reset_async_db
 from internal.infra.redis import close_async_redis, init_async_redis, reset_async_redis
@@ -48,13 +47,12 @@ def _worker_startup():
     # 1. 首先初始化配置 (其他组件可能依赖配置)
     try:
         init_settings()
-        logger.info(f"Celery worker initialized with APP_ENV: {settings.APP_ENV}")
     except Exception as e:
-        logger.critical(f"Worker configuration initialization failed: {e}")
-        raise e
+        raise RuntimeError("Worker configuration initialization failed") from e
 
     # 2. 然后初始化 Logger (依赖配置中的日志格式等)
-    init_logger(level="INFO", base_log_dir=Path("/temp/celery"))
+    init_logger(level="INFO", base_log_dir=BASE_LOG_DIR / "celery")
+    logger.info(f"Celery worker initialized with APP_ENV: {settings.APP_ENV}")
     logger.info(">>> Worker Process Starting: Initializing basic resources...")
 
 
@@ -82,7 +80,9 @@ celery_client = CeleryClient(
 )
 
 # 注册生命周期钩子
-celery_client.register_worker_hooks(on_startup=_worker_startup, on_shutdown=_worker_shutdown)
+celery_client.register_worker_hooks(
+    on_startup=_worker_startup, on_shutdown=_worker_shutdown
+)
 
 # 导出原生 App 对象供 Celery CLI 使用
 celery_app: Celery = celery_client.app
@@ -113,7 +113,9 @@ def check_celery_health():
         logger.error(f"Celery Broker connection failed: {e}")
 
 
-def run_in_async[T](coro_func: Callable[[], Coroutine[None, None, T]], trace_id: str) -> T:
+def run_in_async[T](
+    coro_func: Callable[[], Coroutine[None, None, T]], trace_id: str
+) -> T:
     """
     在 Celery 同步任务中执行异步代码。
     """
@@ -128,7 +130,7 @@ def run_in_async[T](coro_func: Callable[[], Coroutine[None, None, T]], trace_id:
         init_async_redis()
 
         # 2. 设置上下文
-        context.init(**{context.ContextKey.TRACE_ID: trace_id})
+        context.init(trace_id=trace_id)
 
         try:
             # 3. 执行业务逻辑 (通过闭包捕获 coro_func)

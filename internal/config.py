@@ -137,6 +137,20 @@ class Settings(BaseSettings):
     REDIS_PASSWORD: SecretStr = SecretStr("")
     REDIS_DB: int = 0
 
+    # --- Celery PostgreSQL idempotency ---
+    CELERY_IDEMPOTENCY_ENABLED: bool = True
+    CELERY_EXECUTION_LEASE_GRACE_SECONDS: PositiveInt = 30
+    CELERY_TASK_DELIVERY_GRACE_SECONDS: PositiveInt = 2
+    CELERY_PUBLISH_CONFIRM_TIMEOUT_SECONDS: PositiveInt = 30
+    CELERY_PUBLISH_RECONCILER_INTERVAL_SECONDS: PositiveInt = 10
+    CELERY_PUBLISHED_ORPHAN_SECONDS: PositiveInt = 900
+    CELERY_RECONCILER_BEAT_ENABLED: bool = True
+    CELERY_RECONCILER_INTERVAL_SECONDS: PositiveInt = 60
+    CELERY_RECONCILER_BATCH_SIZE: PositiveInt = 100
+    CELERY_RECONCILER_QUEUE: str = "celery_maintenance_queue"
+    CELERY_TASK_IDEMPOTENCY_DAYS: PositiveInt = 30
+    CELERY_TASK_MAX_PAYLOAD_BYTES: PositiveInt = 262144
+
     # --- Endpoint Guard ---
     ENDPOINT_GUARD_ENABLED: bool = True
     ENDPOINT_GUARD_SOURCE: EndpointGuardSource = "settings"
@@ -194,6 +208,42 @@ class Settings(BaseSettings):
                 except Exception as e:
                     logger.error(f"Failed to decrypt field '{field}': {str(e)}")
                     raise ValueError(f"Failed to decrypt field '{field}'") from e
+        return self
+
+    @model_validator(mode="after")
+    def validate_celery_idempotency(self) -> "Settings":
+        """校验 Celery PostgreSQL 幂等状态机的安全边界。"""
+        if not self.CELERY_IDEMPOTENCY_ENABLED:
+            return self
+        if self.DB_TYPE != "postgresql":
+            raise ValueError("CELERY_IDEMPOTENCY_ENABLED requires DB_TYPE=postgresql")
+        if self.CELERY_EXECUTION_LEASE_GRACE_SECONDS > 300:
+            raise ValueError("CELERY_EXECUTION_LEASE_GRACE_SECONDS cannot exceed 300")
+        if (
+            self.CELERY_PUBLISHED_ORPHAN_SECONDS
+            <= self.CELERY_RECONCILER_INTERVAL_SECONDS
+        ):
+            raise ValueError(
+                "CELERY_PUBLISHED_ORPHAN_SECONDS must exceed CELERY_RECONCILER_INTERVAL_SECONDS"
+            )
+        if (
+            self.CELERY_TASK_DELIVERY_GRACE_SECONDS
+            >= self.CELERY_PUBLISH_CONFIRM_TIMEOUT_SECONDS
+        ):
+            raise ValueError(
+                "CELERY_TASK_DELIVERY_GRACE_SECONDS must be less than "
+                "CELERY_PUBLISH_CONFIRM_TIMEOUT_SECONDS"
+            )
+        if (
+            self.CELERY_PUBLISH_CONFIRM_TIMEOUT_SECONDS
+            <= self.CELERY_PUBLISH_RECONCILER_INTERVAL_SECONDS
+        ):
+            raise ValueError(
+                "CELERY_PUBLISH_CONFIRM_TIMEOUT_SECONDS must exceed "
+                "CELERY_PUBLISH_RECONCILER_INTERVAL_SECONDS"
+            )
+        if not self.CELERY_RECONCILER_QUEUE.strip():
+            raise ValueError("CELERY_RECONCILER_QUEUE cannot be empty")
         return self
 
     @property

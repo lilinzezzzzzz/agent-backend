@@ -1,19 +1,25 @@
 import asyncio
 from collections.abc import Callable, Coroutine, Mapping, Sequence
 from datetime import datetime
+from functools import partial
 from typing import Any, cast
 
-from celery import Celery, chain, chord, group, signals
-from celery.result import AsyncResult, GroupResult
+from celery import Celery, signals
+from celery.result import AsyncResult
 
+from pkg.concurrency import anyio_run_in_thread
 from pkg.logger import logger
 
 LifecycleHook = Callable[[], Any] | Callable[[], Coroutine[Any, Any, Any]]
 
 
+def _is_valid_trace_id(trace_id: str) -> bool:
+    return bool(trace_id.strip()) and trace_id not in {"unknown", "-"}
+
+
 class CeleryClient:
     """
-    Celery 工具类：封装任务提交、编排、状态查询及动态定时任务管理。
+    Celery 工具类：封装任务提交、状态查询及动态定时任务管理。
     """
 
     def __init__(
@@ -29,8 +35,12 @@ class CeleryClient:
         **extra_conf: Any,
     ) -> None:
         self.queue = task_default_queue
-        include_modules: list[str] | None = list(include) if include is not None else None
-        self.app = Celery(app_name, broker=broker_url, backend=backend_url, include=include_modules)
+        include_modules: list[str] | None = (
+            list(include) if include is not None else None
+        )
+        self.app = Celery(
+            app_name, broker=broker_url, backend=backend_url, include=include_modules
+        )
 
         # 基础配置
         conf = {
@@ -83,6 +93,7 @@ class CeleryClient:
         priority: int | None = None,
         countdown: int | float | None = None,
         eta: datetime | None = None,
+        task_id: str | None = None,
         **options: Any,
     ) -> AsyncResult:
         """提交异步任务，并关联当前 trace_id。
@@ -91,12 +102,12 @@ class CeleryClient:
             task_name: 完整 Celery task name。
             trace_id: 调用方提供的调用链标识。
         """
-        if "task_id" in options:
-            raise TypeError("task_id is generated automatically and cannot be provided")
         if not isinstance(trace_id, str):
             raise TypeError("trace_id must be a string")
         if not trace_id:
             raise ValueError("trace_id is mandatory and cannot be empty")
+        if not _is_valid_trace_id(trace_id):
+            raise ValueError("trace_id is invalid")
 
         args = tuple(args) if args else ()
         kwargs = kwargs or {}
@@ -114,40 +125,49 @@ class CeleryClient:
             exec_options["countdown"] = countdown
         if eta is not None:
             exec_options["eta"] = eta
+        if task_id is not None:
+            if not isinstance(task_id, str):
+                raise TypeError("task_id must be a string")
+            if not task_id:
+                raise ValueError("task_id cannot be empty")
+            exec_options["task_id"] = task_id
 
-        return self.app.send_task(name=task_name, args=args, kwargs=kwargs, **exec_options)
+        return self.app.send_task(
+            name=task_name, args=args, kwargs=kwargs, **exec_options
+        )
+
+    async def async_submit(
+        self,
+        *,
+        task_name: str,
+        trace_id: str,
+        args: tuple | list | None = None,
+        kwargs: dict | None = None,
+        queue: str | None = None,
+        priority: int | None = None,
+        countdown: int | float | None = None,
+        eta: datetime | None = None,
+        task_id: str | None = None,
+        **options: Any,
+    ) -> AsyncResult:
+        """在线程中提交 Celery 任务，避免阻塞 async 调用方。"""
+        submit = partial(
+            self.submit,
+            task_name=task_name,
+            trace_id=trace_id,
+            args=args,
+            kwargs=kwargs,
+            queue=queue,
+            priority=priority,
+            countdown=countdown,
+            eta=eta,
+            task_id=task_id,
+            **options,
+        )
+        return cast(AsyncResult, await anyio_run_in_thread(submit))
 
     # ------------------------------
-    # 2. 任务编排 (Canvas) - 改为实例方法
-    # ------------------------------
-    def chain(self, *signatures, **options) -> AsyncResult:
-        """
-        链式调用: task1 -> task2 -> task3
-        :param options: 执行参数 (如 queue, countdown 等)
-        """
-        exec_options = self._get_exec_options(options)
-        # 修复: 在初始化时传入 app=self.app，避免 AttributeError
-        return chain(*signatures, app=self.app).apply_async(**exec_options)
-
-    def group(self, *signatures, **options) -> GroupResult:
-        """
-        并发调用: [task1, task2, task3]
-        """
-        exec_options = self._get_exec_options(options)
-        # 修复: 在初始化时传入 app=self.app
-        # 修复: 使用 cast 解决类型提示报错
-        return cast(GroupResult, cast(object, group(*signatures, app=self.app).apply_async(**exec_options)))
-
-    def chord(self, header, body, **options) -> AsyncResult:
-        """
-        回调模式: group(header) 完成后 -> body
-        """
-        exec_options = self._get_exec_options(options)
-        # 修复: 在初始化时传入 app=self.app
-        return chord(header, body=body, app=self.app).apply_async(**exec_options)
-
-    # ------------------------------
-    # 3. 查询与检查
+    # 2. 查询与检查
     # ------------------------------
     def get_result(self, task_id: str, timeout: float, propagate: bool = True) -> Any:
         """
@@ -156,7 +176,9 @@ class CeleryClient:
         :param propagate: True 则任务报错时抛出异常，False 则返回异常对象
         :param task_id: str 任务ID
         """
-        return AsyncResult(task_id, app=self.app).get(timeout=timeout, propagate=propagate)
+        return AsyncResult(task_id, app=self.app).get(
+            timeout=timeout, propagate=propagate
+        )
 
     def get_status(self, task_id: str) -> str:
         return AsyncResult(task_id, app=self.app).state
@@ -164,11 +186,33 @@ class CeleryClient:
     def revoke(self, task_id: str, terminate: bool = False):
         self.app.control.revoke(task_id, terminate=terminate)
 
+    async def async_get_result(
+        self, task_id: str, timeout: float, propagate: bool = True
+    ) -> Any:
+        """在线程中获取 Celery 任务结果，避免阻塞 async 调用方。"""
+        return await anyio_run_in_thread(
+            self.get_result,
+            task_id,
+            timeout,
+            propagate=propagate,
+        )
+
+    async def async_get_status(self, task_id: str) -> str:
+        """在线程中查询 Celery 任务状态，避免阻塞 async 调用方。"""
+        return cast(str, await anyio_run_in_thread(self.get_status, task_id))
+
+    async def async_revoke(self, task_id: str, terminate: bool = False) -> None:
+        """在线程中撤销 Celery 任务，避免阻塞 async 调用方。"""
+        await anyio_run_in_thread(self.revoke, task_id, terminate=terminate)
+
     # ------------------------------
-    # 4. 生命周期管理
+    # 3. 生命周期管理
     # ------------------------------
     @staticmethod
-    def register_worker_hooks(on_startup: LifecycleHook | None = None, on_shutdown: LifecycleHook | None = None):
+    def register_worker_hooks(
+        on_startup: LifecycleHook | None = None,
+        on_shutdown: LifecycleHook | None = None,
+    ):
         """
         注册 Worker 进程生命周期钩子
         注意：使用了 dispatch_uid 防止在多实例下重复注册
@@ -177,9 +221,10 @@ class CeleryClient:
         # --- Startup Handler ---
         if on_startup:
 
-            @signals.worker_process_init.connect(weak=False, dispatch_uid="pkg_celery_worker_startup")
+            @signals.worker_process_init.connect(
+                weak=False, dispatch_uid="pkg_celery_worker_startup"
+            )
             def _wrapper_startup(**kwargs):
-                logger.info("Executing registered worker startup hook...")
                 try:
                     if asyncio.iscoroutinefunction(on_startup):
                         asyncio.run(on_startup())
@@ -193,7 +238,9 @@ class CeleryClient:
         # --- Shutdown Handler ---
         if on_shutdown:
 
-            @signals.worker_process_shutdown.connect(weak=False, dispatch_uid="pkg_celery_worker_shutdown")
+            @signals.worker_process_shutdown.connect(
+                weak=False, dispatch_uid="pkg_celery_worker_shutdown"
+            )
             def _wrapper_shutdown(**kwargs):
                 logger.info("Executing registered worker shutdown hook...")
                 try:

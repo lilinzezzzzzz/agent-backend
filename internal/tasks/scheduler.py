@@ -8,6 +8,13 @@
 
 from celery.schedules import crontab
 
+from internal.config import settings
+from internal.tasks.constants import (
+    ORPHAN_DETECTOR_TASK_NAME,
+    PUBLISH_RECONCILER_TASK_NAME,
+    RUNNING_RECONCILER_TASK_NAME,
+)
+
 # =========================================================
 # 任务模块配置
 # =========================================================
@@ -15,12 +22,18 @@ from celery.schedules import crontab
 # 需要加载的任务模块 (Python 模块路径)
 CELERY_INCLUDE_MODULES = [
     "internal.tasks.celery",
+    "internal.tasks.celery_idempotency_demo",
+    "internal.tasks.reconciler",
 ]
 
 # 任务路由配置 (决定任务去哪个队列)
 CELERY_TASK_ROUTES = {
     # Celery 任务统一走 celery_queue
     "internal.tasks.celery_tasks.*": {"queue": "celery_queue"},
+    "internal.tasks.celery_idempotency_demo.*": {"queue": "celery_queue"},
+    RUNNING_RECONCILER_TASK_NAME: {"queue": settings.CELERY_RECONCILER_QUEUE},
+    ORPHAN_DETECTOR_TASK_NAME: {"queue": settings.CELERY_RECONCILER_QUEUE},
+    PUBLISH_RECONCILER_TASK_NAME: {"queue": settings.CELERY_RECONCILER_QUEUE},
     # 定时任务统一走 cron_queue
     "task_sum_every_15_min": {"queue": "cron_queue"},
 }
@@ -45,3 +58,24 @@ STATIC_BEAT_SCHEDULE = {
         "args": (1, 1),
     },
 }
+
+if settings.CELERY_RECONCILER_BEAT_ENABLED:
+    STATIC_BEAT_SCHEDULE.update(
+        {
+            "celery_task_publish_reconciler": {
+                "task": PUBLISH_RECONCILER_TASK_NAME,
+                "schedule": float(settings.CELERY_PUBLISH_RECONCILER_INTERVAL_SECONDS),
+                "options": {"queue": settings.CELERY_RECONCILER_QUEUE},
+            },
+            "celery_task_running_reconciler": {
+                "task": RUNNING_RECONCILER_TASK_NAME,
+                "schedule": float(settings.CELERY_RECONCILER_INTERVAL_SECONDS),
+                "options": {"queue": settings.CELERY_RECONCILER_QUEUE},
+            },
+            "celery_task_orphan_detector": {
+                "task": ORPHAN_DETECTOR_TASK_NAME,
+                "schedule": float(settings.CELERY_RECONCILER_INTERVAL_SECONDS),
+                "options": {"queue": settings.CELERY_RECONCILER_QUEUE},
+            },
+        }
+    )

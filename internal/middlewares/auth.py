@@ -33,9 +33,9 @@ class _AuthConstants:
     # 白名单路径 (精确匹配)
     WHITELIST_PATHS: frozenset[str] = frozenset(
         {
-            "/auth/login",
-            "/auth/register",
-            "/auth/wechat/login",  # 微信登录
+            "/v1/auth/login",
+            "/v1/auth/register",
+            "/v1/auth/wechat/login",  # 微信登录
             "/docs",
             "/openapi.json",
         }

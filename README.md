@@ -169,8 +169,14 @@ uv run uvicorn entrypoints.main:app --host 0.0.0.0 --port 8000
 Worker：
 
 ```bash
-uv run celery -A entrypoints.celery:celery_app worker -l info -Q default,celery_queue,cron_queue
+uv run celery -A entrypoints.celery:celery_app worker -l info -Q default,celery_queue,cron_queue,celery_maintenance_queue
 ```
+
+使用 PostgreSQL 幂等任务前，先执行 `ddl/postgresql/1.1.0_celery_idempotency.sql`。API 在任务记录事务提交后
+通过 `CeleryClient.submit()` 直接发布；两步不是原子操作。发布异常会立即标记为 `PUBLISH_FAILED`，Beat 会将
+超时停留在 `PENDING_PUBLISH` 的记录收敛为 `PUBLISH_FAILED`，将超过最大未 claim 时间仍停留在
+`PUBLISHED` 的记录收敛为 `ORPHANED`。这些 Reconciler 任务只做状态归类和告警，不会自动重新提交、
+自动 claim 或自动恢复业务执行。
 
 Beat：
 
@@ -209,6 +215,8 @@ uv run celery -A entrypoints.celery:celery_app beat -l info
 | `POST` | `/v1/auth/logout` | 用户登出 |
 | `GET` | `/v1/auth/me` | 当前用户信息 |
 | `POST` | `/v1/auth/wechat/login` | 微信登录 |
+| `POST` | `/v1/celery-tasks/idempotent-sum/create` | 登记幂等 Celery 加法 demo |
+| `GET` | `/v1/celery-tasks/{record_id}` | 查询当前用户的逻辑任务状态 |
 | `GET` | `/v1/user/hello-world` | 用户示例接口 |
 | `POST` | `/v1/agent/chat` | 统一 Agent 聊天入口 |
 | `POST` | `/v1/agent/order/support` | 订单售后 Agent |
@@ -225,7 +233,7 @@ uv run celery -A entrypoints.celery:celery_app beat -l info
 - `/v1/public/**` 直接放行。
 - `/v1/internal/**` 使用 `X-Signature`、`X-Timestamp`、`X-Nonce` 做签名认证。
 - 其他 HTTP 接口默认要求 `Authorization` token，兼容裸 token 和 `Bearer <token>`。
-- 精确白名单包含 `/auth/login`、`/auth/register`、`/auth/wechat/login`、`/docs`、`/openapi.json`。
+- 精确白名单包含 `/v1/auth/login`、`/v1/auth/register`、`/v1/auth/wechat/login`、`/docs`、`/openapi.json`。
 
 统一成功响应结构：
 

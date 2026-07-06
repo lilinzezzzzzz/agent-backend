@@ -23,6 +23,10 @@ class GlobalErrors:
         40006, {"zh": "无法处理的实体", "en": "Unprocessable Entity"}
     )
     EndpointDisabled = AppError(40007, {"zh": "接口已禁用", "en": "Endpoint Disabled"})
+    IdempotencyConflict = AppError(
+        40900,
+        {"zh": "幂等键已绑定不同的任务载荷", "en": "Idempotency Conflict"},
+    )
     StreamTimeout = AppError(40800, {"zh": "流超时", "en": "Stream Timeout"})
 
     # 服务端错误 (50000 - 59999)

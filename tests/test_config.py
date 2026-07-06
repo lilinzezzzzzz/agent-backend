@@ -1,5 +1,8 @@
 from pathlib import Path
 
+import pytest
+from pydantic import ValidationError
+
 from internal.config import Settings, _config_echo_value, _sensitive_secret_config_keys
 
 
@@ -73,6 +76,31 @@ def test_shell_environment_is_fallback_when_dotenv_value_is_missing(
     settings = _new_settings(env_path, secrets_path)
 
     assert settings.REDIS_HOST == "shell-redis"
+
+
+def test_celery_publish_confirmation_timeout_exceeds_reconciler_interval(
+    tmp_path: Path,
+) -> None:
+    env_path = tmp_path / ".env.test"
+    secrets_path = tmp_path / ".secrets"
+    env_values = _base_env_values()
+    env_values.update(
+        {
+            "CELERY_PUBLISH_CONFIRM_TIMEOUT_SECONDS": "10",
+            "CELERY_PUBLISH_RECONCILER_INTERVAL_SECONDS": "10",
+        }
+    )
+    _write_env_file(env_path, env_values)
+    _write_env_file(secrets_path, _secret_values())
+
+    with pytest.raises(
+        ValidationError,
+        match=(
+            "CELERY_PUBLISH_CONFIRM_TIMEOUT_SECONDS must exceed "
+            "CELERY_PUBLISH_RECONCILER_INTERVAL_SECONDS"
+        ),
+    ):
+        _new_settings(env_path, secrets_path)
 
 
 def test_sensitive_secret_config_keys_only_match_sensitive_names() -> None:

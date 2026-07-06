@@ -1,146 +1,156 @@
+"""ScopedOperationLock 表行锁数据访问。"""
+
 from __future__ import annotations
 
-from sqlalchemy import text
+from sqlalchemy import Select, select, text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from internal.infra.database import get_read_session, get_session
 from internal.models.scoped_operation_lock import ScopedOperationLock
 from pkg.database.dao import BaseDao
+from pkg.ids import snowflake_id_generator
+from pkg.toolkit.timer import utc_now_naive
+
+
+_MYSQL_DIALECT_NAMES = {"mysql", "mariadb"}
+_MYSQL_LOCK_UNAVAILABLE_ERROR_CODES = {
+    1205,  # Lock wait timeout exceeded
+    1213,  # Deadlock found
+    3572,  # Statement aborted because NOWAIT lock could not be acquired
+}
+_INSERT_IGNORE_LOCK_ROW_STMT = text(
+    """
+    INSERT IGNORE INTO scoped_operation_locks
+        (id, operation_scope, resource_key, creator_id, created_at, updater_id, updated_at, deleted_at)
+    VALUES
+        (:id, :operation_scope, :resource_key, :creator_id, :created_at, NULL, :updated_at, NULL)
+    """
+)
 
 
 class ScopedOperationLockDao(BaseDao[ScopedOperationLock]):
-    """ScopedOperationLock 数据访问对象。
-
-    提供事务内锁获取功能，不自行管理事务边界。
-    """
+    """封装基于 InnoDB 行锁的事务互斥锁。"""
 
     _model_cls: type[ScopedOperationLock] = ScopedOperationLock
 
     async def acquire(
         self,
+        *,
         session: AsyncSession,
         operation_scope: str,
         resource_key: str,
-        *,
-        wait: bool = True,
-        nowait: bool = False,
-        skip_locked: bool = False,
+        wait: bool,
         creator_id: int | None = None,
-    ) -> ScopedOperationLock:
-        """在事务内获取锁行。
+    ) -> bool:
+        """在当前显式事务内获取锁。
 
-        流程：
-        1. 确保锁行存在（PostgreSQL 的 INSERT ... ON CONFLICT DO NOTHING）
-        2. 对该行 SELECT ... FOR UPDATE
-        3. 不提交事务，锁随调用方事务 commit/rollback 释放
+        实现流程：
+        1. 使用 ``INSERT IGNORE`` 确保锁身份行存在；
+        2. 使用 ``SELECT ... FOR UPDATE`` 锁定唯一身份行；
+        3. 调用方事务 commit/rollback 后 InnoDB 自动释放行锁。
 
         Args:
-            session: 调用方传入的 AsyncSession，必须在事务内
-            operation_scope: 锁作用域（如 "order_confirm"）
-            resource_key: scope 内资源键（如 "order:123"）
-            wait: 是否等待锁（默认 True）
-            nowait: 是否立即失败（默认 False）
-            skip_locked: 是否跳过已锁定行（默认 False）
-            creator_id: 创建人 ID（可选）
+            session: 已开启事务的 MySQL/MariaDB AsyncSession。
+            operation_scope: 锁作用域。
+            resource_key: scope 内资源键。
+            wait: True 时等待锁；False 时使用 NOWAIT 尝试获取锁。
+            creator_id: 创建人 ID，可为空。
 
         Returns:
-            锁定的 ScopedOperationLock 实例
+            是否成功获取锁。等待模式正常返回时恒为 True。
 
         Raises:
-            RuntimeError: 锁获取失败时抛出
+            RuntimeError: session 未开启事务、数据库类型不满足要求或锁行异常缺失。
+            DBAPIError: 等待模式下数据库锁错误或其他数据库错误。
         """
-        # 1. 确保锁行存在
-        await self._ensure_lock_row_exists(session, operation_scope, resource_key, creator_id)
-
-        # 2. 构建 SELECT ... FOR UPDATE 查询
-        for_update_query = self._build_for_update_query(
-            operation_scope, resource_key, wait=wait, nowait=nowait, skip_locked=skip_locked
+        self._validate_session(session)
+        await self._ensure_lock_row_exists(
+            session=session,
+            operation_scope=operation_scope,
+            resource_key=resource_key,
+            creator_id=creator_id,
         )
 
-        # 3. 执行查询获取锁
-        result = await session.execute(for_update_query)
-        row = result.first()
+        try:
+            result = await session.execute(
+                self._build_for_update_query(
+                    operation_scope=operation_scope,
+                    resource_key=resource_key,
+                    wait=wait,
+                )
+            )
+        except DBAPIError as exc:
+            if not wait and self._is_lock_unavailable_error(exc):
+                return False
+            raise
 
-        if row is None:
+        lock = result.scalar_one_or_none()
+        if lock is None:
+            if not wait:
+                return False
             raise RuntimeError(
-                f"Failed to acquire lock for scope={operation_scope}, key={resource_key}"
+                f"Failed to acquire scoped operation lock: scope={operation_scope}, key={resource_key}"
             )
 
-        # 4. 返回锁实例
-        return row[0]
+        return True
 
     async def _ensure_lock_row_exists(
         self,
+        *,
         session: AsyncSession,
         operation_scope: str,
         resource_key: str,
-        creator_id: int | None = None,
+        creator_id: int | None,
     ) -> None:
-        """确保锁行存在，使用 PostgreSQL 的 INSERT ... ON CONFLICT DO NOTHING。"""
-        await self._upsert_postgresql(session, operation_scope, resource_key, creator_id)
-
-    async def _upsert_postgresql(
-        self,
-        session: AsyncSession,
-        operation_scope: str,
-        resource_key: str,
-        creator_id: int | None = None,
-    ) -> None:
-        """PostgreSQL: INSERT ... ON CONFLICT DO NOTHING"""
-        # 生成雪花 ID 和时间戳
-        from pkg.ids import snowflake_id_generator
-        from pkg.toolkit.timer import utc_now_naive
-
-        lock_id = snowflake_id_generator.generate()
+        """确保锁身份行存在；重复身份不修改既有行。"""
         now = utc_now_naive()
-
-        stmt = text("""
-            INSERT INTO scoped_operation_locks (id, operation_scope, resource_key, creator_id, created_at, updated_at)
-            VALUES (:id, :scope, :key, :creator_id, :created_at, :updated_at)
-            ON CONFLICT (operation_scope, resource_key) DO NOTHING
-        """)
-        await session.execute(stmt, {
-            "id": lock_id,
-            "scope": operation_scope,
-            "key": resource_key,
-            "creator_id": creator_id,
-            "created_at": now,
-            "updated_at": now,
-        })
+        await session.execute(
+            _INSERT_IGNORE_LOCK_ROW_STMT,
+            {
+                "id": snowflake_id_generator.generate(),
+                "operation_scope": operation_scope,
+                "resource_key": resource_key,
+                "creator_id": creator_id,
+                "created_at": now,
+                "updated_at": now,
+            },
+        )
 
     def _build_for_update_query(
         self,
+        *,
         operation_scope: str,
         resource_key: str,
-        *,
-        wait: bool = True,
-        nowait: bool = False,
-        skip_locked: bool = False,
-    ):
-        """构建 SELECT ... FOR UPDATE 查询。"""
-        from sqlalchemy import select
-
+        wait: bool,
+    ) -> Select[tuple[ScopedOperationLock]]:
+        """构建锁定唯一锁身份行的查询。"""
         stmt = select(self.model_cls).where(
             self.model_cls.operation_scope == operation_scope,
             self.model_cls.resource_key == resource_key,
         )
+        return stmt.with_for_update(nowait=not wait)
 
-        # 构建 FOR UPDATE 子句
-        if nowait:
-            stmt = stmt.with_for_update(nowait=True)
-        elif skip_locked:
-            stmt = stmt.with_for_update(skip_locked=True)
-        elif not wait:
-            # 如果不等待，使用 nowait
-            stmt = stmt.with_for_update(nowait=True)
-        else:
-            # 默认等待
-            stmt = stmt.with_for_update()
+    @staticmethod
+    def _validate_session(session: AsyncSession) -> None:
+        """校验锁必须运行在显式 MySQL/MariaDB 事务内。"""
+        if not session.in_transaction():
+            raise RuntimeError("Scoped operation lock requires an active transaction")
 
-        return stmt
+        dialect_name = session.get_bind().dialect.name
+        if dialect_name not in _MYSQL_DIALECT_NAMES:
+            raise RuntimeError(
+                f"Scoped operation lock requires MySQL/MariaDB, got {dialect_name}"
+            )
+
+    @staticmethod
+    def _is_lock_unavailable_error(exc: DBAPIError) -> bool:
+        """识别 NOWAIT 未获取锁等可转换为 False 的数据库错误。"""
+        orig = exc.orig
+        error_code = getattr(orig, "args", [None])[0]
+        return error_code in _MYSQL_LOCK_UNAVAILABLE_ERROR_CODES
 
 
-# 全局单例（懒加载）
 _scoped_operation_lock_dao: ScopedOperationLockDao | None = None
 
 

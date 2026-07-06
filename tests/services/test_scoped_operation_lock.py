@@ -1,402 +1,297 @@
-"""ScopedOperationLock 单元测试。
+"""Scoped operation table lock 单元测试。"""
 
-测试输入校验、锁获取协议和模型约束。
-"""
+from typing import Any, cast
+from unittest.mock import MagicMock
 
 import pytest
-import pytest_asyncio
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.dialects import mysql, sqlite
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from internal.core import AppException
 from internal.dao.scoped_operation_lock import ScopedOperationLockDao
 from internal.models.scoped_operation_lock import ScopedOperationLock
-from internal.services.scoped_operation_lock import ScopedOperationLockService
-from pkg.database import Base
+from internal.services.scoped_operation_lock import LockMode, ScopedOperationLockService
 
 
-# 测试模型定义（使用 ScopedOperationLock）
-@pytest_asyncio.fixture(loop_scope="function")
-async def db_engine():
-    """创建内存 SQLite 引擎。"""
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    yield engine
-    await engine.dispose()
+class FakeDbapiError(Exception):
+    """模拟 DBAPI 异常，提供 MySQL error code。"""
 
 
-@pytest_asyncio.fixture(loop_scope="function")
-async def db_session_factory(db_engine):
-    """创建数据库会话工厂。"""
-    return async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
+class FakeResult:
+    """模拟 SQLAlchemy Result。"""
+
+    def __init__(self, scalar_value: Any):
+        self._scalar_value = scalar_value
+
+    def scalar_one_or_none(self):
+        return self._scalar_value
 
 
-@pytest_asyncio.fixture
-async def db_session(db_session_factory):
-    """创建数据库会话。"""
-    async with db_session_factory() as session:
-        yield session
+class FakeSession:
+    """提供 ScopedOperationLockDao 所需的最小 session 行为。"""
+
+    def __init__(
+        self,
+        *,
+        dialect,
+        in_transaction: bool = True,
+        lock_row: ScopedOperationLock | None = None,
+        select_error: OperationalError | None = None,
+    ):
+        self._in_transaction = in_transaction
+        self._bind = MagicMock(dialect=dialect)
+        self._lock_row = lock_row or ScopedOperationLock(
+            id=1,
+            operation_scope="scope",
+            resource_key="key",
+        )
+        self._select_error = select_error
+        self.executions: list[tuple[Any, dict[str, Any] | None]] = []
+
+    def in_transaction(self) -> bool:
+        return self._in_transaction
+
+    def get_bind(self):
+        return self._bind
+
+    async def execute(self, statement, parameters=None):
+        self.executions.append((statement, parameters))
+        if parameters is None and self._select_error is not None:
+            raise self._select_error
+        return FakeResult(self._lock_row)
 
 
 @pytest.fixture
-def lock_dao(db_session_factory):
-    """创建 ScopedOperationLockDao 实例。"""
-    return ScopedOperationLockDao(
-        session_provider=db_session_factory,
-        read_session_provider=db_session_factory,
-    )
+def lock_dao() -> ScopedOperationLockDao:
+    return ScopedOperationLockDao(session_provider=MagicMock())
 
 
 @pytest.fixture
-def lock_service(lock_dao):
-    """创建 ScopedOperationLockService 实例。"""
+def lock_service(lock_dao: ScopedOperationLockDao) -> ScopedOperationLockService:
     return ScopedOperationLockService(dao=lock_dao)
 
 
-# ==========================================
-# 1. 模型约束测试
-# ==========================================
+def _mysql_lock_error(code: int) -> OperationalError:
+    orig = FakeDbapiError()
+    orig.args = (code, "lock unavailable")
+    return OperationalError("SELECT ... FOR UPDATE NOWAIT", {}, orig)
 
 
 class TestScopedOperationLockModel:
-    """测试 ScopedOperationLock 模型约束。"""
+    def test_model_fields_match_lock_identity(self):
+        assert ScopedOperationLock.__tablename__ == "scoped_operation_locks"
+        assert ScopedOperationLock.operation_scope.property.columns[0].type.length == 64
+        assert ScopedOperationLock.resource_key.property.columns[0].type.length == 128
+        assert ScopedOperationLock.creator_id.property.columns[0].nullable is True
 
-    def test_model_has_no_deleted_at_column(self):
-        """验证模型禁用软删除。"""
+    def test_model_has_unique_lock_identity(self):
+        constraints = {
+            constraint.name: constraint
+            for constraint in ScopedOperationLock.__table__.constraints
+            if constraint.name
+        }
+
+        constraint = constraints["uk_scoped_op_lock_key"]
+        assert {column.name for column in constraint.columns} == {
+            "operation_scope",
+            "resource_key",
+        }
+
+    def test_model_disables_soft_delete_semantics(self):
+        lock = ScopedOperationLock(operation_scope="scope", resource_key="key")
+
         assert ScopedOperationLock.has_deleted_at_column() is False
-
-    def test_model_soft_delete_raises_not_implemented(self):
-        """验证软删除操作抛出 NotImplementedError。"""
-        lock = ScopedOperationLock(operation_scope="test", resource_key="key")
         with pytest.raises(NotImplementedError, match="does not support soft delete"):
             lock.build_soft_delete_stmt()
-
-    def test_model_restore_raises_not_implemented(self):
-        """验证恢复操作抛出 NotImplementedError。"""
-        lock = ScopedOperationLock(operation_scope="test", resource_key="key")
         with pytest.raises(NotImplementedError, match="does not support restore"):
             lock.build_restore_stmt()
 
-    def test_model_fields(self):
-        """验证模型字段定义。"""
-        # 检查字段存在
-        assert hasattr(ScopedOperationLock, 'operation_scope')
-        assert hasattr(ScopedOperationLock, 'resource_key')
-        assert hasattr(ScopedOperationLock, 'creator_id')
-
-        # 检查字段类型
-        op_scope_col = ScopedOperationLock.__table__.columns['operation_scope']
-        assert op_scope_col.type.length == 64
-        assert op_scope_col.nullable is False
-
-        res_key_col = ScopedOperationLock.__table__.columns['resource_key']
-        assert res_key_col.type.length == 128
-        assert res_key_col.nullable is False
-
-        creator_col = ScopedOperationLock.__table__.columns['creator_id']
-        assert creator_col.nullable is True
-
-    def test_model_unique_constraint(self):
-        """验证唯一约束定义。"""
-        table_args = ScopedOperationLock.__table_args__
-        unique_constraints = [
-            arg for arg in table_args if hasattr(arg, 'name') and arg.name == 'uk_scoped_op_lock_key'
-        ]
-        assert len(unique_constraints) == 1
-        constraint = unique_constraints[0]
-        assert 'operation_scope' in constraint.columns
-        assert 'resource_key' in constraint.columns
-
-
-# ==========================================
-# 2. 输入校验测试
-# ==========================================
-
-
-class TestScopedOperationLockServiceValidation:
-    """测试 ScopedOperationLockService 输入校验。"""
-
-    def test_validate_empty_operation_scope(self, lock_service):
-        """验证空 operation_scope 抛出异常。"""
-        with pytest.raises(AppException) as exc_info:
-            lock_service._validate_parameters("", "key")
-        assert "operation_scope 不能为空" in str(exc_info.value.message)
-
-    def test_validate_whitespace_operation_scope(self, lock_service):
-        """验证空白 operation_scope 抛出异常。"""
-        with pytest.raises(AppException) as exc_info:
-            lock_service._validate_parameters("   ", "key")
-        assert "operation_scope 不能为空" in str(exc_info.value.message)
-
-    def test_validate_long_operation_scope(self, lock_service):
-        """验证过长 operation_scope 抛出异常。"""
-        long_scope = "a" * 65
-        with pytest.raises(AppException) as exc_info:
-            lock_service._validate_parameters(long_scope, "key")
-        assert "operation_scope 长度不能超过 64 个字符" in str(exc_info.value.message)
-
-    def test_validate_empty_resource_key(self, lock_service):
-        """验证空 resource_key 抛出异常。"""
-        with pytest.raises(AppException) as exc_info:
-            lock_service._validate_parameters("scope", "")
-        assert "resource_key 不能为空" in str(exc_info.value.message)
-
-    def test_validate_whitespace_resource_key(self, lock_service):
-        """验证空白 resource_key 抛出异常。"""
-        with pytest.raises(AppException) as exc_info:
-            lock_service._validate_parameters("scope", "   ")
-        assert "resource_key 不能为空" in str(exc_info.value.message)
-
-    def test_validate_long_resource_key(self, lock_service):
-        """验证过长 resource_key 抛出异常。"""
-        long_key = "b" * 129
-        with pytest.raises(AppException) as exc_info:
-            lock_service._validate_parameters("scope", long_key)
-        assert "resource_key 长度不能超过 128 个字符" in str(exc_info.value.message)
-
-    @pytest.mark.asyncio
-    async def test_validate_mutually_exclusive_parameters(self, lock_service, db_session):
-        """验证 nowait 和 skip_locked 互斥。"""
-        with pytest.raises(AppException) as exc_info:
-            await lock_service.acquire_lock(
-                session=db_session,
-                operation_scope="scope",
-                resource_key="key",
-                nowait=True,
-                skip_locked=True,
-            )
-        assert "nowait 和 skip_locked 参数互斥" in str(exc_info.value.message)
-
-
-# ==========================================
-# 3. 锁获取协议测试
-# ==========================================
-
-
-class TestScopedOperationLockAcquire:
-    """测试锁获取协议。"""
-
-    @pytest.mark.asyncio
-    async def test_acquire_creates_new_lock(self, lock_service, db_session):
-        """测试首次创建锁行。"""
-        async with db_session.begin():
-            lock = await lock_service.acquire_lock(
-                session=db_session,
-                operation_scope="order_confirm",
-                resource_key="order:123",
-            )
-
-            assert lock is not None
-            assert lock.operation_scope == "order_confirm"
-            assert lock.resource_key == "order:123"
-            assert lock.id is not None
-
-    @pytest.mark.asyncio
-    async def test_acquire_existing_lock(self, lock_service, db_session):
-        """测试获取已存在的锁。"""
-        async with db_session.begin():
-            # 首次创建
-            lock1 = await lock_service.acquire_lock(
-                session=db_session,
-                operation_scope="order_confirm",
-                resource_key="order:123",
-            )
-
-            # 释放锁（事务提交）
-            await db_session.commit()
-
-        # 再次获取同一锁
-        async with db_session.begin():
-            lock2 = await lock_service.acquire_lock(
-                session=db_session,
-                operation_scope="order_confirm",
-                resource_key="order:123",
-            )
-
-            assert lock2 is not None
-            assert lock2.id == lock1.id
-
-    @pytest.mark.asyncio
-    async def test_acquire_different_resources(self, lock_service, db_session):
-        """测试获取不同资源的锁。"""
-        async with db_session.begin():
-            lock1 = await lock_service.acquire_lock(
-                session=db_session,
-                operation_scope="order_confirm",
-                resource_key="order:123",
-            )
-
-            lock2 = await lock_service.acquire_lock(
-                session=db_session,
-                operation_scope="order_confirm",
-                resource_key="order:456",
-            )
-
-            assert lock1.id != lock2.id
-
-    @pytest.mark.asyncio
-    async def test_acquire_with_creator_id(self, lock_service, db_session):
-        """测试带 creator_id 的锁获取。"""
-        async with db_session.begin():
-            lock = await lock_service.acquire_lock(
-                session=db_session,
-                operation_scope="order_confirm",
-                resource_key="order:123",
-                creator_id=999,
-            )
-
-            assert lock.creator_id == 999
-
-    @pytest.mark.asyncio
-    async def test_acquire_without_creator_id(self, lock_service, db_session):
-        """测试不带 creator_id 的锁获取。"""
-        async with db_session.begin():
-            lock = await lock_service.acquire_lock(
-                session=db_session,
-                operation_scope="order_confirm",
-                resource_key="order:123",
-            )
-
-            # 注意：由于使用原始 SQL INSERT，绕过了 ModelMixin 的 fill_ins_insert_fields 方法，
-            # 所以 creator_id 不会被自动设置。
-            # 这是预期的行为，因为 DAO 使用原始 SQL 来实现 PostgreSQL 的 upsert 功能。
-            assert lock.creator_id is None
-
-    @pytest.mark.asyncio
-    async def test_acquire_with_wait_strategy(self, lock_service, db_session):
-        """测试等待策略参数。"""
-        async with db_session.begin():
-            # 测试 wait=True（默认）
-            lock = await lock_service.acquire_lock(
-                session=db_session,
-                operation_scope="order_confirm",
-                resource_key="order:123",
-                wait=True,
-            )
-            assert lock is not None
-
-    @pytest.mark.asyncio
-    async def test_acquire_with_nowait_strategy(self, lock_service, db_session):
-        """测试 nowait 策略。"""
-        async with db_session.begin():
-            # 测试 nowait=True
-            lock = await lock_service.acquire_lock(
-                session=db_session,
-                operation_scope="order_confirm",
-                resource_key="order:123",
-                nowait=True,
-            )
-            assert lock is not None
-
-    @pytest.mark.asyncio
-    async def test_acquire_with_skip_locked_strategy(self, lock_service, db_session):
-        """测试 skip_locked 策略。"""
-        async with db_session.begin():
-            # 测试 skip_locked=True
-            lock = await lock_service.acquire_lock(
-                session=db_session,
-                operation_scope="order_confirm",
-                resource_key="order:123",
-                skip_locked=True,
-            )
-            assert lock is not None
-
-    @pytest.mark.asyncio
-    async def test_acquire_rollback_releases_lock(self, lock_service, db_session):
-        """测试事务回滚释放锁。"""
-        # 首先创建锁
-        async with db_session.begin():
-            lock = await lock_service.acquire_lock(
-                session=db_session,
-                operation_scope="order_confirm",
-                resource_key="order:123",
-            )
-            lock_id = lock.id
-
-        # 模拟事务回滚（通过不提交）
-        # 注意：SQLite 内存数据库不支持真正的并发，这里主要测试流程
-        async with db_session.begin():
-            # 再次获取同一锁（应该成功，因为前一个事务已结束）
-            lock2 = await lock_service.acquire_lock(
-                session=db_session,
-                operation_scope="order_confirm",
-                resource_key="order:123",
-            )
-            assert lock2.id == lock_id
-
-
-# ==========================================
-# 4. DAO 方法测试
-# ==========================================
-
 
 class TestScopedOperationLockDao:
-    """测试 ScopedOperationLockDao 方法。"""
+    @pytest.mark.asyncio
+    async def test_wait_mode_ensures_row_then_locks_for_update(
+        self,
+        lock_dao: ScopedOperationLockDao,
+    ):
+        session = FakeSession(dialect=mysql.dialect())
+
+        acquired = await lock_dao.acquire(
+            session=cast(AsyncSession, session),
+            operation_scope="scope",
+            resource_key="key",
+            wait=True,
+            creator_id=123,
+        )
+
+        insert_stmt, insert_params = session.executions[0]
+        select_stmt, select_params = session.executions[1]
+        compiled_select = str(select_stmt.compile(dialect=mysql.dialect()))
+
+        assert acquired is True
+        assert "INSERT IGNORE INTO scoped_operation_locks" in insert_stmt.text
+        assert insert_params is not None
+        assert insert_params["operation_scope"] == "scope"
+        assert insert_params["resource_key"] == "key"
+        assert insert_params["creator_id"] == 123
+        assert "FOR UPDATE" in compiled_select
+        assert "NOWAIT" not in compiled_select
+        assert select_params is None
 
     @pytest.mark.asyncio
-    async def test_dao_acquire_method(self, lock_dao, db_session):
-        """测试 DAO 的 acquire 方法。"""
-        async with db_session.begin():
-            lock = await lock_dao.acquire(
-                db_session,
-                "order_confirm",
-                "order:123",
-            )
+    async def test_try_mode_uses_for_update_nowait(
+        self, lock_dao: ScopedOperationLockDao
+    ):
+        session = FakeSession(dialect=mysql.dialect())
 
-            assert lock is not None
-            assert lock.operation_scope == "order_confirm"
-            assert lock.resource_key == "order:123"
+        acquired = await lock_dao.acquire(
+            session=cast(AsyncSession, session),
+            operation_scope="scope",
+            resource_key="key",
+            wait=False,
+            creator_id=None,
+        )
 
-    @pytest.mark.asyncio
-    async def test_dao_ensure_lock_row_exists(self, lock_dao, db_session):
-        """测试 _ensure_lock_row_exists 方法。"""
-        # 首次创建
-        async with db_session.begin():
-            await lock_dao._ensure_lock_row_exists(
-                db_session,
-                "order_confirm",
-                "order:123",
-                creator_id=1,
-            )
+        select_stmt = session.executions[1][0]
+        compiled_select = str(select_stmt.compile(dialect=mysql.dialect()))
 
-            # 验证记录存在
-            from sqlalchemy import select
-            result = await db_session.execute(
-                select(ScopedOperationLock).where(
-                    ScopedOperationLock.operation_scope == "order_confirm",
-                    ScopedOperationLock.resource_key == "order:123",
-                )
-            )
-            lock = result.scalar_one_or_none()
-            assert lock is not None
+        assert acquired is True
+        assert "FOR UPDATE NOWAIT" in compiled_select
 
     @pytest.mark.asyncio
-    async def test_dao_upsert_generic(self, lock_dao, db_session):
-        """测试 PostgreSQL upsert 方法。"""
-        async with db_session.begin():
-            # 首次插入
-            await lock_dao._upsert_postgresql(
-                db_session,
-                "order_confirm",
-                "order:123",
-                creator_id=1,
+    @pytest.mark.parametrize("error_code", [1205, 1213, 3572])
+    async def test_try_mode_returns_false_when_lock_is_unavailable(
+        self,
+        lock_dao: ScopedOperationLockDao,
+        error_code: int,
+    ):
+        session = FakeSession(
+            dialect=mysql.dialect(),
+            select_error=_mysql_lock_error(error_code),
+        )
+
+        acquired = await lock_dao.acquire(
+            session=cast(AsyncSession, session),
+            operation_scope="scope",
+            resource_key="key",
+            wait=False,
+        )
+
+        assert acquired is False
+
+    @pytest.mark.asyncio
+    async def test_wait_mode_reraises_database_error(
+        self,
+        lock_dao: ScopedOperationLockDao,
+    ):
+        session = FakeSession(
+            dialect=mysql.dialect(),
+            select_error=_mysql_lock_error(3572),
+        )
+
+        with pytest.raises(OperationalError):
+            await lock_dao.acquire(
+                session=cast(AsyncSession, session),
+                operation_scope="scope",
+                resource_key="key",
+                wait=True,
             )
 
-            # 重复插入（应该忽略）
-            await lock_dao._upsert_postgresql(
-                db_session,
-                "order_confirm",
-                "order:123",
-                creator_id=2,
+    @pytest.mark.asyncio
+    async def test_rejects_session_without_transaction(
+        self,
+        lock_dao: ScopedOperationLockDao,
+    ):
+        session = FakeSession(dialect=mysql.dialect(), in_transaction=False)
+
+        with pytest.raises(RuntimeError, match="requires an active transaction"):
+            await lock_dao.acquire(
+                session=cast(AsyncSession, session),
+                operation_scope="scope",
+                resource_key="key",
+                wait=True,
             )
 
-            # 验证只有一条记录
-            from sqlalchemy import func, select
-            result = await db_session.execute(
-                select(func.count(ScopedOperationLock.id)).where(
-                    ScopedOperationLock.operation_scope == "order_confirm",
-                    ScopedOperationLock.resource_key == "order:123",
-                )
+        assert session.executions == []
+
+    @pytest.mark.asyncio
+    async def test_rejects_non_mysql_session(self, lock_dao: ScopedOperationLockDao):
+        session = FakeSession(dialect=sqlite.dialect())
+
+        with pytest.raises(RuntimeError, match="requires MySQL/MariaDB, got sqlite"):
+            await lock_dao.acquire(
+                session=cast(AsyncSession, session),
+                operation_scope="scope",
+                resource_key="key",
+                wait=True,
             )
-            count = result.scalar()
-            assert count == 1
+
+        assert session.executions == []
+
+
+class TestScopedOperationLockService:
+    @pytest.mark.parametrize(
+        ("operation_scope", "resource_key", "message"),
+        [
+            ("", "key", "operation_scope 不能为空"),
+            ("   ", "key", "operation_scope 不能为空"),
+            ("a" * 65, "key", "operation_scope 长度不能超过 64 个字符"),
+            ("scope", "", "resource_key 不能为空"),
+            ("scope", "   ", "resource_key 不能为空"),
+            ("scope", "b" * 129, "resource_key 长度不能超过 128 个字符"),
+        ],
+    )
+    def test_validate_parameters(
+        self,
+        lock_service: ScopedOperationLockService,
+        operation_scope: str,
+        resource_key: str,
+        message: str,
+    ):
+        with pytest.raises(AppException) as exc_info:
+            lock_service._validate_parameters(operation_scope, resource_key)
+
+        assert message in str(exc_info.value.message)
+
+    @pytest.mark.asyncio
+    async def test_rejects_invalid_mode(self, lock_service: ScopedOperationLockService):
+        session = FakeSession(dialect=mysql.dialect())
+
+        with pytest.raises(AppException) as exc_info:
+            await lock_service.acquire_lock(
+                session=cast(AsyncSession, session),
+                operation_scope="scope",
+                resource_key="key",
+                mode="wait",  # type: ignore[arg-type]
+            )
+
+        assert exc_info.value.message == "mode 必须是 LockMode"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("mode", "expected_nowait"),
+        [
+            (LockMode.WAIT, False),
+            (LockMode.TRY, True),
+        ],
+    )
+    async def test_maps_lock_mode(
+        self,
+        lock_service: ScopedOperationLockService,
+        mode: LockMode,
+        expected_nowait: bool,
+    ):
+        session = FakeSession(dialect=mysql.dialect())
+
+        acquired = await lock_service.acquire_lock(
+            session=cast(AsyncSession, session),
+            operation_scope="scope",
+            resource_key="key",
+            mode=mode,
+            creator_id=123,
+        )
+
+        select_stmt = session.executions[1][0]
+
+        assert acquired is True
+        assert select_stmt._for_update_arg.nowait is expected_nowait

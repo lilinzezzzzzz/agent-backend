@@ -135,6 +135,7 @@ CREATE TABLE IF NOT EXISTS `scoped_operation_locks` (
     `resource_key` VARCHAR(128) NOT NULL COMMENT 'scope 内资源键',
     `creator_id` BIGINT DEFAULT NULL COMMENT '创建人 ID',
     `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `updater_id` BIGINT DEFAULT NULL COMMENT '更新人 ID',
     `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     `deleted_at` DATETIME DEFAULT NULL COMMENT '删除时间',
     PRIMARY KEY (`id`),

@@ -1,6 +1,8 @@
-"""ScopedOperationLock 服务层。"""
+"""Scoped operation transaction lock 服务。"""
 
 from __future__ import annotations
+
+from enum import StrEnum
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -9,14 +11,17 @@ from internal.dao.scoped_operation_lock import (
     ScopedOperationLockDao,
     new_scoped_operation_lock_dao,
 )
-from internal.models.scoped_operation_lock import ScopedOperationLock
+
+
+class LockMode(StrEnum):
+    """事务锁等待策略。"""
+
+    WAIT = "wait"
+    TRY = "try"
 
 
 class ScopedOperationLockService:
-    """ScopedOperationLock 业务服务。
-
-    提供锁获取功能，校验参数并调用 DAO。
-    """
+    """提供基于数据库事务行锁的业务互斥锁。"""
 
     def __init__(self, *, dao: ScopedOperationLockDao):
         self._dao = dao
@@ -27,46 +32,38 @@ class ScopedOperationLockService:
         session: AsyncSession,
         operation_scope: str,
         resource_key: str,
-        wait: bool = True,
-        nowait: bool = False,
-        skip_locked: bool = False,
+        mode: LockMode = LockMode.WAIT,
         creator_id: int | None = None,
-    ) -> ScopedOperationLock:
-        """在事务内获取锁。
+    ) -> bool:
+        """在当前事务内获取锁。
+
+        锁由 ``scoped_operation_locks`` 唯一身份行上的 ``SELECT ... FOR UPDATE``
+        实现，并在事务 commit 或 rollback 时自动释放。业务读写必须使用同一个
+        session 和事务。
 
         Args:
-            session: 调用方传入的 AsyncSession，必须在事务内
-            operation_scope: 锁作用域（如 "order_confirm"）
-            resource_key: scope 内资源键（如 "order:123"）
-            wait: 是否等待锁（默认 True）
-            nowait: 是否立即失败（默认 False）
-            skip_locked: 是否跳过已锁定行（默认 False）
-            creator_id: 创建人 ID（可选）
+            session: 已开启事务的 MySQL/MariaDB AsyncSession。
+            operation_scope: 锁作用域，如 ``order_confirm``。
+            resource_key: scope 内资源键，如 ``order:123``。
+            mode: WAIT 等待获取；TRY 立即返回是否获取成功。
+            creator_id: 首次创建锁身份行时写入的创建人 ID，可为空。
 
         Returns:
-            锁定的 ScopedOperationLock 实例
+            是否成功获取锁。WAIT 模式正常返回时恒为 True。
 
         Raises:
-            AppException: 参数校验失败时抛出
-            RuntimeError: 锁获取失败时抛出
+            AppException: 锁参数或 mode 无效。
+            RuntimeError: session 事务或数据库类型不满足要求。
         """
-        # 参数校验
         self._validate_parameters(operation_scope, resource_key)
-
-        # 互斥参数校验
-        if nowait and skip_locked:
-            raise AppException(
-                errors.BadRequest,
-                message="nowait 和 skip_locked 参数互斥，不能同时为 True",
-            )
+        if not isinstance(mode, LockMode):
+            raise AppException(errors.BadRequest, message="mode 必须是 LockMode")
 
         return await self._dao.acquire(
-            session,
-            operation_scope,
-            resource_key,
-            wait=wait,
-            nowait=nowait,
-            skip_locked=skip_locked,
+            session=session,
+            operation_scope=operation_scope,
+            resource_key=resource_key,
+            wait=mode is LockMode.WAIT,
             creator_id=creator_id,
         )
 
@@ -74,10 +71,7 @@ class ScopedOperationLockService:
     def _validate_parameters(operation_scope: str, resource_key: str) -> None:
         """校验锁参数。"""
         if not operation_scope or not operation_scope.strip():
-            raise AppException(
-                errors.BadRequest,
-                message="operation_scope 不能为空",
-            )
+            raise AppException(errors.BadRequest, message="operation_scope 不能为空")
 
         if len(operation_scope) > 64:
             raise AppException(
@@ -86,10 +80,7 @@ class ScopedOperationLockService:
             )
 
         if not resource_key or not resource_key.strip():
-            raise AppException(
-                errors.BadRequest,
-                message="resource_key 不能为空",
-            )
+            raise AppException(errors.BadRequest, message="resource_key 不能为空")
 
         if len(resource_key) > 128:
             raise AppException(
@@ -98,7 +89,6 @@ class ScopedOperationLockService:
             )
 
 
-# 全局单例（懒加载）
 _scoped_operation_lock_service: ScopedOperationLockService | None = None
 
 

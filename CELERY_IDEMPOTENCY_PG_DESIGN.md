@@ -5,11 +5,12 @@
 本方案使用 PostgreSQL 作为 Celery 任务登记、发布和执行状态的唯一事实源，解决以下问题：
 
 1. **提交幂等**：同一业务幂等键只创建一个逻辑任务。
-2. **发布一致性**：业务数据和任务 outbox 在同一 PostgreSQL 事务内提交，避免数据库与 broker 双写不一致。
-3. **执行防重**：Worker 只有在 PostgreSQL 原子 claim 成功后才能进入业务逻辑。
-4. **副作用幂等**：数据库唯一约束或下游 idempotency key 防止崩溃窗口造成重复副作用。
-5. **快速失败**：校验、claim、业务执行和状态持久化失败都立即结束当前执行，不自动执行 retry。
-6. **默认不自动重复执行**：每个逻辑任务默认只允许一次业务执行；Worker 崩溃或结果不确定时不自动接管。
+2. **请求内同名任务唯一**：同一请求最多登记一个指定 `task_name` 的任务；第二次提交立即抛出稳定异常。
+3. **发布一致性**：业务数据和任务 outbox 在同一 PostgreSQL 事务内提交，避免数据库与 broker 双写不一致。
+4. **执行防重**：Worker 只有在 PostgreSQL 原子 claim 成功后才能进入业务逻辑。
+5. **副作用幂等**：数据库唯一约束或下游 idempotency key 防止崩溃窗口造成重复副作用。
+6. **快速失败**：校验、claim、业务执行和状态持久化失败都立即结束当前执行，不自动执行 retry。
+7. **默认不自动重复执行**：每个逻辑任务默认只允许一次业务执行；Worker 崩溃或结果不确定时不自动接管。
 
 本方案不提供跨 PostgreSQL、Redis broker 和外部系统的 exactly-once。它提供的是：
 
@@ -25,6 +26,8 @@
 ### 1.1 术语约束
 
 - **逻辑任务**：`celery_task_record` 中的一条任务记录。
+- **请求**：由 `(scope, trace_id)` 唯一标识的一次提交上下文。调用方必须保证每个请求使用稳定且不与其他请求复用的
+  `trace_id`；任务内部继承原 trace 时，若需要再次提交同名任务，必须改为批量任务或显式的新请求/恢复命令。
 - **publish retry**：outbox 使用同一个 `task_record_id` 和 `task_id` 重新向 broker 发送消息；不创建新逻辑任务，也不增加业务执行次数。
 - **execution retry**：业务逻辑已经开始后再次执行业务逻辑；本方案默认禁止。
 - **重复消息**：同一 `task_record_id` 或 `task_id` 被 broker 重复交付；允许出现，但不得重复进入业务逻辑。
@@ -44,6 +47,7 @@
 ## 3. 当前项目差距
 
 - `CeleryClient.submit()` 每次生成新的 task ID，相同业务请求不会自动去重。
+- 当前 submission 唯一键包含 `task_record_id`，同一请求使用不同幂等键时仍可登记多个同名任务。
 - 数据库提交和 broker 发布之间存在双写窗口。
 - Worker 执行前没有持久化 claim，重复消息可能再次执行业务逻辑。
 - `run_in_async()` 只负责异步资源和 trace context，不包含任务状态机。
@@ -55,20 +59,22 @@
 ## 4. 核心不变量
 
 1. `(scope, task_name, idempotency_key_hash)` 在幂等有效期内唯一。
-2. 相同幂等键和相同 `payload_hash` 返回原任务；payload 不同必须返回稳定 conflict。
-3. 任务登记时一次性生成稳定 `task_id`，所有 publish retry 都复用它。
-4. 业务数据、任务记录、首次 submission 和 outbox 必须在同一 PostgreSQL 事务内写入。
-5. Worker 只有在 `attempt_count = 0` 且原子 claim 成功时才能进入业务逻辑。
-6. `attempt_count` 固定上限为 1、Celery `max_retries = 0`，runtime 不调用 `task.retry()`。
-7. `RUNNING` 任务 lease 过期后进入 `EXECUTION_UNKNOWN`，不得自动回到 `RUNNING`。
-8. 任务成功或失败更新必须校验 `lease_owner`；owner 不匹配不能覆盖状态。
-9. broker I/O、业务协程和外部 API 不得在数据库事务或行锁范围内执行。
-10. PostgreSQL 不可用、header 不完整或 claim 结果不明确时 fail closed，不执行业务逻辑。
-11. 原始 idempotency key 不写数据库、消息或日志；数据库只保存 SHA-256。
-12. 原子 claim 只能防止重复进入业务逻辑，最终副作用仍必须有业务唯一约束或下游 idempotency key。
-13. 批量任务不得在处理前把全量明细预先标记为 `RUNNING`；只能按有界分片 claim，未 claim 的明细必须保持
+2. `(scope, trace_id, task_name)` 在 submission 表中由无状态条件的 unique constraint 保证唯一；同一请求第二次提交同名任务必须抛出
+   `DUPLICATE_TASK_IN_REQUEST`，即使幂等键、payload 或目标逻辑任务完全相同也不能返回成功。
+3. 不同请求使用相同幂等键和相同 `payload_hash` 返回原任务；payload 不同必须返回稳定 conflict。
+4. 任务登记时一次性生成稳定 `task_id`，所有 publish retry 都复用它。
+5. 业务数据、任务记录、首次 submission 和 outbox 必须在同一 PostgreSQL 事务内写入。
+6. Worker 只有在 `attempt_count = 0` 且原子 claim 成功时才能进入业务逻辑。
+7. `attempt_count` 固定上限为 1、Celery `max_retries = 0`，runtime 不调用 `task.retry()`。
+8. `RUNNING` 任务 lease 过期后进入 `EXECUTION_UNKNOWN`，不得自动回到 `RUNNING`。
+9. 任务成功或失败更新必须校验 `lease_owner`；owner 不匹配不能覆盖状态。
+10. broker I/O、业务协程和外部 API 不得在数据库事务或行锁范围内执行。
+11. PostgreSQL 不可用、header 不完整或 claim 结果不明确时 fail closed，不执行业务逻辑。
+12. 原始 idempotency key 不写数据库、消息或日志；数据库只保存 SHA-256。
+13. 原子 claim 只能防止重复进入业务逻辑，最终副作用仍必须有业务唯一约束或下游 idempotency key。
+14. 批量任务不得在处理前把全量明细预先标记为 `RUNNING`；只能按有界分片 claim，未 claim 的明细必须保持
     `PENDING`。
-14. 每条已 claim 的批量明细必须有独立 lease 和 owner/fencing token；明细 lease 过期后必须进入可恢复状态，
+15. 每条已 claim 的批量明细必须有独立 lease 和 owner/fencing token；明细 lease 过期后必须进入可恢复状态，
     不能无限停留在 `RUNNING`。
 
 ## 5. 架构与职责
@@ -189,7 +195,7 @@ CREATE INDEX idx_celery_task_record_idempotency_expiry
 
 > **[待确认]** 默认幂等有效期建议 30 天。删除任务记录后，相同 key 可以再次创建；需要永久幂等的业务应在业务表保留永久唯一键，不能依赖任务表无限保留。
 
-### 6.2 Submission trace 表
+### 6.2 请求任务 Submission 表
 
 ```sql
 CREATE TABLE celery_task_submission (
@@ -197,10 +203,11 @@ CREATE TABLE celery_task_submission (
     task_record_id      BIGINT NOT NULL,
     scope               VARCHAR(128) NOT NULL,
     trace_id            VARCHAR(128) NOT NULL,
+    task_name           VARCHAR(255) NOT NULL,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    CONSTRAINT uq_celery_task_submission_trace
-        UNIQUE (scope, trace_id, task_record_id)
+    CONSTRAINT uq_celery_task_submission_request_task
+        UNIQUE (scope, trace_id, task_name)
 );
 
 CREATE INDEX idx_celery_task_submission_trace
@@ -210,7 +217,13 @@ CREATE INDEX idx_celery_task_submission_record
     ON celery_task_submission (task_record_id, id);
 ```
 
-每次 `submit_once()` 都登记当前 trace，包括命中已有任务的重复提交。按 trace 查询时必须携带 `scope`，避免跨租户读取。
+`task_name` 必须与 `task_record_id` 对应记录一致，由 DAO 在同一事务内写入。每个请求首次调用 `submit_once()` 时登记
+submission，包括命中其他请求已创建的逻辑任务；同一 `(scope, trace_id, task_name)` 的后续调用不得静默忽略冲突，
+必须转换为 `DUPLICATE_TASK_IN_REQUEST`。按 trace 查询时必须携带 `scope`，避免跨租户读取。
+
+该唯一键不因任务进入终态而提前释放。submission 按第 14.2 节清理后，仍依赖 `trace_id` 全局不复用的请求 contract；
+若调用方无法保证这一点，submission 必须按请求 ID 的最长复用周期延长保留。若同一请求确实需要处理多个同类对象，
+应提交一个批量任务并把对象集合放入受大小限制的 payload，或由独立请求分别提交；不得通过随机幂等键绕过请求级约束。
 
 ### 6.3 Outbox 表
 
@@ -337,7 +350,8 @@ class TaskSubmissionDTO:
     created: bool
 ```
 
-`created=False` 表示返回已有逻辑任务，不代表失败，也不会创建新 outbox。
+`created=False` 只表示当前请求首次提交该 `task_name` 时，命中了**其他请求**已登记的逻辑任务；不代表失败，也不会
+创建新 outbox。同一请求再次提交同名任务不会返回 DTO，而是抛出 `DUPLICATE_TASK_IN_REQUEST`。
 
 ### 8.2 幂等键与 payload hash
 
@@ -345,8 +359,9 @@ class TaskSubmissionDTO:
 - `idempotency_key_hash = sha256(idempotency_key.encode()).hexdigest()`。
 - `payload_hash` 使用规范化 JSON，至少包含 `task_name`、`args`、`kwargs`、queue 和影响业务执行的白名单 options。
 - JSON object key 固定排序，数组保留顺序；排除 trace、publish attempt 和 lease 字段。
-- 相同唯一键、相同 payload：返回原任务。
-- 相同唯一键、不同 payload：抛出稳定 `IDEMPOTENCY_CONFLICT`。
+- 不同请求使用相同幂等唯一键、相同 payload：返回原任务。
+- 不同请求使用相同幂等唯一键、不同 payload：抛出稳定 `IDEMPOTENCY_CONFLICT`。
+- 同一请求再次提交同一 `task_name`：优先抛出稳定 `DUPLICATE_TASK_IN_REQUEST`，不比较幂等键或 payload。
 - 原始 idempotency key 不进入日志、headers 或持久化字段。
 
 ### 8.3 原子登记
@@ -356,18 +371,31 @@ class TaskSubmissionDTO:
 ```text
 BEGIN
   写业务数据
+  生成 candidate task_record_id
+  INSERT submission(scope, trace_id, task_name, candidate task_record_id)
+    ON CONFLICT (scope, trace_id, task_name) DO NOTHING RETURNING id
+  若未返回 submission，抛出 DUPLICATE_TASK_IN_REQUEST 并回滚整个事务
   INSERT task_record ... ON CONFLICT DO NOTHING RETURNING ...
   若冲突，读取主库记录并校验 payload_hash
-  INSERT submission ... ON CONFLICT DO NOTHING
+  若命中已有 task record，把 submission.task_record_id 更新为已有 record ID
   仅新任务 INSERT outbox
 COMMIT
 ```
 
 冲突后的读取必须使用当前事务或主库 session，不能使用 read replica。DAO 必须接受显式 `AsyncSession` 或提供 statement；不能调用会自行创建事务的 `BaseDao.insert()`。
 
+请求级唯一性必须由 PostgreSQL unique constraint 兜底，Service 层预检查只能用于改善错误信息，不能作为并发正确性
+保障。DAO 应使用带明确 conflict target 的 `ON CONFLICT DO NOTHING RETURNING` 判断 slot 是否占用，不应捕获宽泛
+`IntegrityError`；不能把连接失败、超时或其他完整性错误误报为重复任务。candidate record ID 在事务内可以短暂尚无对应
+task record，但事务提交前必须插入对应记录或更新为已存在的 record ID，任一步失败都回滚 submission。异常日志只记录
+`scope`、`trace_id` 和 `task_name`。调用方不得捕获该异常后在同一请求中改用随机幂等键重试。
+
 提交结果语义：
 
 - PostgreSQL commit 成功：返回任务已可靠登记，状态通常为 `PENDING_PUBLISH`。
+- 请求内同名任务冲突：抛出 `AppException(errors.DuplicateTaskInRequest)`，其 wire code 固定为 `40900`，语义名为
+  `DUPLICATE_TASK_IN_REQUEST`；沿用项目统一错误响应信封，不单独改变 HTTP status，且当前事务内的业务写入、
+  task record、submission 和 outbox 全部回滚。
 - PostgreSQL 失败：立即返回失败，不发布消息。
 - broker 不可用：不影响已经完成的数据库提交，由 outbox 后续发布。
 
@@ -574,8 +602,10 @@ RETURNING r.id;
 
 1. 协调任务只固化待处理明细和游标，不直接长时间处理全量数据。
 2. 每个分片任务都有独立的 `celery_task_record`、幂等键和 hard time limit。
-3. 分片登记和 outbox 写入使用同一 PostgreSQL 事务；协调任务中止后，已登记分片仍可发布。
-4. 分片幂等键至少包含批次 ID 和稳定分片边界，不能使用本次进程生成的随机值。
+3. 原始请求只能登记一个协调任务。协调器登记多个同名分片时，每个分片必须使用由批次 ID 和稳定分片边界派生的
+   独立内部请求 ID；不得继承原请求的 `(scope, trace_id)`，也不得使用随机 request/trace ID 绕过唯一约束。
+4. 分片登记和 outbox 写入使用同一 PostgreSQL 事务；协调任务中止后，已登记分片仍可发布。
+5. 分片幂等键至少包含批次 ID 和稳定分片边界，不能使用本次进程生成的随机值。
 
 无法拆成子任务时，单任务循环也必须按固定上限 claim 明细。禁止先执行类似
 `UPDATE ... SET status = 'RUNNING' WHERE batch_id = :batch_id` 的全量状态更新。每轮只能在短事务内通过
@@ -736,11 +766,17 @@ beat:{schedule_name}:{scheduled_at_utc}
 ```
 
 Beat 只触发无副作用 dispatcher；真实业务任务由 outbox 发布。重复触发同一时间槽只能创建一条任务记录。
+每个 schedule slot 必须同时派生稳定且唯一的内部 `trace_id`，例如
+`sha256("beat:{schedule_name}:{scheduled_at_utc}")`；同一 slot 第二次提交同名任务直接触发
+`DUPLICATE_TASK_IN_REQUEST`，而不是返回已有 submission。
 
 ### 13.2 Chain、Group、Chord
 
 - 纯计算 Canvas 可以显式 opt-out。
 - 有副作用的每个 Canvas 节点都必须有独立任务记录、稳定 task ID 和幂等键。
+- 同一 Canvas 构建请求中出现多个相同 `task_name` 的持久化节点时必须在提交阶段抛出
+  `DUPLICATE_TASK_IN_REQUEST`。需要并行处理同类数据时使用一个 batch 节点，或把每个节点建模为独立、可审计的
+  内部请求；不能仅替换幂等键绕过限制。
 - Chord callback 使用独立幂等键，不能复用 header 节点的 key。
 - 完成 Canvas 集成测试前，不宣称通用幂等机制覆盖 Canvas。
 
@@ -763,6 +799,7 @@ Beat 只触发无副作用 dispatcher；真实业务任务由 outbox 发布。�
 - 其他终态默认保留 30 天；审计敏感业务按业务要求延长。
 - 已发布 outbox 默认保留 7 天。
 - 清理顺序为 submission、outbox、task record，使用有上限的批量删除，不逐行删除。
+- 清理 submission 的前提是 `trace_id` 永不复用；若上游只保证有限时间内不复用，submission 保留期不得短于该周期。
 
 ### 14.3 指标和告警
 
@@ -776,6 +813,7 @@ Beat 只触发无副作用 dispatcher；真实业务任务由 outbox 发布。�
 - batch item reclaim、safe requeue、unknown reconciliation 数量；
 - `PUBLISH_FAILED`、`FAILED` 数量；
 - idempotency conflict 数量；
+- `DUPLICATE_TASK_IN_REQUEST` 数量，按 `task_name` 聚合且不记录原始 payload；
 - task 执行耗时和 soft/hard timeout 数量。
 
 ## 15. 配置
@@ -811,9 +849,11 @@ CELERY_TASK_MAX_RESULT_BYTES=262144
 | `ddl/postgresql/1.1.0_celery_idempotency.sql` | 三张表、约束和索引 |
 | `internal/models/celery_task.py` | PostgreSQL 系统表 ORM 映射 |
 | `internal/dao/celery_task.py` | reserve、claim、finish、outbox claim、reconcile 原子 SQL |
-| `internal/services/celery_task_dispatcher.py` | 幂等提交和同事务 outbox |
+| `internal/services/celery_task_dispatcher.py` | 请求级同名任务唯一校验、幂等提交和同事务 outbox |
 | `internal/services/celery_task_execution.py` | 单次执行状态机和结果持久化 |
 | `internal/schemas/celery_task.py` | 状态 `StrEnum`、DTO 和 context |
+| `internal/core/errors.py` | 稳定错误码 `DUPLICATE_TASK_IN_REQUEST` |
+| 相关 `internal/controllers/` Router | 同步异步命令的重复任务错误码和重试语义 docstring |
 | `internal/tasks/runtime.py` | request 校验、claim、ACK/Ignore/失败映射 |
 | `entrypoints/celery_outbox.py` | 独立 publisher 和状态 reconciler |
 | `pkg/celery_queue/client.py` | 稳定 task ID 的 `publish()`；保留兼容 `submit()` |
@@ -833,7 +873,7 @@ reconciler；这些字段属于业务恢复 contract，不放入通用 `celery_t
 2. 部署能够识别新 headers 的 Worker，暂不切业务流量。
 3. 部署 outbox publisher 和 reconciler。
 4. 选择一个具备业务唯一约束的任务试点 dispatcher/runtime。
-5. 验证提交并发、publish 故障、重复消息、Worker lost 和状态回写失败。
+5. 验证请求内同名任务并发冲突、提交幂等、publish 故障、重复消息、Worker lost 和状态回写失败。
 6. 迁移所有有副作用任务、Beat 和 Canvas 节点。
 7. 排空旧消息后启用 strict headers；未登记的副作用任务 fail closed。
 
@@ -852,7 +892,10 @@ rollout 期间 legacy 消息只能短期兼容，并必须有明确截止时间�
 
 - task ID、trace、scope、header、payload 大小和 options 白名单校验。
 - canonical payload hash 对 object key 顺序稳定，对数组顺序敏感。
-- 相同 key/相同 payload 返回原任务；不同 payload 返回 conflict。
+- 同一请求第二次提交同名任务抛出 `DUPLICATE_TASK_IN_REQUEST`，即使 key 和 payload 相同也不返回原任务。
+- `errors.DuplicateTaskInRequest` 的 wire code 固定为 `40900`，不能退化为通用 `BadRequest`。
+- 不同请求使用相同 key/相同 payload 返回原任务；不同 payload 返回 `IDEMPOTENCY_CONFLICT`。
+- 不同 task name 可以在同一请求中各提交一次。
 - `attempt_count` 不能超过 1，所有异常路径都不调用 `task.retry()`。
 - 所有允许和禁止的状态转换。
 - error/result 截断和脱敏。
@@ -865,8 +908,12 @@ rollout 期间 legacy 消息只能短期兼容，并必须有明确截止时间�
 
 以下行为不能用 SQLite 代替，必须连接真实 PostgreSQL 并标记 `integration`：
 
-- 100 个并发提交只创建一条 task record 和一条 outbox。
-- 相同 key、不同 payload 并发时稳定 conflict。
+- 不同请求使用相同 key/相同 payload 的 100 个并发提交只创建一条 task record 和一条 outbox，且每个请求各有一条
+  submission。
+- 同一 `(scope, trace_id, task_name)` 100 个并发提交仅一个成功，其余稳定返回
+  `DUPLICATE_TASK_IN_REQUEST`，且没有孤立 task record、submission 或 outbox。
+- 不同请求使用相同 key、不同 payload 并发时稳定返回 `IDEMPOTENCY_CONFLICT`。
+- 同一请求并发提交不同 task name 时分别成功，request-task unique constraint 不误冲突。
 - 业务数据、任务、submission 和 outbox 同时 commit/rollback。
 - 多 publisher 不会同时 claim 同一 outbox。
 - 多 Worker 只有一个 execution claim 成功。
@@ -890,30 +937,32 @@ rollout 期间 legacy 消息只能短期兼容，并必须有明确截止时间�
 - soft/hard timeout 不触发第二次业务执行。
 - `Ignore`、ACK、redelivery、Worker lost 和 Redis visibility timeout 行为符合第 11 节 contract。
 - legacy 与 strict header 模式符合上线阶段约束。
-- Beat 同一时间槽只登记一个任务。
-- 有副作用 Canvas 节点和 callback 分别防重。
+- Beat 同一时间槽的首次提交只登记一个任务，重复提交抛出 `DUPLICATE_TASK_IN_REQUEST`。
+- 有副作用 Canvas 节点和 callback 分别防重，同一构建请求的同名持久化节点在发布前失败。
 
 ## 19. 验收标准
 
 满足以下条件后才能用于生产副作用任务：
 
-1. 同一幂等键 100 并发提交只产生一个逻辑任务和一个 outbox。
-2. 同一消息并发或重复消费时，业务 Service 最多进入一次。
-3. 业务异常立即进入 `FAILED`，没有 `task.retry()`、autoretry 或自动重新提交。
-4. Worker lost 或 hard timeout 后不自动接管，状态可观测地进入 `EXECUTION_UNKNOWN`。
-5. PostgreSQL 不可用或 claim 不明确时 fail closed。
-6. publish retry 始终复用相同 task ID，不创建新逻辑任务或 execution attempt。
-7. outbox backlog、dead、publish failure、expired running 和 unknown 状态均有指标与告警。
-8. 所有外部副作用都有业务唯一约束或下游 idempotency key。
-9. Beat、Canvas、旧消息兼容、回滚和数据清理流程完成演练。
-10. ACK/redelivery contract 已在锁定的 Celery、Redis 和 Worker pool 组合上通过集成测试。
-11. 批量任务不会全量预标记 `RUNNING`；Worker 被 kill 后，过期明细可观测地转为 `PENDING` 或
+1. 同一 `(scope, trace_id, task_name)` 的 100 个并发提交仅一个成功，其余均抛出
+   `DUPLICATE_TASK_IN_REQUEST`，且冲突事务不残留业务写入、task record、submission 或 outbox。
+2. 不同请求使用同一幂等键 100 并发提交只产生一个逻辑任务和一个 outbox。
+3. 同一消息并发或重复消费时，业务 Service 最多进入一次。
+4. 业务异常立即进入 `FAILED`，没有 `task.retry()`、autoretry 或自动重新提交。
+5. Worker lost 或 hard timeout 后不自动接管，状态可观测地进入 `EXECUTION_UNKNOWN`。
+6. PostgreSQL 不可用或 claim 不明确时 fail closed。
+7. publish retry 始终复用相同 task ID，不创建新逻辑任务或 execution attempt。
+8. outbox backlog、dead、publish failure、expired running、unknown 和请求内同名任务冲突均有指标与告警。
+9. 所有外部副作用都有业务唯一约束或下游 idempotency key。
+10. Beat、Canvas、旧消息兼容、回滚和数据清理流程完成演练。
+11. ACK/redelivery contract 已在锁定的 Celery、Redis 和 Worker pool 组合上通过集成测试。
+12. 批量任务不会全量预标记 `RUNNING`；Worker 被 kill 后，过期明细可观测地转为 `PENDING` 或
     `PROCESSING_UNKNOWN`，不存在永久 `RUNNING`。
 
 ## 20. 实施顺序
 
-1. DDL、ORM、DAO 原子 SQL 和 PostgreSQL 并发测试。
-2. dispatcher、canonical hash、原子登记和提交幂等测试。
+1. DDL、ORM、请求级 task slot、DAO 原子 SQL 和 PostgreSQL 并发测试。
+2. dispatcher、稳定错误码、canonical hash、原子登记和提交幂等测试。
 3. `CeleryMessage.publish()`、outbox publisher 和 broker 故障测试。
 4. execution Service、单次 claim、`EXECUTION_UNKNOWN` 和 reconciler。
 5. runtime wrapper、ACK/redelivery 集成测试和单任务试点。

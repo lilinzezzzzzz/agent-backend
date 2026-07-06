@@ -9,6 +9,7 @@ import pytest
 from celery.result import AsyncResult
 
 from internal.infra.celery import celery_app, celery_client
+from internal.tasks import celery as celery_tasks
 from internal.tasks.celery import number_sum
 from pkg.logger import init_logger
 
@@ -16,6 +17,30 @@ from pkg.logger import init_logger
 init_logger(level="INFO")
 
 _TEST_TRACE_ID = "test-celery-trace"
+
+
+class _FakeTaskRequest:
+    def __init__(self, headers: dict[str, object] | None) -> None:
+        self.headers = headers
+
+
+class _FakeTask:
+    def __init__(self, headers: dict[str, object] | None) -> None:
+        self.request = _FakeTaskRequest(headers)
+
+
+def test_resolve_task_trace_id_uses_caller_header() -> None:
+    trace_id = celery_tasks._resolve_task_trace_id(
+        _FakeTask(headers={"trace_id": "caller-trace-id"}),
+    )
+
+    assert trace_id == "caller-trace-id"
+
+
+@pytest.mark.parametrize("headers", [None, {}, {"trace_id": ""}, {"trace_id": 123}])
+def test_resolve_task_trace_id_rejects_missing_or_invalid_header(headers: dict[str, object] | None) -> None:
+    with pytest.raises(ValueError, match="missing required trace_id header"):
+        celery_tasks._resolve_task_trace_id(_FakeTask(headers=headers))
 
 
 class TestCeleryTasks:

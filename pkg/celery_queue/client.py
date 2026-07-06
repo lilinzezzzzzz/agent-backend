@@ -5,7 +5,6 @@ from typing import Any, cast
 
 from celery import Celery, chain, chord, group, signals
 from celery.result import AsyncResult, GroupResult
-from kombu.utils.uuid import uuid
 
 from pkg.logger import logger
 
@@ -73,14 +72,6 @@ class CeleryClient:
     # ------------------------------
     # 1. 提交任务 (Submit)
     # ------------------------------
-    @staticmethod
-    def _build_task_id(*, task_name: str, trace_id: str) -> str:
-        """构造包含任务标签和调用链信息的 Celery task ID。"""
-        task_tag = task_name.rsplit(".", maxsplit=1)[-1]
-        if not task_tag:
-            raise ValueError("task_name must contain a non-empty task tag")
-        return f"{task_tag}_{trace_id}_{uuid()}"
-
     def submit(
         self,
         *,
@@ -102,18 +93,17 @@ class CeleryClient:
         """
         if "task_id" in options:
             raise TypeError("task_id is generated automatically and cannot be provided")
+        if not isinstance(trace_id, str):
+            raise TypeError("trace_id must be a string")
         if not trace_id:
             raise ValueError("trace_id is mandatory and cannot be empty")
 
-        task_id = self._build_task_id(task_name=task_name, trace_id=trace_id)
         args = tuple(args) if args else ()
         kwargs = kwargs or {}
 
         # 合并参数
         exec_options = self._get_exec_options(options, queue=queue)
 
-        # 注入其他显式参数
-        exec_options["task_id"] = task_id
         headers = exec_options.get("headers")
         if headers is not None and not isinstance(headers, Mapping):
             raise TypeError("headers must be a mapping")

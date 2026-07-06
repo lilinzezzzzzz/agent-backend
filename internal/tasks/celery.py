@@ -9,8 +9,23 @@
 """
 
 
+from collections.abc import Mapping
+
 from internal.infra.celery import celery_client, run_in_async
 from pkg.logger import logger
+
+
+def _resolve_task_trace_id(task: object) -> str:
+    """从 Celery custom headers 读取并校验调用链 trace_id。"""
+    request = getattr(task, "request", None)
+    headers = getattr(request, "headers", None)
+    if isinstance(headers, Mapping):
+        trace_id = headers.get("trace_id")
+        if isinstance(trace_id, str) and trace_id:
+            return trace_id
+
+    raise ValueError("Celery task missing required trace_id header")
+
 
 # =========================================================
 # 1. 独立业务逻辑任务示例
@@ -33,7 +48,7 @@ def clean_expired_tokens(self):
         logger.info("Cleaning expired tokens...")
         return {"deleted_count": 0}
 
-    return run_in_async(_clean_tokens, trace_id=f"clean_tokens_{self.request.id}")
+    return run_in_async(_clean_tokens, trace_id=_resolve_task_trace_id(self))
 
 
 @celery_client.app.task(bind=True, name="internal.tasks.celery_tasks.generate_daily_report")
@@ -51,7 +66,7 @@ def generate_daily_report(self, report_type: str):
         logger.info(f"Generating {report_type} report for {datetime.now(UTC).date()}")
         return {"status": "generated", "report_type": report_type}
 
-    return run_in_async(_generate, trace_id=f"report_{self.request.id}")
+    return run_in_async(_generate, trace_id=_resolve_task_trace_id(self))
 
 
 # =========================================================
@@ -82,7 +97,7 @@ def send_welcome_email(self, user_id: int):
         logger.info(f"Sending welcome email to user {user_id}")
         return {"user_id": user_id, "email_sent": True}
 
-    return run_in_async(_send, trace_id=f"welcome_email_{user_id}")
+    return run_in_async(_send, trace_id=_resolve_task_trace_id(self))
 
 
 @celery_client.app.task(bind=True, name="internal.tasks.celery_tasks.sync_user_data")
@@ -96,7 +111,7 @@ def sync_user_data(self, user_id: int):
         logger.info(f"Syncing user {user_id} data to external systems")
         return {"user_id": user_id, "synced": True}
 
-    return run_in_async(_sync, trace_id=f"sync_user_{user_id}")
+    return run_in_async(_sync, trace_id=_resolve_task_trace_id(self))
 
 
 # =========================================================
@@ -128,7 +143,7 @@ def warmup_cache(self):
         logger.info("Cache warmup completed")
         return {"status": "warmed"}
 
-    return run_in_async(_warmup, trace_id=f"warmup_{self.request.id}")
+    return run_in_async(_warmup, trace_id=_resolve_task_trace_id(self))
 
 
 # =========================================================

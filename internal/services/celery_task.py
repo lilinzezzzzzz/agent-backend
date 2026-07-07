@@ -1,21 +1,23 @@
 import hashlib
 import json
 from collections.abc import Mapping, Sequence
-from datetime import timedelta
 from typing import Any
 
 from internal.config import settings
 from internal.core import AppException, errors
 from internal.dao.celery_task import CeleryTaskDao, new_celery_task_dao
+from internal.models.celery_task import CeleryTaskRecord
 from internal.schemas.celery_task import (
+    CeleryTaskCancelDTO,
     CeleryTaskDetailDTO,
     CeleryTaskDispatchDTO,
+    CeleryTaskErrorCode,
     CeleryTaskStatus,
 )
 from pkg.celery_queue import CeleryClient
 from pkg.database.base import SessionProvider
 from pkg.ids import snowflake_id_generator
-from pkg.toolkit.timer import utc_now_naive
+from pkg.logger import logger
 
 
 _ALLOWED_OPTIONS = frozenset({"priority", "expires"})
@@ -26,7 +28,7 @@ def canonical_task_payload(
     task_name: str,
     args: Sequence[object],
     kwargs: Mapping[str, object],
-    queue: str | None,
+    queue: str,
     options: Mapping[str, object],
 ) -> bytes:
     """生成用于幂等比对的 canonical JSON。"""
@@ -53,7 +55,7 @@ def canonical_task_payload(
 
 
 class CeleryTaskService:
-    """管理 Celery 逻辑任务的登记、查询和 Worker 执行状态。"""
+    """管理 Celery 逻辑任务的登记、查询、执行和取消状态。"""
 
     def __init__(
         self,
@@ -73,21 +75,18 @@ class CeleryTaskService:
         trace_id: str,
         scope: str,
         idempotency_key: str,
+        queue: str,
         args: Sequence[object] = (),
         kwargs: Mapping[str, object] | None = None,
-        queue: str | None = None,
         options: Mapping[str, object] | None = None,
-        execution_timeout_seconds: int,
-        idempotency_expires_in: timedelta,
     ) -> CeleryTaskDispatchDTO:
-        """登记逻辑任务，提交到 broker，并确认发布状态。"""
+        """登记逻辑任务，提交到 Broker，并确认排队状态。"""
         self._validate_submission(
             task_name=task_name,
             trace_id=trace_id,
             scope=scope,
             idempotency_key=idempotency_key,
-            execution_timeout_seconds=execution_timeout_seconds,
-            idempotency_expires_in=idempotency_expires_in,
+            queue=queue,
         )
         task_kwargs = dict(kwargs or {})
         publish_options: dict[str, Any] = dict(options or {})
@@ -105,7 +104,6 @@ class CeleryTaskService:
                 message=f"Celery task payload exceeds {max_payload_bytes} bytes",
             )
 
-        now = utc_now_naive()
         idempotency_key_hash = hashlib.sha256(idempotency_key.encode()).hexdigest()
         payload_hash = hashlib.sha256(payload).hexdigest()
         async with self._session_provider() as session, session.begin():
@@ -115,10 +113,9 @@ class CeleryTaskService:
                 task_name=task_name,
                 trace_id=trace_id,
                 scope=scope,
+                queue=queue,
                 idempotency_key_hash=idempotency_key_hash,
                 payload_hash=payload_hash,
-                execution_timeout_seconds=execution_timeout_seconds,
-                idempotency_expires_at=now + idempotency_expires_in,
             )
         if not created and record.payload_hash != payload_hash:
             raise AppException(
@@ -126,11 +123,7 @@ class CeleryTaskService:
                 message="same idempotency key was submitted with a different payload",
             )
         if not created:
-            return CeleryTaskDispatchDTO(
-                record_id=record.id,
-                status=CeleryTaskStatus(record.status),
-                created=False,
-            )
+            return self._to_dispatch_dto(record, created=False)
 
         try:
             await self._celery_client.async_submit(
@@ -140,22 +133,32 @@ class CeleryTaskService:
                 args=(record.id, scope, *args),
                 kwargs=task_kwargs,
                 queue=queue,
-                countdown=settings.CELERY_TASK_DELIVERY_GRACE_SECONDS,
                 retry=False,
                 **publish_options,
             )
         except Exception as exc:
-            await self._dao.mark_publish_failed(record_id=record.id)
-            raise AppException(
-                errors.ServiceUnavailable, message="Celery task publish failed"
-            ) from exc
-        if not await self._dao.mark_published(record_id=record.id):
-            raise RuntimeError("Celery task publish confirmation state write failed")
-        return CeleryTaskDispatchDTO(
+            current, marked_failed = await self._dao.mark_dispatch_failed(
+                record_id=record.id,
+                scope=scope,
+            )
+            if marked_failed or current is None:
+                raise AppException(
+                    errors.ServiceUnavailable, message="Celery task publish failed"
+                ) from exc
+            logger.warning(
+                "Celery publish raised after task state advanced; preserving database state: "
+                f"record_id={record.id}, status={current.status}"
+            )
+            return self._to_dispatch_dto(current, created=True)
+
+        current = await self._dao.mark_queued(
             record_id=record.id,
-            status=CeleryTaskStatus.PUBLISHED,
-            created=True,
+            scope=scope,
+            queue_start_timeout_seconds=settings.CELERY_QUEUE_START_TIMEOUT_SECONDS,
         )
+        if current is None:
+            raise RuntimeError("Celery task disappeared after broker publish")
+        return self._to_dispatch_dto(current, created=True)
 
     async def get_task(self, *, record_id: int, scope: str) -> CeleryTaskDetailDTO:
         """查询当前 scope 可见的逻辑任务。"""
@@ -164,16 +167,101 @@ class CeleryTaskService:
             raise AppException(errors.NotFound, message="Celery task record not found")
         if record.updated_at is None:
             raise RuntimeError("Celery task record updated_at is missing")
-        return CeleryTaskDetailDTO(
-            record_id=record.id,
-            task_name=record.task_name,
-            status=CeleryTaskStatus(record.status),
-            trace_id=record.trace_id,
-            error_type=record.error_type,
-            error_message=record.error_message,
-            created_at=record.created_at,
-            updated_at=record.updated_at,
+        return self._to_detail_dto(record)
+
+    async def cancel_task(self, *, record_id: int, scope: str) -> CeleryTaskCancelDTO:
+        """幂等请求取消指定任务，并 best-effort 通知 Celery Broker。"""
+        record = await self._dao.request_cancellation(
+            record_id=record_id,
+            scope=scope,
         )
+        if record is None:
+            raise AppException(errors.NotFound, message="Celery task record not found")
+        status = CeleryTaskStatus(record.status)
+        if status in {CeleryTaskStatus.SUCCEEDED, CeleryTaskStatus.FAILED}:
+            raise AppException(
+                errors.TaskStateConflict,
+                message=f"terminal task cannot be cancelled: {status.value}",
+            )
+
+        try:
+            await self._celery_client.async_revoke(record.task_id, terminate=False)
+        except Exception as exc:
+            logger.warning(
+                "Celery revoke failed after cancellation state persisted: "
+                f"record_id={record.id}, error_type={type(exc).__name__}"
+            )
+        return CeleryTaskCancelDTO(record_id=record.id, status=status)
+
+    async def claim(
+        self,
+        *,
+        record_id: int,
+        task_name: str,
+        scope: str,
+        execution_token: str,
+        execution_timeout_seconds: int,
+        deadline_grace_seconds: int,
+    ) -> bool:
+        """尝试获取任务唯一执行权。"""
+        if execution_timeout_seconds <= 0 or deadline_grace_seconds <= 0:
+            raise ValueError("execution timeout and deadline grace must be positive")
+        record = await self._dao.claim_execution(
+            record_id=record_id,
+            task_name=task_name,
+            scope=scope,
+            execution_token=execution_token,
+            hard_deadline_seconds=execution_timeout_seconds + deadline_grace_seconds,
+        )
+        return record is not None
+
+    async def acknowledge_cancellation(
+        self, *, record_id: int, execution_token: str
+    ) -> bool:
+        """Worker 在协作检查点确认取消。"""
+        return await self._dao.acknowledge_cancellation(
+            record_id=record_id,
+            execution_token=execution_token,
+        )
+
+    async def succeed(self, *, record_id: int, execution_token: str) -> bool:
+        """使用 execution token 将当前任务写入 SUCCEEDED。"""
+        updated = await self._dao.finish_execution(
+            record_id=record_id,
+            execution_token=execution_token,
+            status=CeleryTaskStatus.SUCCEEDED,
+        )
+        if updated:
+            return True
+        if await self.acknowledge_cancellation(
+            record_id=record_id, execution_token=execution_token
+        ):
+            return False
+        raise RuntimeError("Celery task success state write rejected by token fencing")
+
+    async def fail(
+        self, *, record_id: int, execution_token: str, exc: Exception
+    ) -> bool:
+        """使用 execution token 写入脱敏失败信息。"""
+        updated = await self._dao.finish_execution(
+            record_id=record_id,
+            execution_token=execution_token,
+            status=CeleryTaskStatus.FAILED,
+            error_code=CeleryTaskErrorCode.TASK_EXECUTION_FAILED,
+            error_summary=(
+                f"task execution failed ({type(exc).__name__}); "
+                "inspect redacted worker logs"
+            ),
+        )
+        if updated:
+            return True
+        if await self.acknowledge_cancellation(
+            record_id=record_id, execution_token=execution_token
+        ):
+            return False
+        raise RuntimeError(
+            "Celery task failure state write rejected by token fencing"
+        ) from exc
 
     @staticmethod
     def _validate_submission(
@@ -182,69 +270,52 @@ class CeleryTaskService:
         trace_id: str,
         scope: str,
         idempotency_key: str,
-        execution_timeout_seconds: int,
-        idempotency_expires_in: timedelta,
+        queue: str,
     ) -> None:
         fields = {
             "task_name": (task_name, 255),
             "trace_id": (trace_id, 128),
             "scope": (scope, 128),
             "idempotency_key": (idempotency_key, 1024),
+            "queue": (queue, 64),
         }
         for name, (value, max_length) in fields.items():
             if not value or len(value) > max_length:
                 raise ValueError(f"{name} must contain 1 to {max_length} characters")
-        if execution_timeout_seconds <= 0:
-            raise ValueError("execution_timeout_seconds must be positive")
-        if idempotency_expires_in <= timedelta(0):
-            raise ValueError("idempotency_expires_in must be positive")
 
-    async def claim(
-        self,
-        *,
-        record_id: int,
-        task_name: str,
-        scope: str,
-        owner: str,
-        execution_timeout_seconds: int,
-        lease_grace_seconds: int,
-    ) -> bool:
-        """尝试获取任务唯一执行权。"""
-        record = await self._dao.claim_execution(
-            record_id=record_id,
-            task_name=task_name,
-            scope=scope,
-            owner=owner,
-            lease_seconds=execution_timeout_seconds + lease_grace_seconds,
-            execution_timeout_seconds=execution_timeout_seconds,
+    @staticmethod
+    def _to_dispatch_dto(
+        record: CeleryTaskRecord, *, created: bool
+    ) -> CeleryTaskDispatchDTO:
+        return CeleryTaskDispatchDTO(
+            record_id=record.id,
+            status=CeleryTaskStatus(record.status),
+            created=created,
         )
-        return record is not None
 
-    async def succeed(self, *, record_id: int, owner: str) -> None:
-        """将当前 owner 的任务写入 SUCCEEDED。"""
-        updated = await self._dao.finish_execution(
-            record_id=record_id,
-            owner=owner,
-            status=CeleryTaskStatus.SUCCEEDED,
+    @staticmethod
+    def _to_detail_dto(record: CeleryTaskRecord) -> CeleryTaskDetailDTO:
+        if record.updated_at is None:
+            raise RuntimeError("Celery task record updated_at is missing")
+        error_code = (
+            CeleryTaskErrorCode(record.error_code) if record.error_code else None
         )
-        if not updated:
-            raise RuntimeError(
-                "Celery task success state write rejected by owner fencing"
-            )
-
-    async def fail(self, *, record_id: int, owner: str, exc: Exception) -> None:
-        """将明确的业务异常写入 FAILED，不持久化原始敏感消息。"""
-        updated = await self._dao.finish_execution(
-            record_id=record_id,
-            owner=owner,
-            status=CeleryTaskStatus.FAILED,
-            error_type=type(exc).__name__[:128],
-            error_message="task execution failed; inspect redacted worker logs",
+        return CeleryTaskDetailDTO(
+            record_id=record.id,
+            task_name=record.task_name,
+            queue=record.queue,
+            status=CeleryTaskStatus(record.status),
+            trace_id=record.trace_id,
+            attempt_count=record.attempt_count,
+            queued_deadline_at=record.queued_deadline_at,
+            hard_deadline_at=record.hard_deadline_at,
+            started_at=record.started_at,
+            finished_at=record.finished_at,
+            error_code=error_code,
+            error_summary=record.error_summary,
+            created_at=record.created_at,
+            updated_at=record.updated_at,
         )
-        if not updated:
-            raise RuntimeError(
-                "Celery task failure state write rejected by owner fencing"
-            ) from exc
 
 
 _celery_task_service: CeleryTaskService | None = None

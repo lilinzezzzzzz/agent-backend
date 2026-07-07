@@ -27,6 +27,10 @@ class GlobalErrors:
         40900,
         {"zh": "幂等键已绑定不同的任务载荷", "en": "Idempotency Conflict"},
     )
+    TaskStateConflict = AppError(
+        40901,
+        {"zh": "任务状态不允许执行该操作", "en": "Task State Conflict"},
+    )
     StreamTimeout = AppError(40800, {"zh": "流超时", "en": "Stream Timeout"})
 
     # 服务端错误 (50000 - 59999)

@@ -139,16 +139,14 @@ class Settings(BaseSettings):
 
     # --- Celery PostgreSQL idempotency ---
     CELERY_IDEMPOTENCY_ENABLED: bool = True
-    CELERY_EXECUTION_LEASE_GRACE_SECONDS: PositiveInt = 30
-    CELERY_TASK_DELIVERY_GRACE_SECONDS: PositiveInt = 2
+    CELERY_EXECUTION_DEADLINE_GRACE_SECONDS: PositiveInt = 30
+    CELERY_QUEUE_START_TIMEOUT_SECONDS: PositiveInt = 300
     CELERY_PUBLISH_CONFIRM_TIMEOUT_SECONDS: PositiveInt = 30
     CELERY_PUBLISH_RECONCILER_INTERVAL_SECONDS: PositiveInt = 10
-    CELERY_PUBLISHED_ORPHAN_SECONDS: PositiveInt = 900
     CELERY_RECONCILER_BEAT_ENABLED: bool = True
     CELERY_RECONCILER_INTERVAL_SECONDS: PositiveInt = 60
     CELERY_RECONCILER_BATCH_SIZE: PositiveInt = 100
     CELERY_RECONCILER_QUEUE: str = "celery_maintenance_queue"
-    CELERY_TASK_IDEMPOTENCY_DAYS: PositiveInt = 30
     CELERY_TASK_MAX_PAYLOAD_BYTES: PositiveInt = 262144
 
     # --- Endpoint Guard ---
@@ -217,22 +215,17 @@ class Settings(BaseSettings):
             return self
         if self.DB_TYPE != "postgresql":
             raise ValueError("CELERY_IDEMPOTENCY_ENABLED requires DB_TYPE=postgresql")
-        if self.CELERY_EXECUTION_LEASE_GRACE_SECONDS > 300:
-            raise ValueError("CELERY_EXECUTION_LEASE_GRACE_SECONDS cannot exceed 300")
+        if self.CELERY_EXECUTION_DEADLINE_GRACE_SECONDS > 300:
+            raise ValueError(
+                "CELERY_EXECUTION_DEADLINE_GRACE_SECONDS cannot exceed 300"
+            )
         if (
-            self.CELERY_PUBLISHED_ORPHAN_SECONDS
+            self.CELERY_QUEUE_START_TIMEOUT_SECONDS
             <= self.CELERY_RECONCILER_INTERVAL_SECONDS
         ):
             raise ValueError(
-                "CELERY_PUBLISHED_ORPHAN_SECONDS must exceed CELERY_RECONCILER_INTERVAL_SECONDS"
-            )
-        if (
-            self.CELERY_TASK_DELIVERY_GRACE_SECONDS
-            >= self.CELERY_PUBLISH_CONFIRM_TIMEOUT_SECONDS
-        ):
-            raise ValueError(
-                "CELERY_TASK_DELIVERY_GRACE_SECONDS must be less than "
-                "CELERY_PUBLISH_CONFIRM_TIMEOUT_SECONDS"
+                "CELERY_QUEUE_START_TIMEOUT_SECONDS must exceed "
+                "CELERY_RECONCILER_INTERVAL_SECONDS"
             )
         if (
             self.CELERY_PUBLISH_CONFIRM_TIMEOUT_SECONDS

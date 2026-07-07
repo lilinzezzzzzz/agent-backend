@@ -1,62 +1,95 @@
-from datetime import datetime, timedelta
+from datetime import timedelta
 
-from sqlalchemy import select, text, update
+from sqlalchemy import func, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from internal.infra.database import get_read_session, get_session
+from internal.infra.database import get_session
 from internal.models.celery_task import CeleryTaskRecord
-from internal.schemas.celery_task import CeleryTaskStatus
+from internal.schemas.celery_task import CeleryTaskErrorCode, CeleryTaskStatus
 from pkg.database.base import SessionProvider
-from pkg.toolkit.timer import utc_now_naive
 
 
-_RECONCILE_EXPIRED_RUNNING_SQL = text(
+_FAIL_STALE_SUBMITTING_SQL = text(
     """
     WITH candidates AS (
         SELECT id
         FROM celery_task_record
-        WHERE status = 'RUNNING'
-          AND lease_expires_at < :now
-        ORDER BY lease_expires_at, id
-        FOR UPDATE SKIP LOCKED
-        LIMIT :batch_size
-    )
-    UPDATE celery_task_record AS r
-    SET status = 'NEEDS_RECONCILIATION',
-        lease_owner = NULL,
-        lease_expires_at = NULL,
-        error_type = 'WORKER_LOST_OR_TIMEOUT',
-        error_message = 'running task lease expired before terminal status was persisted',
-        updated_at = :now
-    FROM candidates AS c
-    WHERE r.id = c.id
-      AND r.status = 'RUNNING'
-      AND r.lease_expires_at < :now
-    RETURNING r.id
-    """
-)
-
-_DETECT_ORPHANED_SQL = text(
-    """
-    WITH candidates AS (
-        SELECT id
-        FROM celery_task_record
-        WHERE status = 'PUBLISHED'
+        WHERE status = 'SUBMITTING'
           AND updated_at < :cutoff
         ORDER BY updated_at, id
         FOR UPDATE SKIP LOCKED
         LIMIT :batch_size
     )
     UPDATE celery_task_record AS r
-    SET status = 'ORPHANED',
-        error_type = 'DELIVERY_ORPHANED',
-        error_message = 'published task was not claimed before orphan deadline',
+    SET status = 'FAILED',
+        error_code = 'PUBLISH_CONFIRMATION_TIMEOUT',
+        error_summary = 'task publish was not confirmed before the deadline',
+        finished_at = :now,
         updated_at = :now
     FROM candidates AS c
     WHERE r.id = c.id
-      AND r.status = 'PUBLISHED'
+      AND r.status = 'SUBMITTING'
       AND r.updated_at < :cutoff
+    RETURNING r.id
+    """
+)
+
+_FAIL_EXPIRED_QUEUED_SQL = text(
+    """
+    WITH candidates AS (
+        SELECT id
+        FROM celery_task_record
+        WHERE status = 'QUEUED'
+          AND queued_deadline_at <= :now
+        ORDER BY queued_deadline_at, id
+        FOR UPDATE SKIP LOCKED
+        LIMIT :batch_size
+    )
+    UPDATE celery_task_record AS r
+    SET status = 'FAILED',
+        error_code = 'QUEUE_START_TIMEOUT',
+        error_summary = 'queued task was not claimed before the start deadline',
+        finished_at = :now,
+        updated_at = :now
+    FROM candidates AS c
+    WHERE r.id = c.id
+      AND r.status = 'QUEUED'
+      AND r.queued_deadline_at <= :now
+    RETURNING r.id
+    """
+)
+
+_RECONCILE_EXPIRED_EXECUTION_SQL = text(
+    """
+    WITH candidates AS (
+        SELECT id
+        FROM celery_task_record
+        WHERE status IN ('RUNNING', 'CANCELLING')
+          AND hard_deadline_at <= :now
+        ORDER BY hard_deadline_at, id
+        FOR UPDATE SKIP LOCKED
+        LIMIT :batch_size
+    )
+    UPDATE celery_task_record AS r
+    SET status = CASE
+            WHEN r.status = 'CANCELLING' THEN 'CANCELLED'
+            ELSE 'FAILED'
+        END,
+        error_code = CASE
+            WHEN r.status = 'CANCELLING' THEN 'CANCEL_DEADLINE_EXCEEDED'
+            ELSE 'WORKER_LOST_OR_TIMEOUT'
+        END,
+        error_summary = CASE
+            WHEN r.status = 'CANCELLING' THEN 'task cancellation exceeded the execution deadline'
+            ELSE 'running task exceeded the execution deadline'
+        END,
+        finished_at = :now,
+        updated_at = :now
+    FROM candidates AS c
+    WHERE r.id = c.id
+      AND r.status IN ('RUNNING', 'CANCELLING')
+      AND r.hard_deadline_at <= :now
     RETURNING r.id
     """
 )
@@ -69,10 +102,8 @@ class CeleryTaskDao:
         self,
         *,
         session_provider: SessionProvider,
-        read_session_provider: SessionProvider | None = None,
     ) -> None:
         self._session_provider = session_provider
-        self._read_session_provider = read_session_provider or session_provider
 
     @property
     def session_provider(self) -> SessionProvider:
@@ -86,14 +117,13 @@ class CeleryTaskDao:
         task_name: str,
         trace_id: str,
         scope: str,
+        queue: str,
         idempotency_key_hash: str,
         payload_hash: str,
-        execution_timeout_seconds: int,
-        idempotency_expires_at: datetime,
     ) -> tuple[CeleryTaskRecord, bool]:
-        """在调用方事务内幂等登记任务。"""
+        """在调用方事务内幂等登记 SUBMITTING 任务。"""
         self._require_postgresql(session)
-        now = utc_now_naive()
+        now = await CeleryTaskRecord.get_database_now(session)
         insert_record = (
             pg_insert(CeleryTaskRecord)
             .values(
@@ -101,11 +131,11 @@ class CeleryTaskDao:
                 task_name=task_name,
                 trace_id=trace_id,
                 scope=scope,
+                queue=queue,
                 idempotency_key_hash=idempotency_key_hash,
                 payload_hash=payload_hash,
-                status=CeleryTaskStatus.PENDING_PUBLISH.value,
-                execution_timeout_seconds=execution_timeout_seconds,
-                idempotency_expires_at=idempotency_expires_at,
+                status=CeleryTaskStatus.SUBMITTING.value,
+                attempt_count=0,
                 created_at=now,
                 updated_at=now,
             )
@@ -126,7 +156,6 @@ class CeleryTaskDao:
                 CeleryTaskRecord.idempotency_key_hash == idempotency_key_hash,
             )
             return (await session.execute(existing_stmt)).scalar_one(), False
-
         return record, True
 
     async def get_by_id_and_scope(
@@ -134,13 +163,75 @@ class CeleryTaskDao:
     ) -> CeleryTaskRecord | None:
         """从主库读取指定 scope 的任务记录。"""
         async with self._session_provider() as session:
-            result = await session.execute(
-                select(CeleryTaskRecord).where(
+            return await self._get_by_id_and_scope_in_session(
+                session, record_id=record_id, scope=scope
+            )
+
+    async def mark_queued(
+        self,
+        *,
+        record_id: int,
+        scope: str,
+        queue_start_timeout_seconds: int,
+    ) -> CeleryTaskRecord | None:
+        """Broker 接受消息后将 SUBMITTING CAS 为 QUEUED。"""
+        async with self._session_provider() as session, session.begin():
+            self._require_postgresql(session)
+            now = await CeleryTaskRecord.get_database_now(session)
+            stmt = (
+                update(CeleryTaskRecord)
+                .where(
                     CeleryTaskRecord.id == record_id,
                     CeleryTaskRecord.scope == scope,
+                    CeleryTaskRecord.status == CeleryTaskStatus.SUBMITTING.value,
                 )
+                .values(
+                    status=CeleryTaskStatus.QUEUED.value,
+                    queued_deadline_at=now
+                    + timedelta(seconds=queue_start_timeout_seconds),
+                    updated_at=now,
+                )
+                .returning(CeleryTaskRecord)
             )
-            return result.scalar_one_or_none()
+            record = (await session.execute(stmt)).scalar_one_or_none()
+            if record is not None:
+                return record
+            return await self._get_by_id_and_scope_in_session(
+                session, record_id=record_id, scope=scope
+            )
+
+    async def mark_dispatch_failed(
+        self, *, record_id: int, scope: str
+    ) -> tuple[CeleryTaskRecord | None, bool]:
+        """将仍为 SUBMITTING 的任务 CAS 为发布失败。"""
+        async with self._session_provider() as session, session.begin():
+            self._require_postgresql(session)
+            now = await CeleryTaskRecord.get_database_now(session)
+            stmt = (
+                update(CeleryTaskRecord)
+                .where(
+                    CeleryTaskRecord.id == record_id,
+                    CeleryTaskRecord.scope == scope,
+                    CeleryTaskRecord.status == CeleryTaskStatus.SUBMITTING.value,
+                )
+                .values(
+                    status=CeleryTaskStatus.FAILED.value,
+                    error_code=CeleryTaskErrorCode.BROKER_PUBLISH_FAILED.value,
+                    error_summary="broker publish failed; automatic retry is disabled",
+                    finished_at=now,
+                    updated_at=now,
+                )
+                .returning(CeleryTaskRecord)
+            )
+            record = (await session.execute(stmt)).scalar_one_or_none()
+            if record is not None:
+                return record, True
+            return (
+                await self._get_by_id_and_scope_in_session(
+                    session, record_id=record_id, scope=scope
+                ),
+                False,
+            )
 
     async def claim_execution(
         self,
@@ -148,30 +239,34 @@ class CeleryTaskDao:
         record_id: int,
         task_name: str,
         scope: str,
-        owner: str,
-        lease_seconds: int,
-        execution_timeout_seconds: int,
+        execution_token: str,
+        hard_deadline_seconds: int,
     ) -> CeleryTaskRecord | None:
-        """仅允许 PUBLISHED 任务进入一次 RUNNING。"""
+        """允许 SUBMITTING 或 QUEUED delivery 获取唯一执行权。"""
         async with self._session_provider() as session, session.begin():
             self._require_postgresql(session)
-            now = utc_now_naive()
+            now = await CeleryTaskRecord.get_database_now(session)
             stmt = (
                 update(CeleryTaskRecord)
                 .where(
                     CeleryTaskRecord.id == record_id,
                     CeleryTaskRecord.task_name == task_name,
                     CeleryTaskRecord.scope == scope,
-                    CeleryTaskRecord.status == CeleryTaskStatus.PUBLISHED.value,
-                    CeleryTaskRecord.execution_timeout_seconds
-                    == execution_timeout_seconds,
+                    CeleryTaskRecord.status.in_(
+                        [
+                            CeleryTaskStatus.SUBMITTING.value,
+                            CeleryTaskStatus.QUEUED.value,
+                        ]
+                    ),
                 )
                 .values(
                     status=CeleryTaskStatus.RUNNING.value,
-                    lease_owner=owner,
-                    lease_expires_at=now + timedelta(seconds=lease_seconds),
-                    error_type=None,
-                    error_message=None,
+                    execution_token=execution_token,
+                    attempt_count=CeleryTaskRecord.attempt_count + 1,
+                    started_at=func.coalesce(CeleryTaskRecord.started_at, now),
+                    hard_deadline_at=now + timedelta(seconds=hard_deadline_seconds),
+                    error_code=None,
+                    error_summary=None,
                     updated_at=now,
                 )
                 .returning(CeleryTaskRecord)
@@ -182,136 +277,141 @@ class CeleryTaskDao:
         self,
         *,
         record_id: int,
-        owner: str,
+        execution_token: str,
         status: CeleryTaskStatus,
-        error_type: str | None = None,
-        error_message: str | None = None,
+        error_code: CeleryTaskErrorCode | None = None,
+        error_summary: str | None = None,
     ) -> bool:
-        """使用 owner fencing 将 RUNNING 任务写入终态。"""
+        """使用 execution token fencing 将 RUNNING 任务写入终态。"""
         if status not in {CeleryTaskStatus.SUCCEEDED, CeleryTaskStatus.FAILED}:
             raise ValueError(f"unsupported automatic terminal status: {status}")
         async with self._session_provider() as session, session.begin():
             self._require_postgresql(session)
-            now = utc_now_naive()
+            now = await CeleryTaskRecord.get_database_now(session)
             stmt = (
                 update(CeleryTaskRecord)
                 .where(
                     CeleryTaskRecord.id == record_id,
                     CeleryTaskRecord.status == CeleryTaskStatus.RUNNING.value,
-                    CeleryTaskRecord.lease_owner == owner,
+                    CeleryTaskRecord.execution_token == execution_token,
                 )
                 .values(
                     status=status.value,
-                    lease_owner=None,
-                    lease_expires_at=None,
-                    error_type=error_type,
-                    error_message=error_message,
+                    error_code=error_code.value if error_code else None,
+                    error_summary=error_summary[:512] if error_summary else None,
+                    finished_at=now,
                     updated_at=now,
                 )
                 .returning(CeleryTaskRecord.id)
             )
             return (await session.execute(stmt)).scalar_one_or_none() is not None
 
-    async def mark_published(self, *, record_id: int) -> bool:
-        """将已确认提交到 broker 的任务标记为 PUBLISHED。"""
+    async def acknowledge_cancellation(
+        self, *, record_id: int, execution_token: str
+    ) -> bool:
+        """Worker 在协作检查点确认取消并写入 CANCELLED。"""
         async with self._session_provider() as session, session.begin():
             self._require_postgresql(session)
-            now = utc_now_naive()
+            now = await CeleryTaskRecord.get_database_now(session)
             stmt = (
                 update(CeleryTaskRecord)
                 .where(
                     CeleryTaskRecord.id == record_id,
-                    CeleryTaskRecord.status == CeleryTaskStatus.PENDING_PUBLISH.value,
+                    CeleryTaskRecord.status == CeleryTaskStatus.CANCELLING.value,
+                    CeleryTaskRecord.execution_token == execution_token,
                 )
                 .values(
-                    status=CeleryTaskStatus.PUBLISHED.value,
-                    error_type=None,
-                    error_message=None,
+                    status=CeleryTaskStatus.CANCELLED.value,
+                    finished_at=now,
                     updated_at=now,
                 )
                 .returning(CeleryTaskRecord.id)
             )
             return (await session.execute(stmt)).scalar_one_or_none() is not None
 
-    async def mark_publish_failed(self, *, record_id: int) -> bool:
-        """将明确失败的 broker 提交标记为 PUBLISH_FAILED。"""
+    async def request_cancellation(
+        self, *, record_id: int, scope: str
+    ) -> CeleryTaskRecord | None:
+        """锁定记录并按当前状态提交幂等取消请求。"""
         async with self._session_provider() as session, session.begin():
             self._require_postgresql(session)
-            now = utc_now_naive()
             stmt = (
-                update(CeleryTaskRecord)
+                select(CeleryTaskRecord)
                 .where(
                     CeleryTaskRecord.id == record_id,
-                    CeleryTaskRecord.status == CeleryTaskStatus.PENDING_PUBLISH.value,
+                    CeleryTaskRecord.scope == scope,
                 )
-                .values(
-                    status=CeleryTaskStatus.PUBLISH_FAILED.value,
-                    error_type="BROKER_PUBLISH_FAILED",
-                    error_message="broker publish failed; automatic retry is disabled",
-                    updated_at=now,
-                )
-                .returning(CeleryTaskRecord.id)
+                .with_for_update()
             )
-            return (await session.execute(stmt)).scalar_one_or_none() is not None
+            record = (await session.execute(stmt)).scalar_one_or_none()
+            if record is None:
+                return None
 
-    async def fail_stale_pending_publish(
+            status = CeleryTaskStatus(record.status)
+            if status in {CeleryTaskStatus.CANCELLING, CeleryTaskStatus.CANCELLED}:
+                return record
+            if status.is_terminal:
+                return record
+
+            now = await CeleryTaskRecord.get_database_now(session)
+            if status in {CeleryTaskStatus.SUBMITTING, CeleryTaskStatus.QUEUED}:
+                record.status = CeleryTaskStatus.CANCELLED.value
+                record.finished_at = now
+            elif status is CeleryTaskStatus.RUNNING:
+                record.status = CeleryTaskStatus.CANCELLING.value
+            record.updated_at = now
+            return record
+
+    async def fail_stale_submitting(
         self, *, batch_size: int, stale_seconds: int
     ) -> list[int]:
-        """批量将超时未确认发布的任务收敛为 PUBLISH_FAILED。"""
+        """批量将发布确认超时的 SUBMITTING 任务收敛为 FAILED。"""
         async with self._session_provider() as session, session.begin():
             self._require_postgresql(session)
-            now = utc_now_naive()
-            candidates = (
-                select(CeleryTaskRecord.id)
-                .where(
-                    CeleryTaskRecord.status == CeleryTaskStatus.PENDING_PUBLISH.value,
-                    CeleryTaskRecord.updated_at
-                    < now - timedelta(seconds=stale_seconds),
-                )
-                .order_by(CeleryTaskRecord.updated_at, CeleryTaskRecord.id)
-                .limit(batch_size)
-                .with_for_update(skip_locked=True)
-            )
-            stmt = (
-                update(CeleryTaskRecord)
-                .where(CeleryTaskRecord.id.in_(candidates))
-                .values(
-                    status=CeleryTaskStatus.PUBLISH_FAILED.value,
-                    error_type="PUBLISH_CONFIRMATION_TIMEOUT",
-                    error_message="task publish was not confirmed before the deadline",
-                    updated_at=now,
-                )
-                .returning(CeleryTaskRecord.id)
-            )
-            return list((await session.execute(stmt)).scalars().all())
-
-    async def reconcile_expired_running(self, *, batch_size: int) -> list[int]:
-        """将过期 RUNNING 任务保守收敛为 NEEDS_RECONCILIATION。"""
-        async with self._session_provider() as session, session.begin():
-            self._require_postgresql(session)
-            now = utc_now_naive()
+            now = await CeleryTaskRecord.get_database_now(session)
             result = await session.execute(
-                _RECONCILE_EXPIRED_RUNNING_SQL,
-                {"batch_size": batch_size, "now": now},
-            )
-            return list(result.scalars().all())
-
-    async def detect_orphaned(
-        self, *, batch_size: int, orphan_seconds: int
-    ) -> list[int]:
-        """将超时未 claim 的 PUBLISHED 任务收敛为 ORPHANED。"""
-        async with self._session_provider() as session, session.begin():
-            self._require_postgresql(session)
-            now = utc_now_naive()
-            result = await session.execute(
-                _DETECT_ORPHANED_SQL,
+                _FAIL_STALE_SUBMITTING_SQL,
                 {
                     "batch_size": batch_size,
-                    "cutoff": now - timedelta(seconds=orphan_seconds),
+                    "cutoff": now - timedelta(seconds=stale_seconds),
                     "now": now,
                 },
             )
             return list(result.scalars().all())
+
+    async def fail_expired_queued(self, *, batch_size: int) -> list[int]:
+        """批量将超过启动 deadline 的 QUEUED 任务收敛为 FAILED。"""
+        async with self._session_provider() as session, session.begin():
+            self._require_postgresql(session)
+            now = await CeleryTaskRecord.get_database_now(session)
+            result = await session.execute(
+                _FAIL_EXPIRED_QUEUED_SQL,
+                {"batch_size": batch_size, "now": now},
+            )
+            return list(result.scalars().all())
+
+    async def reconcile_expired_execution(self, *, batch_size: int) -> list[int]:
+        """批量收敛超过 hard deadline 的 RUNNING/CANCELLING 任务。"""
+        async with self._session_provider() as session, session.begin():
+            self._require_postgresql(session)
+            now = await CeleryTaskRecord.get_database_now(session)
+            result = await session.execute(
+                _RECONCILE_EXPIRED_EXECUTION_SQL,
+                {"batch_size": batch_size, "now": now},
+            )
+            return list(result.scalars().all())
+
+    @staticmethod
+    async def _get_by_id_and_scope_in_session(
+        session: AsyncSession, *, record_id: int, scope: str
+    ) -> CeleryTaskRecord | None:
+        result = await session.execute(
+            select(CeleryTaskRecord).where(
+                CeleryTaskRecord.id == record_id,
+                CeleryTaskRecord.scope == scope,
+            )
+        )
+        return result.scalar_one_or_none()
 
     @staticmethod
     def _require_postgresql(session: AsyncSession) -> None:
@@ -331,6 +431,5 @@ def new_celery_task_dao() -> CeleryTaskDao:
     if _celery_task_dao is None:
         _celery_task_dao = CeleryTaskDao(
             session_provider=get_session,
-            read_session_provider=get_read_session,
         )
     return _celery_task_dao

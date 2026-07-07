@@ -23,19 +23,28 @@ class CeleryTaskRecord(ModelMixin):
     task_name: Mapped[str] = mapped_column(String(255), nullable=False)
     trace_id: Mapped[str] = mapped_column(String(128), nullable=False)
     scope: Mapped[str] = mapped_column(String(128), nullable=False)
+    queue: Mapped[str] = mapped_column(String(64), nullable=False)
     idempotency_key_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
-    execution_timeout_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
-    lease_owner: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    lease_expires_at: Mapped[datetime | None] = mapped_column(
+    execution_token: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    attempt_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    queued_deadline_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=False), nullable=True
     )
-    error_type: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    error_message: Mapped[str | None] = mapped_column(String(2048), nullable=True)
-    idempotency_expires_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=False), nullable=False
+    hard_deadline_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=False), nullable=True
     )
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=False), nullable=True
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=False), nullable=True
+    )
+    error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    error_summary: Mapped[str | None] = mapped_column(String(512), nullable=True)
     creator_id: Mapped[int] = mapped_column(BigInteger, nullable=True, default=None)
 
     __table_args__ = (
@@ -46,39 +55,44 @@ class CeleryTaskRecord(ModelMixin):
             name="uq_celery_task_record_idempotency",
         ),
         CheckConstraint(
-            "status IN ('PENDING_PUBLISH', 'PUBLISHED', 'PUBLISH_FAILED', 'ORPHANED', "
-            "'RUNNING', 'SUCCEEDED', 'FAILED', 'NEEDS_RECONCILIATION', 'CANCELLED')",
+            "status IN ('SUBMITTING', 'QUEUED', 'RUNNING', 'CANCELLING', "
+            "'SUCCEEDED', 'FAILED', 'CANCELLED')",
             name="ck_celery_task_record_status",
         ),
         CheckConstraint(
-            "execution_timeout_seconds > 0", name="ck_celery_task_record_timeout"
+            "attempt_count >= 0", name="ck_celery_task_record_attempt_count"
         ),
         Index(
-            "idx_celery_task_record_trace",
+            "idx_celery_task_record_scope_trace",
+            "scope",
             "trace_id",
             text("created_at DESC"),
             text("id DESC"),
         ),
-        Index("idx_celery_task_record_status_updated", "status", "updated_at", "id"),
         Index(
-            "idx_celery_task_record_expired_running",
-            "lease_expires_at",
+            "idx_celery_task_record_scope_status",
+            "scope",
+            "status",
+            "created_at",
             "id",
-            postgresql_where=text("status = 'RUNNING'"),
         ),
         Index(
-            "idx_celery_task_record_stale_published",
+            "idx_celery_task_record_stale_submitting",
             "updated_at",
             "id",
-            postgresql_where=text("status = 'PUBLISHED'"),
+            postgresql_where=text("status = 'SUBMITTING'"),
         ),
         Index(
-            "idx_celery_task_record_idempotency_expiry",
-            "idempotency_expires_at",
+            "idx_celery_task_record_queued_deadline",
+            "queued_deadline_at",
             "id",
-            postgresql_where=text(
-                "status IN ('PUBLISH_FAILED', 'SUCCEEDED', 'FAILED', 'NEEDS_RECONCILIATION', 'CANCELLED')"
-            ),
+            postgresql_where=text("status = 'QUEUED'"),
+        ),
+        Index(
+            "idx_celery_task_record_execution_deadline",
+            "hard_deadline_at",
+            "id",
+            postgresql_where=text("status IN ('RUNNING', 'CANCELLING')"),
         ),
     )
 

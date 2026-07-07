@@ -8,15 +8,32 @@ from pydantic import BaseModel, Field
 class CeleryTaskStatus(StrEnum):
     """Celery 逻辑任务状态。"""
 
-    PENDING_PUBLISH = "PENDING_PUBLISH"
-    PUBLISHED = "PUBLISHED"
-    PUBLISH_FAILED = "PUBLISH_FAILED"
-    ORPHANED = "ORPHANED"
+    SUBMITTING = "SUBMITTING"
+    QUEUED = "QUEUED"
     RUNNING = "RUNNING"
+    CANCELLING = "CANCELLING"
     SUCCEEDED = "SUCCEEDED"
     FAILED = "FAILED"
-    NEEDS_RECONCILIATION = "NEEDS_RECONCILIATION"
     CANCELLED = "CANCELLED"
+
+    @property
+    def is_terminal(self) -> bool:
+        return self in {
+            CeleryTaskStatus.SUCCEEDED,
+            CeleryTaskStatus.FAILED,
+            CeleryTaskStatus.CANCELLED,
+        }
+
+
+class CeleryTaskErrorCode(StrEnum):
+    """Celery 逻辑任务稳定错误码。"""
+
+    BROKER_PUBLISH_FAILED = "BROKER_PUBLISH_FAILED"
+    PUBLISH_CONFIRMATION_TIMEOUT = "PUBLISH_CONFIRMATION_TIMEOUT"
+    QUEUE_START_TIMEOUT = "QUEUE_START_TIMEOUT"
+    WORKER_LOST_OR_TIMEOUT = "WORKER_LOST_OR_TIMEOUT"
+    CANCEL_DEADLINE_EXCEEDED = "CANCEL_DEADLINE_EXCEEDED"
+    TASK_EXECUTION_FAILED = "TASK_EXECUTION_FAILED"
 
 
 class IdempotentSumCreateReqSchema(BaseModel):
@@ -42,12 +59,26 @@ class CeleryTaskDetailSchema(BaseModel):
     record_id: int
     task_id: str
     task_name: str
+    queue: str
     status: CeleryTaskStatus
     trace_id: str
-    error_type: str | None = None
-    error_message: str | None = None
+    attempt_count: int
+    queued_deadline_at: datetime | None = None
+    hard_deadline_at: datetime | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    error_code: CeleryTaskErrorCode | None = None
+    error_summary: str | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class CeleryTaskCancelRespSchema(BaseModel):
+    """任务取消命令结果。"""
+
+    record_id: int
+    task_id: str
+    status: CeleryTaskStatus
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,10 +108,16 @@ class CeleryTaskDetailDTO:
 
     record_id: int
     task_name: str
+    queue: str
     status: CeleryTaskStatus
     trace_id: str
-    error_type: str | None
-    error_message: str | None
+    attempt_count: int
+    queued_deadline_at: datetime | None
+    hard_deadline_at: datetime | None
+    started_at: datetime | None
+    finished_at: datetime | None
+    error_code: CeleryTaskErrorCode | None
+    error_summary: str | None
     created_at: datetime
     updated_at: datetime
 
@@ -93,10 +130,35 @@ class CeleryTaskDetailDTO:
             record_id=self.record_id,
             task_id=self.task_id,
             task_name=self.task_name,
+            queue=self.queue,
             status=self.status,
             trace_id=self.trace_id,
-            error_type=self.error_type,
-            error_message=self.error_message,
+            attempt_count=self.attempt_count,
+            queued_deadline_at=self.queued_deadline_at,
+            hard_deadline_at=self.hard_deadline_at,
+            started_at=self.started_at,
+            finished_at=self.finished_at,
+            error_code=self.error_code,
+            error_summary=self.error_summary,
             created_at=self.created_at,
             updated_at=self.updated_at,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class CeleryTaskCancelDTO:
+    """任务取消命令 DTO。"""
+
+    record_id: int
+    status: CeleryTaskStatus
+
+    @property
+    def task_id(self) -> str:
+        return f"task_{self.record_id}"
+
+    def to_schema(self) -> CeleryTaskCancelRespSchema:
+        return CeleryTaskCancelRespSchema(
+            record_id=self.record_id,
+            task_id=self.task_id,
+            status=self.status,
         )

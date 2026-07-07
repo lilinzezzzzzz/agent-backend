@@ -172,11 +172,21 @@ Worker：
 uv run celery -A entrypoints.celery:celery_app worker -l info -Q default,celery_queue,cron_queue,celery_maintenance_queue
 ```
 
-使用 PostgreSQL 幂等任务前，先执行 `ddl/postgresql/1.1.0_celery_idempotency.sql`。API 在任务记录事务提交后
-通过 `CeleryClient.submit()` 直接发布；两步不是原子操作。发布异常会立即标记为 `PUBLISH_FAILED`，Beat 会将
-超时停留在 `PENDING_PUBLISH` 的记录收敛为 `PUBLISH_FAILED`，将超过最大未 claim 时间仍停留在
-`PUBLISHED` 的记录收敛为 `ORPHANED`。这些 Reconciler 任务只做状态归类和告警，不会自动重新提交、
-自动 claim 或自动恢复业务执行。
+使用 PostgreSQL 幂等任务前，先在全新环境执行
+`ddl/postgresql/1.2.0_celery_task_state_machine.sql`。该脚本不迁移旧表；已有环境必须人工确认并删除旧的
+`celery_task_record` 后再执行。API 先登记 `SUBMITTING` 记录，再调用 `CeleryClient.submit()`；Worker 可从
+`SUBMITTING` 或 `QUEUED` claim，从而避免快速消费竞态。Beat 会分别收敛发布确认超时、排队启动超时和
+执行 deadline 超时，不会自动重新提交任务。取消接口先持久化 `CANCELLED/CANCELLING`，再 best-effort
+调用非强制 Celery revoke，运行中任务通过数据库检查点协作退出。
+
+状态机相关配置：
+
+- `CELERY_QUEUE_START_TIMEOUT_SECONDS`：消息确认入队后允许等待 Worker claim 的时间，默认 300 秒。
+- `CELERY_EXECUTION_DEADLINE_GRACE_SECONDS`：task time limit 之外的状态收敛宽限，默认 30 秒。
+- `CELERY_PUBLISH_CONFIRM_TIMEOUT_SECONDS`：`SUBMITTING` 发布确认超时。
+- `CELERY_PUBLISH_RECONCILER_INTERVAL_SECONDS`：发布确认 Reconciler 周期。
+- `CELERY_RECONCILER_INTERVAL_SECONDS` / `CELERY_RECONCILER_BATCH_SIZE`：deadline Reconciler 周期与批量。
+- `CELERY_RECONCILER_QUEUE`：Reconciler 专用 queue。
 
 Beat：
 
@@ -217,6 +227,7 @@ uv run celery -A entrypoints.celery:celery_app beat -l info
 | `POST` | `/v1/auth/wechat/login` | 微信登录 |
 | `POST` | `/v1/celery-tasks/idempotent-sum/create` | 登记幂等 Celery 加法 demo |
 | `GET` | `/v1/celery-tasks/{record_id}` | 查询当前用户的逻辑任务状态 |
+| `POST` | `/v1/celery-tasks/{record_id}/cancel` | 幂等请求取消逻辑任务 |
 | `GET` | `/v1/user/hello-world` | 用户示例接口 |
 | `POST` | `/v1/agent/chat` | 统一 Agent 聊天入口 |
 | `POST` | `/v1/agent/order/support` | 订单售后 Agent |

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy import select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -8,6 +8,7 @@ from internal.infra.database import get_read_session, get_session
 from internal.models.celery_task import CeleryTaskRecord
 from internal.schemas.celery_task import CeleryTaskStatus
 from pkg.database.base import SessionProvider
+from pkg.toolkit.timer import utc_now_naive
 
 
 _RECONCILE_EXPIRED_RUNNING_SQL = text(
@@ -16,7 +17,7 @@ _RECONCILE_EXPIRED_RUNNING_SQL = text(
         SELECT id
         FROM celery_task_record
         WHERE status = 'RUNNING'
-          AND lease_expires_at < CURRENT_TIMESTAMP
+          AND lease_expires_at < :now
         ORDER BY lease_expires_at, id
         FOR UPDATE SKIP LOCKED
         LIMIT :batch_size
@@ -27,11 +28,11 @@ _RECONCILE_EXPIRED_RUNNING_SQL = text(
         lease_expires_at = NULL,
         error_type = 'WORKER_LOST_OR_TIMEOUT',
         error_message = 'running task lease expired before terminal status was persisted',
-        updated_at = CURRENT_TIMESTAMP
+        updated_at = :now
     FROM candidates AS c
     WHERE r.id = c.id
       AND r.status = 'RUNNING'
-      AND r.lease_expires_at < CURRENT_TIMESTAMP
+      AND r.lease_expires_at < :now
     RETURNING r.id
     """
 )
@@ -42,7 +43,7 @@ _DETECT_ORPHANED_SQL = text(
         SELECT id
         FROM celery_task_record
         WHERE status = 'PUBLISHED'
-          AND updated_at < CURRENT_TIMESTAMP - (:orphan_seconds * INTERVAL '1 second')
+          AND updated_at < :cutoff
         ORDER BY updated_at, id
         FOR UPDATE SKIP LOCKED
         LIMIT :batch_size
@@ -51,11 +52,11 @@ _DETECT_ORPHANED_SQL = text(
     SET status = 'ORPHANED',
         error_type = 'DELIVERY_ORPHANED',
         error_message = 'published task was not claimed before orphan deadline',
-        updated_at = CURRENT_TIMESTAMP
+        updated_at = :now
     FROM candidates AS c
     WHERE r.id = c.id
       AND r.status = 'PUBLISHED'
-      AND r.updated_at < CURRENT_TIMESTAMP - (:orphan_seconds * INTERVAL '1 second')
+      AND r.updated_at < :cutoff
     RETURNING r.id
     """
 )
@@ -92,6 +93,7 @@ class CeleryTaskDao:
     ) -> tuple[CeleryTaskRecord, bool]:
         """在调用方事务内幂等登记任务。"""
         self._require_postgresql(session)
+        now = utc_now_naive()
         insert_record = (
             pg_insert(CeleryTaskRecord)
             .values(
@@ -104,8 +106,8 @@ class CeleryTaskDao:
                 status=CeleryTaskStatus.PENDING_PUBLISH.value,
                 execution_timeout_seconds=execution_timeout_seconds,
                 idempotency_expires_at=idempotency_expires_at,
-                created_at=text("CURRENT_TIMESTAMP"),
-                updated_at=text("CURRENT_TIMESTAMP"),
+                created_at=now,
+                updated_at=now,
             )
             .on_conflict_do_nothing(
                 index_elements=[
@@ -153,6 +155,7 @@ class CeleryTaskDao:
         """仅允许 PUBLISHED 任务进入一次 RUNNING。"""
         async with self._session_provider() as session, session.begin():
             self._require_postgresql(session)
+            now = utc_now_naive()
             stmt = (
                 update(CeleryTaskRecord)
                 .where(
@@ -166,12 +169,10 @@ class CeleryTaskDao:
                 .values(
                     status=CeleryTaskStatus.RUNNING.value,
                     lease_owner=owner,
-                    lease_expires_at=text(
-                        f"CURRENT_TIMESTAMP + ({int(lease_seconds)} * INTERVAL '1 second')"
-                    ),
+                    lease_expires_at=now + timedelta(seconds=lease_seconds),
                     error_type=None,
                     error_message=None,
-                    updated_at=text("CURRENT_TIMESTAMP"),
+                    updated_at=now,
                 )
                 .returning(CeleryTaskRecord)
             )
@@ -191,6 +192,7 @@ class CeleryTaskDao:
             raise ValueError(f"unsupported automatic terminal status: {status}")
         async with self._session_provider() as session, session.begin():
             self._require_postgresql(session)
+            now = utc_now_naive()
             stmt = (
                 update(CeleryTaskRecord)
                 .where(
@@ -204,7 +206,7 @@ class CeleryTaskDao:
                     lease_expires_at=None,
                     error_type=error_type,
                     error_message=error_message,
-                    updated_at=text("CURRENT_TIMESTAMP"),
+                    updated_at=now,
                 )
                 .returning(CeleryTaskRecord.id)
             )
@@ -214,6 +216,7 @@ class CeleryTaskDao:
         """将已确认提交到 broker 的任务标记为 PUBLISHED。"""
         async with self._session_provider() as session, session.begin():
             self._require_postgresql(session)
+            now = utc_now_naive()
             stmt = (
                 update(CeleryTaskRecord)
                 .where(
@@ -224,7 +227,7 @@ class CeleryTaskDao:
                     status=CeleryTaskStatus.PUBLISHED.value,
                     error_type=None,
                     error_message=None,
-                    updated_at=text("CURRENT_TIMESTAMP"),
+                    updated_at=now,
                 )
                 .returning(CeleryTaskRecord.id)
             )
@@ -234,6 +237,7 @@ class CeleryTaskDao:
         """将明确失败的 broker 提交标记为 PUBLISH_FAILED。"""
         async with self._session_provider() as session, session.begin():
             self._require_postgresql(session)
+            now = utc_now_naive()
             stmt = (
                 update(CeleryTaskRecord)
                 .where(
@@ -244,7 +248,7 @@ class CeleryTaskDao:
                     status=CeleryTaskStatus.PUBLISH_FAILED.value,
                     error_type="BROKER_PUBLISH_FAILED",
                     error_message="broker publish failed; automatic retry is disabled",
-                    updated_at=text("CURRENT_TIMESTAMP"),
+                    updated_at=now,
                 )
                 .returning(CeleryTaskRecord.id)
             )
@@ -256,14 +260,13 @@ class CeleryTaskDao:
         """批量将超时未确认发布的任务收敛为 PUBLISH_FAILED。"""
         async with self._session_provider() as session, session.begin():
             self._require_postgresql(session)
+            now = utc_now_naive()
             candidates = (
                 select(CeleryTaskRecord.id)
                 .where(
                     CeleryTaskRecord.status == CeleryTaskStatus.PENDING_PUBLISH.value,
                     CeleryTaskRecord.updated_at
-                    < text(
-                        f"CURRENT_TIMESTAMP - ({int(stale_seconds)} * INTERVAL '1 second')"
-                    ),
+                    < now - timedelta(seconds=stale_seconds),
                 )
                 .order_by(CeleryTaskRecord.updated_at, CeleryTaskRecord.id)
                 .limit(batch_size)
@@ -276,7 +279,7 @@ class CeleryTaskDao:
                     status=CeleryTaskStatus.PUBLISH_FAILED.value,
                     error_type="PUBLISH_CONFIRMATION_TIMEOUT",
                     error_message="task publish was not confirmed before the deadline",
-                    updated_at=text("CURRENT_TIMESTAMP"),
+                    updated_at=now,
                 )
                 .returning(CeleryTaskRecord.id)
             )
@@ -286,8 +289,10 @@ class CeleryTaskDao:
         """将过期 RUNNING 任务保守收敛为 NEEDS_RECONCILIATION。"""
         async with self._session_provider() as session, session.begin():
             self._require_postgresql(session)
+            now = utc_now_naive()
             result = await session.execute(
-                _RECONCILE_EXPIRED_RUNNING_SQL, {"batch_size": batch_size}
+                _RECONCILE_EXPIRED_RUNNING_SQL,
+                {"batch_size": batch_size, "now": now},
             )
             return list(result.scalars().all())
 
@@ -297,9 +302,14 @@ class CeleryTaskDao:
         """将超时未 claim 的 PUBLISHED 任务收敛为 ORPHANED。"""
         async with self._session_provider() as session, session.begin():
             self._require_postgresql(session)
+            now = utc_now_naive()
             result = await session.execute(
                 _DETECT_ORPHANED_SQL,
-                {"batch_size": batch_size, "orphan_seconds": orphan_seconds},
+                {
+                    "batch_size": batch_size,
+                    "cutoff": now - timedelta(seconds=orphan_seconds),
+                    "now": now,
+                },
             )
             return list(result.scalars().all())
 

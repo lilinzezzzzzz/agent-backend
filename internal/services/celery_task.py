@@ -1,7 +1,7 @@
 import hashlib
 import json
 from collections.abc import Mapping, Sequence
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from typing import Any
 
 from internal.config import settings
@@ -15,6 +15,7 @@ from internal.schemas.celery_task import (
 from pkg.celery_queue import CeleryClient
 from pkg.database.base import SessionProvider
 from pkg.ids import snowflake_id_generator
+from pkg.toolkit.timer import utc_now_naive
 
 
 _ALLOWED_OPTIONS = frozenset({"priority", "expires"})
@@ -104,7 +105,7 @@ class CeleryTaskService:
                 message=f"Celery task payload exceeds {max_payload_bytes} bytes",
             )
 
-        now = datetime.now(UTC)
+        now = utc_now_naive()
         idempotency_key_hash = hashlib.sha256(idempotency_key.encode()).hexdigest()
         payload_hash = hashlib.sha256(payload).hexdigest()
         async with self._session_provider() as session, session.begin():
@@ -161,6 +162,8 @@ class CeleryTaskService:
         record = await self._dao.get_by_id_and_scope(record_id=record_id, scope=scope)
         if record is None:
             raise AppException(errors.NotFound, message="Celery task record not found")
+        if record.updated_at is None:
+            raise RuntimeError("Celery task record updated_at is missing")
         return CeleryTaskDetailDTO(
             record_id=record.id,
             task_name=record.task_name,

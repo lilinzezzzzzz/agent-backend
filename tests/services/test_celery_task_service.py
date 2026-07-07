@@ -11,6 +11,7 @@ from internal.services.celery_task import (
     CeleryTaskService,
     canonical_task_payload,
 )
+from pkg.database.base import ModelMixin
 
 
 class FakeSession:
@@ -88,6 +89,28 @@ def test_celery_task_record_task_id_uses_record_id() -> None:
     assert record.task_id == "task_123"
 
 
+def test_celery_task_record_integrates_model_mixin_columns() -> None:
+    assert issubclass(CeleryTaskRecord, ModelMixin)
+    assert {
+        "id",
+        "creator_id",
+        "created_at",
+        "updater_id",
+        "updated_at",
+        "deleted_at",
+    }.issubset(CeleryTaskRecord.get_column_names())
+    assert CeleryTaskRecord.creator_id.property.columns[0].nullable is True
+    assert CeleryTaskRecord.created_at.property.columns[0].type.timezone is False
+    assert CeleryTaskRecord.created_at.property.columns[0].nullable is False
+    assert CeleryTaskRecord.updated_at.property.columns[0].type.timezone is False
+    assert CeleryTaskRecord.updated_at.property.columns[0].nullable is True
+    assert CeleryTaskRecord.lease_expires_at.property.columns[0].type.timezone is False
+    assert (
+        CeleryTaskRecord.idempotency_expires_at.property.columns[0].type.timezone
+        is False
+    )
+
+
 def test_canonical_payload_is_stable_for_object_key_order() -> None:
     first = canonical_task_payload(
         task_name="task.name",
@@ -137,6 +160,7 @@ async def test_submit_once_publishes_with_stable_task_id() -> None:
 
     assert result.created is True
     assert result.status is CeleryTaskStatus.PUBLISHED
+    assert dao.reserve_calls[0]["idempotency_expires_at"].tzinfo is None
     assert dao.published_ids == [result.record_id]
     assert client.calls == [
         {

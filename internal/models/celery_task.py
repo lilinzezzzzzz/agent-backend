@@ -12,15 +12,14 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from pkg.database.base import Base
+from pkg.database.base import ModelMixin
 
 
-class CeleryTaskRecord(Base):
+class CeleryTaskRecord(ModelMixin):
     """PostgreSQL 中的 Celery 逻辑任务事实记录。"""
 
     __tablename__ = "celery_task_record"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     task_name: Mapped[str] = mapped_column(String(255), nullable=False)
     trace_id: Mapped[str] = mapped_column(String(128), nullable=False)
     scope: Mapped[str] = mapped_column(String(128), nullable=False)
@@ -30,19 +29,14 @@ class CeleryTaskRecord(Base):
     execution_timeout_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
     lease_owner: Mapped[str | None] = mapped_column(String(128), nullable=True)
     lease_expires_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
+        DateTime(timezone=False), nullable=True
     )
     error_type: Mapped[str | None] = mapped_column(String(128), nullable=True)
     error_message: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     idempotency_expires_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
+        DateTime(timezone=False), nullable=False
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    creator_id: Mapped[int] = mapped_column(BigInteger, nullable=True, default=None)
 
     __table_args__ = (
         UniqueConstraint(

@@ -1,7 +1,7 @@
 from collections.abc import Callable, Mapping
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Self
 
 from sqlalchemy import (
@@ -10,8 +10,10 @@ from sqlalchemy import (
     Executable,
     Insert,
     Update,
+    func,
     insert,
     inspect,
+    select,
     update,
 )
 from sqlalchemy.ext.asyncio import (
@@ -96,6 +98,16 @@ class ModelMixin(Base):
     def __init__(self, **kwargs: Any):
         super().__init__(**kwargs)
 
+    @staticmethod
+    async def get_database_now(sess: AsyncSession) -> datetime:
+        """读取数据库当前 UTC 时间并返回 naive datetime。"""
+        value = (await sess.execute(select(func.now()))).scalar_one()
+        if not isinstance(value, datetime):
+            raise RuntimeError("database current time is not a datetime")
+        if value.tzinfo is not None:
+            return value.astimezone(UTC).replace(tzinfo=None)
+        return value
+
     # ==========================================================================
     # 工厂方法
     # ==========================================================================
@@ -156,8 +168,9 @@ class ModelMixin(Base):
             )
 
         data: dict[str, Any] = {}
-        raw_updates = dict(updates or {})
-        raw_updates |= kwargs
+        raw_updates: dict[ColumnKey, Any] = dict(updates or {})
+        for kwarg_name, kwarg_value in kwargs.items():
+            raw_updates[kwarg_name] = kwarg_value
 
         for key, value in raw_updates.items():
             column_name = self.normalize_update_column_name(key)

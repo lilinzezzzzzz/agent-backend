@@ -178,10 +178,14 @@ class CeleryTaskService:
         if record is None:
             raise AppException(errors.NotFound, message="Celery task record not found")
         status = CeleryTaskStatus(record.status)
-        if status in {CeleryTaskStatus.SUCCEEDED, CeleryTaskStatus.FAILED}:
+        if status in {
+            CeleryTaskStatus.SUCCEEDED,
+            CeleryTaskStatus.FAILED,
+            CeleryTaskStatus.ORPHANED,
+        } or (status is CeleryTaskStatus.RUNNING and not record.cancel_allowed):
             raise AppException(
                 errors.TaskStateConflict,
-                message=f"terminal task cannot be cancelled: {status.value}",
+                message=f"task cannot be cancelled in current state: {status.value}",
             )
 
         try:
@@ -220,6 +224,15 @@ class CeleryTaskService:
     ) -> bool:
         """Worker 在协作检查点确认取消。"""
         return await self._dao.acknowledge_cancellation(
+            record_id=record_id,
+            execution_token=execution_token,
+        )
+
+    async def disallow_cancellation(
+        self, *, record_id: int, execution_token: str
+    ) -> bool:
+        """Worker 进入不可取消阶段前关闭取消门禁。"""
+        return await self._dao.disallow_cancellation(
             record_id=record_id,
             execution_token=execution_token,
         )
@@ -305,10 +318,12 @@ class CeleryTaskService:
             task_name=record.task_name,
             queue=record.queue,
             status=CeleryTaskStatus(record.status),
+            cancel_allowed=record.cancel_allowed,
             trace_id=record.trace_id,
             attempt_count=record.attempt_count,
             queued_deadline_at=record.queued_deadline_at,
             hard_deadline_at=record.hard_deadline_at,
+            fence_expires_at=record.fence_expires_at,
             started_at=record.started_at,
             finished_at=record.finished_at,
             error_code=error_code,

@@ -27,6 +27,7 @@ def _record(
     record_id: int = 123,
     payload_hash: str = "payload",
     status: CeleryTaskStatus = CeleryTaskStatus.SUBMITTING,
+    cancel_allowed: bool = True,
 ) -> CeleryTaskRecord:
     now = datetime(2026, 7, 7, 12, 0, 0)
     return CeleryTaskRecord(
@@ -38,6 +39,7 @@ def _record(
         idempotency_key_hash="a" * 64,
         payload_hash=payload_hash,
         status=status.value,
+        cancel_allowed=cancel_allowed,
         attempt_count=0,
         created_at=now,
         updated_at=now,
@@ -54,9 +56,11 @@ class FakeCeleryTaskDao:
         dispatch_failure_status: CeleryTaskStatus = CeleryTaskStatus.FAILED,
         dispatch_failure_marked: bool = True,
         cancellation_status: CeleryTaskStatus = CeleryTaskStatus.CANCELLED,
+        cancellation_cancel_allowed: bool = True,
         claim_succeeds: bool = True,
         finish_succeeds: bool = True,
         acknowledge_succeeds: bool = False,
+        disallow_succeeds: bool = True,
     ) -> None:
         self.existing_payload_hash = existing_payload_hash
         self.existing_status = existing_status
@@ -64,15 +68,18 @@ class FakeCeleryTaskDao:
         self.dispatch_failure_status = dispatch_failure_status
         self.dispatch_failure_marked = dispatch_failure_marked
         self.cancellation_status = cancellation_status
+        self.cancellation_cancel_allowed = cancellation_cancel_allowed
         self.claim_succeeds = claim_succeeds
         self.finish_succeeds = finish_succeeds
         self.acknowledge_succeeds = acknowledge_succeeds
+        self.disallow_succeeds = disallow_succeeds
         self.reserve_calls: list[dict] = []
         self.queued_calls: list[dict] = []
         self.dispatch_failed_calls: list[dict] = []
         self.finish_calls: list[dict] = []
         self.acknowledge_calls: list[dict] = []
         self.claim_calls: list[dict] = []
+        self.disallow_calls: list[dict] = []
 
     async def reserve_task(self, **kwargs):
         self.reserve_calls.append(kwargs)
@@ -103,7 +110,10 @@ class FakeCeleryTaskDao:
         )
 
     async def request_cancellation(self, **_kwargs):
-        return _record(status=self.cancellation_status)
+        return _record(
+            status=self.cancellation_status,
+            cancel_allowed=self.cancellation_cancel_allowed,
+        )
 
     async def claim_execution(self, **kwargs):
         self.claim_calls.append(kwargs)
@@ -116,6 +126,10 @@ class FakeCeleryTaskDao:
     async def acknowledge_cancellation(self, **kwargs) -> bool:
         self.acknowledge_calls.append(kwargs)
         return self.acknowledge_succeeds
+
+    async def disallow_cancellation(self, **kwargs) -> bool:
+        self.disallow_calls.append(kwargs)
+        return self.disallow_succeeds
 
 
 class FakeCeleryClient:
@@ -162,6 +176,8 @@ def test_celery_task_record_uses_new_model_mixin_contract() -> None:
         "attempt_count",
         "queued_deadline_at",
         "hard_deadline_at",
+        "fence_expires_at",
+        "cancel_allowed",
         "started_at",
         "finished_at",
         "error_code",
@@ -345,16 +361,46 @@ async def test_cancel_task_persists_then_best_effort_revokes() -> None:
 
 
 @pytest.mark.asyncio
-async def test_cancel_terminal_task_returns_state_conflict() -> None:
+@pytest.mark.parametrize(
+    "status",
+    [
+        CeleryTaskStatus.SUCCEEDED,
+        CeleryTaskStatus.FAILED,
+        CeleryTaskStatus.ORPHANED,
+    ],
+)
+async def test_cancel_unsafe_task_state_returns_state_conflict(
+    status: CeleryTaskStatus,
+) -> None:
+    client = FakeCeleryClient()
     service = _new_service(
-        FakeCeleryTaskDao(cancellation_status=CeleryTaskStatus.SUCCEEDED),
-        FakeCeleryClient(),
+        FakeCeleryTaskDao(cancellation_status=status),
+        client,
     )
 
     with pytest.raises(AppException) as exc_info:
         await service.cancel_task(record_id=123, scope="user:1")
 
     assert exc_info.value.error is errors.TaskStateConflict
+    assert client.revoke_calls == []
+
+
+@pytest.mark.asyncio
+async def test_cancel_running_task_when_cancel_disallowed_returns_state_conflict() -> None:
+    client = FakeCeleryClient()
+    service = _new_service(
+        FakeCeleryTaskDao(
+            cancellation_status=CeleryTaskStatus.RUNNING,
+            cancellation_cancel_allowed=False,
+        ),
+        client,
+    )
+
+    with pytest.raises(AppException) as exc_info:
+        await service.cancel_task(record_id=123, scope="user:1")
+
+    assert exc_info.value.error is errors.TaskStateConflict
+    assert client.revoke_calls == []
 
 
 @pytest.mark.asyncio
@@ -380,6 +426,22 @@ async def test_claim_uses_execution_token_and_combined_deadline() -> None:
             "execution_token": "delivery-token",
             "hard_deadline_seconds": 55,
         }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_disallow_cancellation_uses_running_token_fence() -> None:
+    dao = FakeCeleryTaskDao()
+    service = _new_service(dao, FakeCeleryClient())
+
+    updated = await service.disallow_cancellation(
+        record_id=123,
+        execution_token="delivery-token",
+    )
+
+    assert updated is True
+    assert dao.disallow_calls == [
+        {"record_id": 123, "execution_token": "delivery-token"}
     ]
 
 

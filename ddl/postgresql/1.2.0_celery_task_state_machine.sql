@@ -7,10 +7,12 @@ CREATE TABLE celery_task_record (
     idempotency_key_hash    VARCHAR(64) NOT NULL,
     payload_hash            VARCHAR(64) NOT NULL,
     status                  VARCHAR(32) NOT NULL,
+    cancel_allowed          BOOLEAN NOT NULL DEFAULT TRUE,
     execution_token         VARCHAR(64),
     attempt_count           INTEGER NOT NULL DEFAULT 0,
     queued_deadline_at      TIMESTAMP WITHOUT TIME ZONE,
     hard_deadline_at        TIMESTAMP WITHOUT TIME ZONE,
+    fence_expires_at        TIMESTAMP WITHOUT TIME ZONE,
     started_at              TIMESTAMP WITHOUT TIME ZONE,
     finished_at             TIMESTAMP WITHOUT TIME ZONE,
     error_code              VARCHAR(64),
@@ -25,7 +27,7 @@ CREATE TABLE celery_task_record (
     CONSTRAINT ck_celery_task_record_status
         CHECK (status IN (
             'SUBMITTING', 'QUEUED', 'RUNNING', 'CANCELLING',
-            'SUCCEEDED', 'FAILED', 'CANCELLED'
+            'ORPHANED', 'SUCCEEDED', 'FAILED', 'CANCELLED'
         )),
     CONSTRAINT ck_celery_task_record_attempt_count CHECK (attempt_count >= 0)
 );
@@ -41,5 +43,8 @@ CREATE INDEX idx_celery_task_record_queued_deadline
 CREATE INDEX idx_celery_task_record_execution_deadline
     ON celery_task_record (hard_deadline_at, id)
     WHERE status IN ('RUNNING', 'CANCELLING');
+CREATE INDEX idx_celery_task_record_orphan_fence
+    ON celery_task_record (fence_expires_at, id)
+    WHERE status = 'ORPHANED';
 
 COMMENT ON TABLE celery_task_record IS '通用 Celery 逻辑任务事实记录';

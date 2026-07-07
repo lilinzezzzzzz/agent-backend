@@ -10,7 +10,9 @@
 - 幂等键在 `(scope, task_name, idempotency_key_hash)` 范围内永久有效。
 - 相同幂等键和相同 `payload_hash` 返回已有任务；payload 不同返回 `IdempotencyConflict`。
 - 不自动重投失败任务，不使用进程内锁，不依赖 Celery result backend。
-- 当前没有 fence/orphan 隔离机制。任务的外部副作用必须由业务自身保证幂等或隔离。
+- `RUNNING` / `CANCELLING` 超过 hard deadline 后先进入 `ORPHANED`，并设置 `fence_expires_at`。`ORPHANED`
+  表示旧 Worker 是否仍在产生外部副作用未知；最终 `FAILED` / `CANCELLED` 必须等 fence 到期且业务核对完成后再写入。
+- `cancel_allowed` 是运行中任务的取消门禁；进入不可取消阶段后由持有 `execution_token` 的 Worker CAS 为 `false`。
 
 这是 breaking schema。新表 DDL 位于：
 `ddl/postgresql/1.2.0_celery_task_state_machine.sql`。已有环境必须人工确认并删除旧表后执行；脚本本身不会删除旧表、
@@ -19,13 +21,30 @@
 ## 状态机
 
 ```text
-SUBMITTING ── broker confirmed ──► QUEUED ── worker claim ──► RUNNING ──► SUCCEEDED
-     │                              │                          │          FAILED
-     │ publish failed/timeout       │ queue start timeout      │ cancel
-     ▼                              ▼                          ▼
-   FAILED                         FAILED                   CANCELLING ──► CANCELLED
-     │                              │
-     └──── cancel before terminal ──┴────────────────────────► CANCELLED
+SUBMITTING
+    ├── Broker 提交失败/超时 ───────────► FAILED
+    ├── Broker 提交成功 ───────────────► QUEUED
+    ├── Worker 抢先 claim ─────────────► RUNNING
+    └── 用户取消 ─────────────────────► CANCELLED
+
+QUEUED
+    ├── Worker claim ─────────────────► RUNNING
+    ├── queued_deadline_at 到期 ───────► FAILED
+    └── 用户取消 ─────────────────────► CANCELLED
+
+RUNNING
+    ├── 成功 ─────────────────────────► SUCCEEDED
+    ├── 明确失败 ─────────────────────► FAILED
+    ├── 用户取消且 cancel_allowed=true ─► CANCELLING
+    ├── 用户取消且 cancel_allowed=false ─► TaskStateConflict
+    └── hard_deadline_at 到期 ─────────► ORPHANED
+
+CANCELLING
+    ├── Worker 协作确认 ───────────────► CANCELLED
+    └── hard_deadline_at 到期 ─────────► ORPHANED
+
+ORPHANED
+    └── fence_expires_at 到期并核对完成 ─► FAILED / CANCELLED
 ```
 
 允许的业务转换：
@@ -37,11 +56,15 @@ SUBMITTING ── broker confirmed ──► QUEUED ── worker claim ──�
 | `SUBMITTING` | Broker 异常 | `FAILED` |
 | `RUNNING` | token 匹配的 Worker 完成 | `SUCCEEDED` / `FAILED` |
 | `SUBMITTING` / `QUEUED` | 用户取消 | `CANCELLED` |
-| `RUNNING` | 用户取消 | `CANCELLING` |
+| `RUNNING` 且 `cancel_allowed = true` | 用户取消 | `CANCELLING` |
+| `RUNNING` 且 `cancel_allowed = false` | 用户取消 | 拒绝取消，保持 `RUNNING` |
 | `CANCELLING` | Worker 协作确认 | `CANCELLED` |
+| `RUNNING` / `CANCELLING` | `hard_deadline_at` 到期 | `ORPHANED` |
+| `ORPHANED` | `fence_expires_at` 到期且业务核对完成 | `FAILED` / `CANCELLED` |
 
-`CANCELLING` 和 `CANCELLED` 的重复取消幂等成功；`SUCCEEDED` 和 `FAILED` 不允许取消，API 返回
-`TaskStateConflict`。
+`CANCELLING` 和 `CANCELLED` 的重复取消幂等成功；`SUCCEEDED`、`FAILED` 和 `ORPHANED` 不允许取消，API 返回
+`TaskStateConflict`。`RUNNING` 但 `cancel_allowed = false` 也不允许取消，API 返回 `TaskStateConflict`，任务保持
+`RUNNING` 并继续完成或失败。`ORPHANED` 不是成功或失败终态，而是外部副作用未知的隔离态。
 
 ## 时间与 deadline
 
@@ -49,8 +72,9 @@ SUBMITTING ── broker confirmed ──► QUEUED ── worker claim ──�
 
 - `queued_deadline_at = database_now + CELERY_QUEUE_START_TIMEOUT_SECONDS`
 - `hard_deadline_at = database_now + Celery task time limit + CELERY_EXECUTION_DEADLINE_GRACE_SECONDS`
+- `fence_expires_at = database_now + CELERY_ORPHAN_FENCE_SECONDS`，只在进入 `ORPHANED` 时设置。
 - `started_at` 只在首次成功 claim 时设置。
-- `finished_at` 在进入 `SUCCEEDED`、`FAILED` 或 `CANCELLED` 时设置。
+- `finished_at` 在进入 `SUCCEEDED`、`FAILED` 或 `CANCELLED` 时设置；进入 `ORPHANED` 不设置。
 
 `queued_deadline_at` 不是 Celery 消息的 `expires`。它只用于识别 Broker 已接受、但 Worker 未及时 claim 的任务。
 
@@ -70,7 +94,7 @@ SUBMITTING ── broker confirmed ──► QUEUED ── worker claim ──�
 
 - 匹配 `record_id + task_name + scope`；
 - 当前状态必须是 `SUBMITTING` 或 `QUEUED`；
-- 写入 `RUNNING`、`execution_token` 和 `hard_deadline_at`；
+- 写入 `RUNNING`、`execution_token`、`cancel_allowed = true` 和 `hard_deadline_at`；
 - 原子递增 `attempt_count`。
 
 完成写入必须同时匹配 `RUNNING + execution_token`。重复 delivery、晚到 Worker 或 token 不匹配的 Worker 不能覆盖
@@ -86,9 +110,19 @@ SUBMITTING ── broker confirmed ──► QUEUED ── worker claim ──�
 await celery_client.async_revoke(task_id, terminate=False)
 ```
 
-revoke 失败只记录脱敏告警，不回滚数据库状态。运行中的 Worker 在业务执行前后检查 `CANCELLING`，以
-`record_id + execution_token` CAS 到 `CANCELLED` 后抛出 Celery `Ignore`。当前实现不使用 `terminate=True`，因此长任务
-应在业务阶段边界增加更多取消检查点。
+revoke 失败只记录脱敏告警，不回滚数据库状态。运行中的 Worker 必须按业务阶段协作检查 `CANCELLING`，以
+`record_id + execution_token` CAS 到 `CANCELLED` 后抛出 Celery `Ignore`。取消检查点应放在可安全停止的阶段边界，
+例如开始执行业务前、每个 batch/page/chunk 前后、外部调用前后、事务提交前后，以及最终写入 `SUCCEEDED` 前。
+检查点不应放在半个事务或半次不可回滚外部副作用中间。
+
+当前实现不使用 `terminate=True`，因此取消不是抢占式中断。长任务需要拆成幂等或可恢复的阶段，并在阶段边界主动确认
+取消；如果 Worker 长时间阻塞、崩溃或没有检查点，任务会停留在 `CANCELLING`，直到 hard deadline 后进入
+`ORPHANED`。
+
+如果任务进入不可取消阶段，Worker 必须先在阶段边界检查一次 `CANCELLING`；确认未取消后，再以
+`RUNNING + execution_token + cancel_allowed = true` 为条件 CAS 设置 `cancel_allowed = false`。从该 CAS 成功后开始，
+新的用户取消请求会被拒绝并保持 `RUNNING`。如果用户取消先完成，Worker 设置 `cancel_allowed = false` 会失败，随后应确认
+`CANCELLED` 并退出。
 
 ## Reconciler
 
@@ -98,10 +132,12 @@ revoke 失败只记录脱敏告警，不回滚数据库状态。运行中的 Wor
 |---|---|---|
 | stale `SUBMITTING` | `FAILED` | `PUBLISH_CONFIRMATION_TIMEOUT` |
 | `QUEUED` 且 queue deadline 到期 | `FAILED` | `QUEUE_START_TIMEOUT` |
-| `RUNNING` 且 hard deadline 到期 | `FAILED` | `WORKER_LOST_OR_TIMEOUT` |
-| `CANCELLING` 且 hard deadline 到期 | `CANCELLED` | `CANCEL_DEADLINE_EXCEEDED` |
+| `RUNNING` 且 hard deadline 到期 | `ORPHANED` | `WORKER_LOST_OR_TIMEOUT` |
+| `CANCELLING` 且 hard deadline 到期 | `ORPHANED` | `CANCEL_DEADLINE_EXCEEDED` |
+| `ORPHANED` 且 fence 到期、核对完成 | `FAILED` / `CANCELLED` | 保留原错误码或由核对流程覆盖 |
 
 Reconciler 只收敛数据库状态，不重新发布消息，也不能保证 deadline 到期后的旧 Worker 已停止外部副作用。
+因此 hard deadline Reconciler 只能把任务隔离为 `ORPHANED`；最终终态需要业务核对外部副作用后显式写入。
 
 `NEEDS_RECONCILIATION` 不属于持久化状态。是否需要收敛由当前状态和 deadline 条件派生，例如
 `status = 'QUEUED' AND queued_deadline_at <= database_now`。这样 `status` 只表达任务生命周期，后台治理动作不会引入
@@ -115,6 +151,7 @@ CELERY_EXECUTION_DEADLINE_GRACE_SECONDS=30
 CELERY_QUEUE_START_TIMEOUT_SECONDS=300
 CELERY_PUBLISH_CONFIRM_TIMEOUT_SECONDS=30
 CELERY_PUBLISH_RECONCILER_INTERVAL_SECONDS=10
+CELERY_ORPHAN_FENCE_SECONDS=300
 CELERY_RECONCILER_BEAT_ENABLED=true
 CELERY_RECONCILER_INTERVAL_SECONDS=60
 CELERY_RECONCILER_BATCH_SIZE=100
@@ -127,6 +164,7 @@ CELERY_TASK_MAX_PAYLOAD_BYTES=262144
 - `CELERY_EXECUTION_DEADLINE_GRACE_SECONDS <= 300`
 - `CELERY_QUEUE_START_TIMEOUT_SECONDS > CELERY_RECONCILER_INTERVAL_SECONDS`
 - `CELERY_PUBLISH_CONFIRM_TIMEOUT_SECONDS > CELERY_PUBLISH_RECONCILER_INTERVAL_SECONDS`
+- `CELERY_ORPHAN_FENCE_SECONDS > 0`
 - `CELERY_RECONCILER_QUEUE` 不能为空
 
 ## API contract
@@ -136,4 +174,4 @@ CELERY_TASK_MAX_PAYLOAD_BYTES=262144
 - `POST /v1/celery-tasks/{record_id}/cancel`
 
 创建接口可能返回 `SUBMITTING`、`QUEUED` 或 `RUNNING`，取决于 Broker 回写和快速 Worker claim 的竞态结果。查询接口
-返回 queue、attempt、deadline、开始/结束时间以及脱敏错误字段。
+返回 queue、attempt、`cancel_allowed`、deadline、fence、开始/结束时间以及脱敏错误字段。

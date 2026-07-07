@@ -11,6 +11,7 @@ from internal.tasks.constants import (
 class FakeSettings:
     CELERY_RECONCILER_BATCH_SIZE = 25
     CELERY_PUBLISH_CONFIRM_TIMEOUT_SECONDS = 30
+    CELERY_ORPHAN_FENCE_SECONDS = 300
 
 
 class FakeCeleryTaskDao:
@@ -85,7 +86,10 @@ def test_execution_reconciler_only_marks_expired_execution(monkeypatch) -> None:
 
     assert result == {"execution_reconciled_count": 3}
     assert dao.reconcile_expired_execution_calls == [
-        {"batch_size": FakeSettings.CELERY_RECONCILER_BATCH_SIZE}
+        {
+            "batch_size": FakeSettings.CELERY_RECONCILER_BATCH_SIZE,
+            "orphan_fence_seconds": FakeSettings.CELERY_ORPHAN_FENCE_SECONDS,
+        }
     ]
     assert dao.fail_stale_submitting_calls == []
     assert dao.fail_expired_queued_calls == []

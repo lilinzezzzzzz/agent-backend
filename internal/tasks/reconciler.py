@@ -58,12 +58,13 @@ def fail_expired_queued() -> dict[str, int]:
     time_limit=60,
 )
 def reconcile_expired_execution() -> dict[str, int]:
-    """收敛超过 hard deadline 的 RUNNING/CANCELLING 任务。"""
+    """将超过 hard deadline 的 RUNNING/CANCELLING 任务隔离为 ORPHANED。"""
 
     async def _execute() -> dict[str, int]:
         dao = new_celery_task_dao()
         record_ids = await dao.reconcile_expired_execution(
-            batch_size=settings.CELERY_RECONCILER_BATCH_SIZE
+            batch_size=settings.CELERY_RECONCILER_BATCH_SIZE,
+            orphan_fence_seconds=settings.CELERY_ORPHAN_FENCE_SECONDS,
         )
         return {"execution_reconciled_count": len(record_ids)}
 

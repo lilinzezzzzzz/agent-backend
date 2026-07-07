@@ -176,13 +176,16 @@ uv run celery -A entrypoints.celery:celery_app worker -l info -Q default,celery_
 `ddl/postgresql/1.2.0_celery_task_state_machine.sql`。该脚本不迁移旧表；已有环境必须人工确认并删除旧的
 `celery_task_record` 后再执行。API 先登记 `SUBMITTING` 记录，再调用 `CeleryClient.submit()`；Worker 可从
 `SUBMITTING` 或 `QUEUED` claim，从而避免快速消费竞态。Beat 会分别收敛发布确认超时、排队启动超时和
-执行 deadline 超时，不会自动重新提交任务。取消接口先持久化 `CANCELLED/CANCELLING`，再 best-effort
+执行 deadline 超时；运行中任务超过 hard deadline 后先进入 `ORPHANED`，等待 fence 过期和业务核对后再进入
+`FAILED/CANCELLED`，不会自动重新提交任务。运行中任务可通过 `cancel_allowed=false` 进入不可取消阶段。取消接口先持久化
+`CANCELLED/CANCELLING`，再 best-effort
 调用非强制 Celery revoke，运行中任务通过数据库检查点协作退出。
 
 状态机相关配置：
 
 - `CELERY_QUEUE_START_TIMEOUT_SECONDS`：消息确认入队后允许等待 Worker claim 的时间，默认 300 秒。
 - `CELERY_EXECUTION_DEADLINE_GRACE_SECONDS`：task time limit 之外的状态收敛宽限，默认 30 秒。
+- `CELERY_ORPHAN_FENCE_SECONDS`：`ORPHANED` 状态外部副作用隔离窗口，默认 300 秒。
 - `CELERY_PUBLISH_CONFIRM_TIMEOUT_SECONDS`：`SUBMITTING` 发布确认超时。
 - `CELERY_PUBLISH_RECONCILER_INTERVAL_SECONDS`：发布确认 Reconciler 周期。
 - `CELERY_RECONCILER_INTERVAL_SECONDS` / `CELERY_RECONCILER_BATCH_SIZE`：deadline Reconciler 周期与批量。

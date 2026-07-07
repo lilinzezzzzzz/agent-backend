@@ -72,10 +72,7 @@ _RECONCILE_EXPIRED_EXECUTION_SQL = text(
         LIMIT :batch_size
     )
     UPDATE celery_task_record AS r
-    SET status = CASE
-            WHEN r.status = 'CANCELLING' THEN 'CANCELLED'
-            ELSE 'FAILED'
-        END,
+    SET status = 'ORPHANED',
         error_code = CASE
             WHEN r.status = 'CANCELLING' THEN 'CANCEL_DEADLINE_EXCEEDED'
             ELSE 'WORKER_LOST_OR_TIMEOUT'
@@ -84,7 +81,7 @@ _RECONCILE_EXPIRED_EXECUTION_SQL = text(
             WHEN r.status = 'CANCELLING' THEN 'task cancellation exceeded the execution deadline'
             ELSE 'running task exceeded the execution deadline'
         END,
-        finished_at = :now,
+        fence_expires_at = :fence_expires_at,
         updated_at = :now
     FROM candidates AS c
     WHERE r.id = c.id
@@ -261,6 +258,7 @@ class CeleryTaskDao:
                 )
                 .values(
                     status=CeleryTaskStatus.RUNNING.value,
+                    cancel_allowed=True,
                     execution_token=execution_token,
                     attempt_count=CeleryTaskRecord.attempt_count + 1,
                     started_at=func.coalesce(CeleryTaskRecord.started_at, now),
@@ -348,9 +346,16 @@ class CeleryTaskDao:
                 return None
 
             status = CeleryTaskStatus(record.status)
-            if status in {CeleryTaskStatus.CANCELLING, CeleryTaskStatus.CANCELLED}:
+            if status in {
+                CeleryTaskStatus.CANCELLING,
+                CeleryTaskStatus.CANCELLED,
+                CeleryTaskStatus.ORPHANED,
+            }:
                 return record
             if status.is_terminal:
+                return record
+
+            if status is CeleryTaskStatus.RUNNING and not record.cancel_allowed:
                 return record
 
             now = await CeleryTaskRecord.get_database_now(session)
@@ -361,6 +366,26 @@ class CeleryTaskDao:
                 record.status = CeleryTaskStatus.CANCELLING.value
             record.updated_at = now
             return record
+
+    async def disallow_cancellation(
+        self, *, record_id: int, execution_token: str
+    ) -> bool:
+        """Worker 进入不可取消阶段前关闭取消门禁。"""
+        async with self._session_provider() as session, session.begin():
+            self._require_postgresql(session)
+            now = await CeleryTaskRecord.get_database_now(session)
+            stmt = (
+                update(CeleryTaskRecord)
+                .where(
+                    CeleryTaskRecord.id == record_id,
+                    CeleryTaskRecord.status == CeleryTaskStatus.RUNNING.value,
+                    CeleryTaskRecord.execution_token == execution_token,
+                    CeleryTaskRecord.cancel_allowed.is_(True),
+                )
+                .values(cancel_allowed=False, updated_at=now)
+                .returning(CeleryTaskRecord.id)
+            )
+            return (await session.execute(stmt)).scalar_one_or_none() is not None
 
     async def fail_stale_submitting(
         self, *, batch_size: int, stale_seconds: int
@@ -390,16 +415,59 @@ class CeleryTaskDao:
             )
             return list(result.scalars().all())
 
-    async def reconcile_expired_execution(self, *, batch_size: int) -> list[int]:
-        """批量收敛超过 hard deadline 的 RUNNING/CANCELLING 任务。"""
+    async def reconcile_expired_execution(
+        self, *, batch_size: int, orphan_fence_seconds: int
+    ) -> list[int]:
+        """批量将超过 hard deadline 的运行中任务隔离为 ORPHANED。"""
         async with self._session_provider() as session, session.begin():
             self._require_postgresql(session)
             now = await CeleryTaskRecord.get_database_now(session)
             result = await session.execute(
                 _RECONCILE_EXPIRED_EXECUTION_SQL,
-                {"batch_size": batch_size, "now": now},
+                {
+                    "batch_size": batch_size,
+                    "fence_expires_at": now + timedelta(seconds=orphan_fence_seconds),
+                    "now": now,
+                },
             )
             return list(result.scalars().all())
+
+    async def resolve_orphaned(
+        self,
+        *,
+        record_id: int,
+        scope: str,
+        status: CeleryTaskStatus,
+        error_code: CeleryTaskErrorCode | None = None,
+        error_summary: str | None = None,
+    ) -> bool:
+        """核对完成后将 fence 到期的 ORPHANED 任务写入最终状态。"""
+        if status not in {CeleryTaskStatus.FAILED, CeleryTaskStatus.CANCELLED}:
+            raise ValueError(f"unsupported orphan resolution status: {status}")
+        async with self._session_provider() as session, session.begin():
+            self._require_postgresql(session)
+            now = await CeleryTaskRecord.get_database_now(session)
+            values = {
+                "status": status.value,
+                "finished_at": now,
+                "updated_at": now,
+            }
+            if error_code is not None:
+                values["error_code"] = error_code.value
+            if error_summary is not None:
+                values["error_summary"] = error_summary[:512]
+            stmt = (
+                update(CeleryTaskRecord)
+                .where(
+                    CeleryTaskRecord.id == record_id,
+                    CeleryTaskRecord.scope == scope,
+                    CeleryTaskRecord.status == CeleryTaskStatus.ORPHANED.value,
+                    CeleryTaskRecord.fence_expires_at <= now,
+                )
+                .values(**values)
+                .returning(CeleryTaskRecord.id)
+            )
+            return (await session.execute(stmt)).scalar_one_or_none() is not None
 
     @staticmethod
     async def _get_by_id_and_scope_in_session(

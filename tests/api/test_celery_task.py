@@ -32,10 +32,12 @@ class FakeCeleryTaskService:
             task_name="internal.tasks.celery_idempotency_demo.sum_numbers",
             queue="celery_demo_queue",
             status=CeleryTaskStatus.SUCCEEDED,
+            cancel_allowed=False,
             trace_id="trace-123",
             attempt_count=1,
             queued_deadline_at=None,
             hard_deadline_at=None,
+            fence_expires_at=None,
             started_at=now,
             finished_at=now,
             error_code=None,
@@ -78,6 +80,7 @@ async def test_get_celery_task_uses_authenticated_scope() -> None:
     assert response.data["record_id"] == 123
     assert response.data["status"] == "SUCCEEDED"
     assert response.data["queue"] == "celery_demo_queue"
+    assert response.data["cancel_allowed"] is False
     assert response.data["attempt_count"] == 1
 
 

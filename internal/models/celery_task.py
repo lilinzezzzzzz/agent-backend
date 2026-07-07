@@ -2,6 +2,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     DateTime,
     Index,
@@ -27,6 +28,9 @@ class CeleryTaskRecord(ModelMixin):
     idempotency_key_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
+    cancel_allowed: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=text("true")
+    )
     execution_token: Mapped[str | None] = mapped_column(String(64), nullable=True)
     attempt_count: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default=text("0")
@@ -35,6 +39,9 @@ class CeleryTaskRecord(ModelMixin):
         DateTime(timezone=False), nullable=True
     )
     hard_deadline_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=False), nullable=True
+    )
+    fence_expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=False), nullable=True
     )
     started_at: Mapped[datetime | None] = mapped_column(
@@ -56,7 +63,7 @@ class CeleryTaskRecord(ModelMixin):
         ),
         CheckConstraint(
             "status IN ('SUBMITTING', 'QUEUED', 'RUNNING', 'CANCELLING', "
-            "'SUCCEEDED', 'FAILED', 'CANCELLED')",
+            "'ORPHANED', 'SUCCEEDED', 'FAILED', 'CANCELLED')",
             name="ck_celery_task_record_status",
         ),
         CheckConstraint(
@@ -93,6 +100,12 @@ class CeleryTaskRecord(ModelMixin):
             "hard_deadline_at",
             "id",
             postgresql_where=text("status IN ('RUNNING', 'CANCELLING')"),
+        ),
+        Index(
+            "idx_celery_task_record_orphan_fence",
+            "fence_expires_at",
+            "id",
+            postgresql_where=text("status = 'ORPHANED'"),
         ),
     )
 

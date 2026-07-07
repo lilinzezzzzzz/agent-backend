@@ -133,6 +133,7 @@ def test_celery_state_machine_removes_legacy_timing_settings() -> None:
 
     assert "CELERY_EXECUTION_DEADLINE_GRACE_SECONDS" in fields
     assert "CELERY_QUEUE_START_TIMEOUT_SECONDS" in fields
+    assert "CELERY_ORPHAN_FENCE_SECONDS" in fields
     assert "CELERY_EXECUTION_LEASE_GRACE_SECONDS" not in fields
     assert "CELERY_TASK_DELIVERY_GRACE_SECONDS" not in fields
     assert "CELERY_PUBLISHED_ORPHAN_SECONDS" not in fields

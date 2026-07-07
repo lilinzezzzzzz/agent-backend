@@ -12,6 +12,7 @@ class CeleryTaskStatus(StrEnum):
     QUEUED = "QUEUED"
     RUNNING = "RUNNING"
     CANCELLING = "CANCELLING"
+    ORPHANED = "ORPHANED"
     SUCCEEDED = "SUCCEEDED"
     FAILED = "FAILED"
     CANCELLED = "CANCELLED"
@@ -61,10 +62,12 @@ class CeleryTaskDetailSchema(BaseModel):
     task_name: str
     queue: str
     status: CeleryTaskStatus
+    cancel_allowed: bool
     trace_id: str
     attempt_count: int
     queued_deadline_at: datetime | None = None
     hard_deadline_at: datetime | None = None
+    fence_expires_at: datetime | None = None
     started_at: datetime | None = None
     finished_at: datetime | None = None
     error_code: CeleryTaskErrorCode | None = None
@@ -110,10 +113,12 @@ class CeleryTaskDetailDTO:
     task_name: str
     queue: str
     status: CeleryTaskStatus
+    cancel_allowed: bool
     trace_id: str
     attempt_count: int
     queued_deadline_at: datetime | None
     hard_deadline_at: datetime | None
+    fence_expires_at: datetime | None
     started_at: datetime | None
     finished_at: datetime | None
     error_code: CeleryTaskErrorCode | None
@@ -132,10 +137,12 @@ class CeleryTaskDetailDTO:
             task_name=self.task_name,
             queue=self.queue,
             status=self.status,
+            cancel_allowed=self.cancel_allowed,
             trace_id=self.trace_id,
             attempt_count=self.attempt_count,
             queued_deadline_at=self.queued_deadline_at,
             hard_deadline_at=self.hard_deadline_at,
+            fence_expires_at=self.fence_expires_at,
             started_at=self.started_at,
             finished_at=self.finished_at,
             error_code=self.error_code,

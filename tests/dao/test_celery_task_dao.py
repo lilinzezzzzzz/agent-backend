@@ -27,6 +27,7 @@ def _record(status: CeleryTaskStatus) -> CeleryTaskRecord:
         idempotency_key_hash="a" * 64,
         payload_hash="b" * 64,
         status=status.value,
+        cancel_allowed=True,
         attempt_count=0,
         created_at=now,
         updated_at=now,
@@ -86,6 +87,7 @@ def test_reconciliation_is_deadline_predicate_not_persisted_status() -> None:
         "QUEUED",
         "RUNNING",
         "CANCELLING",
+        "ORPHANED",
         "SUCCEEDED",
         "FAILED",
         "CANCELLED",
@@ -143,6 +145,7 @@ async def test_request_cancellation_transitions_with_one_database_time(
     [
         CeleryTaskStatus.CANCELLING,
         CeleryTaskStatus.CANCELLED,
+        CeleryTaskStatus.ORPHANED,
         CeleryTaskStatus.SUCCEEDED,
         CeleryTaskStatus.FAILED,
     ],
@@ -167,6 +170,29 @@ async def test_request_cancellation_does_not_retime_idempotent_or_terminal_state
 
     assert actual is record
     assert record.status == status.value
+
+
+@pytest.mark.asyncio
+async def test_request_cancellation_rejects_running_when_cancel_disallowed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def unexpected_database_now(_session: AsyncSession) -> datetime:
+        raise AssertionError("disallowed cancellation must not read database time")
+
+    monkeypatch.setattr(
+        CeleryTaskRecord,
+        "get_database_now",
+        unexpected_database_now,
+    )
+    record = _record(CeleryTaskStatus.RUNNING)
+    record.cancel_allowed = False
+    session = _Session(record=record)
+    dao = CeleryTaskDao(session_provider=_provider(session))  # type: ignore[arg-type]
+
+    actual = await dao.request_cancellation(record_id=123, scope="user:1")
+
+    assert actual is record
+    assert record.status == CeleryTaskStatus.RUNNING.value
 
 
 @pytest.mark.asyncio
@@ -199,6 +225,35 @@ async def test_reconciler_reuses_database_now_for_cutoff_and_batch(
     )
 
 
+@pytest.mark.asyncio
+async def test_execution_reconciler_sets_orphan_fence_from_database_time(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = datetime(2026, 7, 7, 9, 0, 0)
+
+    async def database_now(_session: AsyncSession) -> datetime:
+        return now
+
+    monkeypatch.setattr(CeleryTaskRecord, "get_database_now", database_now)
+    session = _Session(ids=[1])
+    dao = CeleryTaskDao(session_provider=_provider(session))  # type: ignore[arg-type]
+
+    actual = await dao.reconcile_expired_execution(
+        batch_size=25,
+        orphan_fence_seconds=300,
+    )
+
+    assert actual == [1]
+    assert session.execute_calls[0] == (
+        _RECONCILE_EXPIRED_EXECUTION_SQL,
+        {
+            "batch_size": 25,
+            "fence_expires_at": now + timedelta(seconds=300),
+            "now": now,
+        },
+    )
+
+
 def test_reconciler_sql_uses_skip_locked_deadline_cas() -> None:
     submitting_sql = _FAIL_STALE_SUBMITTING_SQL.text
     queued_sql = _FAIL_EXPIRED_QUEUED_SQL.text
@@ -215,6 +270,8 @@ def test_reconciler_sql_uses_skip_locked_deadline_cas() -> None:
     assert "FOR UPDATE SKIP LOCKED" in execution_sql
     assert "r.status IN ('RUNNING', 'CANCELLING')" in execution_sql
     assert "r.hard_deadline_at <= :now" in execution_sql
+    assert "SET status = 'ORPHANED'" in execution_sql
+    assert "fence_expires_at = :fence_expires_at" in execution_sql
 
 
 def test_fresh_postgresql_ddl_matches_state_machine_contract() -> None:
@@ -228,6 +285,9 @@ def test_fresh_postgresql_ddl_matches_state_machine_contract() -> None:
     assert "WHERE status = 'SUBMITTING'" in ddl
     assert "WHERE status = 'QUEUED'" in ddl
     assert "WHERE status IN ('RUNNING', 'CANCELLING')" in ddl
+    assert "WHERE status = 'ORPHANED'" in ddl
+    assert "fence_expires_at" in ddl
+    assert "cancel_allowed          BOOLEAN NOT NULL DEFAULT TRUE" in ddl
     assert "NEEDS_RECONCILIATION" not in ddl
     assert "DROP TABLE" not in ddl.upper()
     for removed_column in (
@@ -235,7 +295,6 @@ def test_fresh_postgresql_ddl_matches_state_machine_contract() -> None:
         "execution_timeout_seconds",
         "lease_owner",
         "lease_expires_at",
-        "fence_expires_at",
         "error_type",
         "error_message",
     ):

@@ -17,6 +17,16 @@ def _is_valid_trace_id(trace_id: str) -> bool:
     return bool(trace_id.strip()) and trace_id not in {"unknown", "-"}
 
 
+def _validate_task_id(task_id: str | None) -> str | None:
+    if task_id is None:
+        return None
+    if not isinstance(task_id, str):
+        raise TypeError("task_id must be a string")
+    if not task_id:
+        raise ValueError("task_id cannot be empty")
+    return task_id
+
+
 class CeleryClient:
     """
     Celery 工具类：封装任务提交、状态查询及动态定时任务管理。
@@ -125,12 +135,9 @@ class CeleryClient:
             exec_options["countdown"] = countdown
         if eta is not None:
             exec_options["eta"] = eta
-        if task_id is not None:
-            if not isinstance(task_id, str):
-                raise TypeError("task_id must be a string")
-            if not task_id:
-                raise ValueError("task_id cannot be empty")
-            exec_options["task_id"] = task_id
+        validated_task_id = _validate_task_id(task_id)
+        if validated_task_id is not None:
+            exec_options["task_id"] = validated_task_id
 
         return self.app.send_task(
             name=task_name, args=args, kwargs=kwargs, **exec_options

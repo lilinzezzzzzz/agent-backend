@@ -141,6 +141,25 @@ def test_submit_rejects_empty_trace_id(celery_client: CeleryClient) -> None:
         )
 
 
+def test_submit_rejects_non_string_task_id(celery_client: CeleryClient) -> None:
+    submit = cast(Any, celery_client.submit)
+    with pytest.raises(TypeError, match="task_id must be a string"):
+        submit(
+            task_name="internal.tasks.celery_tasks.number_sum",
+            trace_id="trace-1",
+            task_id=123,
+        )
+
+
+def test_submit_rejects_empty_task_id(celery_client: CeleryClient) -> None:
+    with pytest.raises(ValueError, match="task_id cannot be empty"):
+        celery_client.submit(
+            task_name="internal.tasks.celery_tasks.number_sum",
+            trace_id="trace-1",
+            task_id="",
+        )
+
+
 @pytest.mark.parametrize("trace_id", ["   ", "unknown", "-"])
 def test_submit_rejects_invalid_trace_id(
     celery_client: CeleryClient, trace_id: str

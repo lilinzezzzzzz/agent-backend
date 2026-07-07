@@ -6,19 +6,28 @@ from internal.tasks import celery_idempotency_demo
 
 
 class FakeExecutionService:
-    def __init__(self, *, claimed: bool) -> None:
+    def __init__(
+        self, *, claimed: bool, cancellation_checks: list[bool] | None = None
+    ) -> None:
         self.claimed = claimed
+        self.cancellation_checks = cancellation_checks or [False, False]
         self.claim_calls: list[dict] = []
         self.succeed_calls: list[dict] = []
+        self.cancellation_calls: list[dict] = []
 
     async def claim(self, **kwargs) -> bool:
         self.claim_calls.append(kwargs)
         return self.claimed
 
-    async def succeed(self, **kwargs) -> None:
-        self.succeed_calls.append(kwargs)
+    async def acknowledge_cancellation(self, **kwargs) -> bool:
+        self.cancellation_calls.append(kwargs)
+        return self.cancellation_checks.pop(0)
 
-    async def fail(self, **_kwargs) -> None:
+    async def succeed(self, **kwargs) -> bool:
+        self.succeed_calls.append(kwargs)
+        return True
+
+    async def fail(self, **_kwargs) -> bool:
         raise AssertionError("加法 demo 不应进入失败分支")
 
 
@@ -73,7 +82,9 @@ def test_sum_numbers_claims_before_execution(monkeypatch: pytest.MonkeyPatch) ->
     assert result == {"x": 2, "y": 3, "result": 5}
     assert service.claim_calls[0]["record_id"] == 123
     assert service.claim_calls[0]["scope"] == "user:1"
+    assert service.claim_calls[0]["execution_token"]
     assert service.succeed_calls[0]["record_id"] == 123
+    assert len(service.cancellation_calls) == 2
 
 
 def test_sum_numbers_ignores_duplicate_delivery(
@@ -95,4 +106,28 @@ def test_sum_numbers_ignores_duplicate_delivery(
     with pytest.raises(Ignore):
         celery_idempotency_demo.sum_numbers.run(123, "user:1", 2, 3)
 
+    assert service.succeed_calls == []
+    assert service.cancellation_calls == []
+
+
+def test_sum_numbers_cooperatively_stops_when_cancelling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = FakeExecutionService(claimed=True, cancellation_checks=[True])
+    monkeypatch.setattr(
+        celery_idempotency_demo,
+        "new_celery_task_service",
+        lambda: service,
+    )
+    monkeypatch.setattr(
+        celery_idempotency_demo,
+        "_resolve_trace_id",
+        lambda _task: "caller-trace-id",
+    )
+    monkeypatch.setattr(celery_idempotency_demo, "run_in_async", _run_async)
+
+    with pytest.raises(Ignore):
+        celery_idempotency_demo.sum_numbers.run(123, "user:1", 2, 3)
+
+    assert len(service.cancellation_calls) == 1
     assert service.succeed_calls == []

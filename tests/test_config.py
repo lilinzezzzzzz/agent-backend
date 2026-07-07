@@ -103,6 +103,42 @@ def test_celery_publish_confirmation_timeout_exceeds_reconciler_interval(
         _new_settings(env_path, secrets_path)
 
 
+def test_celery_queue_start_timeout_exceeds_reconciler_interval(
+    tmp_path: Path,
+) -> None:
+    env_path = tmp_path / ".env.test"
+    secrets_path = tmp_path / ".secrets"
+    env_values = _base_env_values()
+    env_values.update(
+        {
+            "CELERY_QUEUE_START_TIMEOUT_SECONDS": "60",
+            "CELERY_RECONCILER_INTERVAL_SECONDS": "60",
+        }
+    )
+    _write_env_file(env_path, env_values)
+    _write_env_file(secrets_path, _secret_values())
+
+    with pytest.raises(
+        ValidationError,
+        match=(
+            "CELERY_QUEUE_START_TIMEOUT_SECONDS must exceed "
+            "CELERY_RECONCILER_INTERVAL_SECONDS"
+        ),
+    ):
+        _new_settings(env_path, secrets_path)
+
+
+def test_celery_state_machine_removes_legacy_timing_settings() -> None:
+    fields = Settings.model_fields
+
+    assert "CELERY_EXECUTION_DEADLINE_GRACE_SECONDS" in fields
+    assert "CELERY_QUEUE_START_TIMEOUT_SECONDS" in fields
+    assert "CELERY_EXECUTION_LEASE_GRACE_SECONDS" not in fields
+    assert "CELERY_TASK_DELIVERY_GRACE_SECONDS" not in fields
+    assert "CELERY_PUBLISHED_ORPHAN_SECONDS" not in fields
+    assert "CELERY_TASK_IDEMPOTENCY_DAYS" not in fields
+
+
 def test_sensitive_secret_config_keys_only_match_sensitive_names() -> None:
     assert _sensitive_secret_config_keys(
         {

@@ -149,13 +149,13 @@ def run_in_async[T](
 # =========================================================
 1. 启动任务
 # 开发环境 - 基础启动
-celery -A entrypoints.celery:celery_app worker -l info -c 1 -Q default,celery_queue
+celery -A internal.infra.celery:celery_app worker -l info -c 1 -Q default,celery_queue
 
 # 开发环境 - 指定并发数（容器资源有限时建议限制）
-celery -A entrypoints.celery:celery_app worker -l info -c 2 -Q default,celery_queue
+celery -A internal.infra.celery:celery_app worker -l info -c 2 -Q default,celery_queue
 
 # 生产环境 - 推荐配置
-celery -A entrypoints.celery:celery_app worker \
+celery -A internal.infra.celery:celery_app worker \
     -l info \
     -c 4 \
     --max-tasks-per-child 1000 \
@@ -163,5 +163,5 @@ celery -A entrypoints.celery:celery_app worker \
     -Q default,celery_queue
 
 # 2. 启动 Beat (派发定时任务):
-# celery -A entrypoints.celery:celery_app beat -l info
+# celery -A internal.infra.celery:celery_app beat -l info
 """

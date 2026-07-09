@@ -20,7 +20,7 @@ README 只记录当前仓库可直接核对的能力；更细的设计约束和�
 
 ## 当前能力
 
-- 进程入口：`entrypoints/main.py` 导出 FastAPI `app`，`entrypoints/celery.py` 导出 Celery `celery_app`，`internal/app.py` 负责路由、中间件和 lifespan。
+- 进程入口：`entrypoints/main.py` 导出 FastAPI `app`，`internal.infra.celery` 导出 Celery `celery_app`，`internal/app.py` 负责路由、中间件和 lifespan。
 - 配置加载：从 `configs/.secrets` 读取 `APP_ENV`，加载 `configs/.env.{APP_ENV}` 后再由 `.secrets` 覆盖。
 - 数据库：异步 SQLAlchemy 连接池，支持主库和可选只读副本；配置层支持 PostgreSQL、MySQL、Oracle DSN。
 - Redis：连接池、业务缓存封装、认证 token metadata、Agent action confirmation / idempotency 缓存。
@@ -169,7 +169,7 @@ uv run uvicorn entrypoints.main:app --host 0.0.0.0 --port 8000
 Worker：
 
 ```bash
-uv run celery -A entrypoints.celery:celery_app worker -l info -Q default,celery_queue,cron_queue,celery_maintenance_queue
+uv run celery -A internal.infra.celery:celery_app worker -l info -Q default,celery_queue,cron_queue,celery_maintenance_queue
 ```
 
 使用 PostgreSQL 幂等任务前，先在全新环境执行
@@ -194,7 +194,7 @@ uv run celery -A entrypoints.celery:celery_app worker -l info -Q default,celery_
 Beat：
 
 ```bash
-uv run celery -A entrypoints.celery:celery_app beat -l info
+uv run celery -A internal.infra.celery:celery_app beat -l info
 ```
 
 也可以使用脚本启动 Worker：

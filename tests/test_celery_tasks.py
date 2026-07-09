@@ -299,7 +299,7 @@ if __name__ == "__main__":
     直接运行测试
     运行前需要：
     1. 启动 Redis: docker-compose up redis
-    2. 启动 Celery Worker: celery -A entrypoints.celery:celery_app worker -l info -c 1 -Q default,celery_queue
+    2. 启动 Celery Worker: celery -A internal.infra.celery:celery_app worker -l info -c 1 -Q default,celery_queue
     3. 运行测试: pytest tests/test_celery_tasks.py -v
     """
     sys.exit(pytest.main(["-s", "-v", "--log-cli-level=INFO", __file__]))

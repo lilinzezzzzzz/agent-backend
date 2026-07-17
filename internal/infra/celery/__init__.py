@@ -22,7 +22,7 @@ from internal.tasks.scheduler import (
     CELERY_TASK_ROUTES,
     STATIC_BEAT_SCHEDULE,
 )
-from pkg.logger import init_logger, logger
+from pkg.logger import init_logger, init_tracing, logger, shutdown_tracing
 from pkg import request_context as context
 from pkg.celery_queue import CeleryClient
 
@@ -52,6 +52,10 @@ def _worker_startup():
 
     # 2. 然后初始化 Logger (依赖配置中的日志格式等)
     init_logger(level="INFO", base_log_dir=BASE_LOG_DIR / "celery")
+    init_tracing(
+        enabled=settings.OTEL_TRACING_ENABLED,
+        service_name=settings.OTEL_SERVICE_NAME,
+    )
     logger.info(f"Celery worker initialized with APP_ENV: {settings.APP_ENV}")
     logger.info(">>> Worker Process Starting: Initializing basic resources...")
 
@@ -62,6 +66,7 @@ async def _worker_shutdown():
     注意：数据库和 Redis 连接在 run_in_async 中已自动清理
     """
     logger.warning("Worker Process Stopping: Cleaning up basic resources...")
+    shutdown_tracing()
 
 
 # =========================================================

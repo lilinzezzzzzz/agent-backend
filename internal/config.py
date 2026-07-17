@@ -73,6 +73,10 @@ class Settings(BaseSettings):
     # --- 日志配置 ---
     LOG_FORMAT: LogFormat = LogFormat.TEXT  # 日志格式: TEXT 或 JSON
 
+    # --- OpenTelemetry ---
+    OTEL_TRACING_ENABLED: bool
+    OTEL_SERVICE_NAME: str
+
     # --- 密钥配置 ---
     AES_SECRET: SecretStr
     JWT_SECRET: SecretStr

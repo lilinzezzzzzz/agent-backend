@@ -16,6 +16,8 @@ def _write_env_file(path: Path, values: dict[str, str]) -> None:
 def _base_env_values() -> dict[str, str]:
     return {
         "DEBUG": "true",
+        "OTEL_TRACING_ENABLED": "false",
+        "OTEL_SERVICE_NAME": "agent-backend-test",
         "JWT_ALGORITHM": "HS256",
         "DB_TYPE": "postgresql",
         "DB_HOST": "dotenv-db",

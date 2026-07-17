@@ -13,12 +13,22 @@ import pytest_asyncio
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from loguru import logger as loguru_logger
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+from opentelemetry.trace import SpanKind, StatusCode
 
-from internal.core import errors
 import pkg.logger as logger_module
-from pkg.logger import LogFormat, init_logger
-from pkg.logger.span import configure_span_logger
+import pkg.logger.otel as otel_runtime
+from internal.core import errors
 from pkg import request_context as context
+from pkg.logger import LogFormat, init_logger
+from pkg.logger.otel import RequestContextIdGenerator, init_tracing, shutdown_tracing
+
+_PUBLIC_TRACE_ID = "019da8cd058b76ed8a4a52141c1c6b38"
+_INTERNAL_TRACE_ID = "019da8cd058b76ed8a4a52141c1c6b39"
+_TOKEN_TRACE_ID = "019da8cd058b76ed8a4a52141c1c6b3a"
+_MISSING_TOKEN_TRACE_ID = "019da8cd058b76ed8a4a52141c1c6b3b"
 
 
 class _ContextStore:
@@ -44,8 +54,8 @@ class _ContextStore:
 
     def get_trace_id(self) -> str:
         trace_id = (self._ctx_var.get() or {}).get(context.ContextKey.TRACE_ID.value)
-        if not isinstance(trace_id, str) or trace_id in {"", "-", "unknown"}:
-            raise LookupError(f"trace_id is invalid or not set, current value: {trace_id!r}")
+        if not isinstance(trace_id, str) or not trace_id:
+            raise LookupError(f"trace_id is invalid or not set: {trace_id!r}")
         return trace_id
 
 
@@ -72,19 +82,14 @@ def _build_app(*, auth_middleware: type, record_middleware: type) -> FastAPI:
     return app
 
 
-def _default_log_file(base_log_dir: Path) -> Path:
+def _read_json_records(base_log_dir: Path) -> list[dict[str, object]]:
     files = list(base_log_dir.glob("*.log"))
     assert len(files) == 1
-    return files[0]
-
-
-def _read_json_records(file_path: Path) -> list[dict[str, object]]:
-    records: list[dict[str, object]] = []
-    for line in file_path.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
-        records.append(json.loads(line))
-    return records
+    return [
+        json.loads(line)
+        for line in files[0].read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
 
 
 def _find_record(records: list[dict[str, object]], message: str) -> dict[str, object]:
@@ -94,7 +99,10 @@ def _find_record(records: list[dict[str, object]], message: str) -> dict[str, ob
     raise AssertionError(f"record not found for message={message}")
 
 
-def _find_record_prefix(records: list[dict[str, object]], prefix: str) -> dict[str, object]:
+def _find_record_prefix(
+    records: list[dict[str, object]],
+    prefix: str,
+) -> dict[str, object]:
     for record in records:
         message = record.get("message")
         if isinstance(message, str) and message.startswith(prefix):
@@ -102,15 +110,10 @@ def _find_record_prefix(records: list[dict[str, object]], prefix: str) -> dict[s
     raise AssertionError(f"record not found for prefix={prefix}")
 
 
-def _find_span_record(records: list[dict[str, object]], message: str, span_name: str) -> dict[str, object]:
-    for record in records:
-        if record.get("message") == message and record.get("span_name") == span_name:
-            return record
-    raise AssertionError(f"span record not found for message={message}, span_name={span_name}")
-
-
 @pytest.fixture
 def configured_logger(tmp_path: Path) -> Path:
+    previous_logger = logger_module._logger
+    previous_manager = logger_module._logger_manager
     base_log_dir = tmp_path / "logs"
     init_logger(
         base_log_dir=base_log_dir,
@@ -120,9 +123,8 @@ def configured_logger(tmp_path: Path) -> Path:
     )
     yield base_log_dir
     loguru_logger.remove()
-    logger_module._logger = None
-    logger_module._logger_manager = None
-    configure_span_logger(None)
+    logger_module._logger = previous_logger
+    logger_module._logger_manager = previous_manager
 
 
 @pytest.fixture
@@ -132,11 +134,31 @@ def patched_request_context(monkeypatch: pytest.MonkeyPatch) -> _ContextStore:
     monkeypatch.setattr(context, "clear", store.clear)
     monkeypatch.setattr(context, "set_val", store.set_val)
     monkeypatch.setattr(context, "get_trace_id", store.get_trace_id)
+    monkeypatch.setattr(otel_runtime, "request_context", context)
     return store
 
 
 @pytest.fixture
-def middleware_modules(monkeypatch: pytest.MonkeyPatch) -> Generator[tuple[ModuleType, ModuleType], None, None]:
+def tracing_runtime(
+    patched_request_context: _ContextStore,
+) -> InMemorySpanExporter:
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider(id_generator=RequestContextIdGenerator())
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    init_tracing(
+        enabled=True,
+        service_name="test-agent-backend",
+        tracer_provider=provider,
+    )
+    yield exporter
+    shutdown_tracing()
+    provider.shutdown()
+
+
+@pytest.fixture
+def middleware_modules(
+    monkeypatch: pytest.MonkeyPatch,
+) -> Generator[tuple[ModuleType, ModuleType], None, None]:
     fake_auth_service = types.ModuleType("internal.services.auth")
     module_names = (
         "internal.middlewares",
@@ -151,7 +173,6 @@ def middleware_modules(monkeypatch: pytest.MonkeyPatch) -> Generator[tuple[Modul
 
     fake_auth_service.new_auth_service = lambda: FakeAuthService()
     monkeypatch.setitem(sys.modules, "internal.services.auth", fake_auth_service)
-
     for module_name in module_names:
         sys.modules.pop(module_name, None)
 
@@ -167,7 +188,10 @@ def middleware_modules(monkeypatch: pytest.MonkeyPatch) -> Generator[tuple[Modul
 
 
 @pytest_asyncio.fixture
-async def middleware_client(middleware_modules: tuple[ModuleType, ModuleType]) -> AsyncGenerator[AsyncClient, None]:
+async def middleware_client(
+    middleware_modules: tuple[ModuleType, ModuleType],
+    tracing_runtime: InMemorySpanExporter,
+) -> AsyncGenerator[AsyncClient, None]:
     auth_module, recorder_module = middleware_modules
     async with AsyncClient(
         transport=ASGITransport(
@@ -187,14 +211,14 @@ async def middleware_client(middleware_modules: tuple[ModuleType, ModuleType]) -
     [
         (
             "/v1/public/ping",
-            {"X-Trace-ID": "trace-public"},
+            {"X-Trace-ID": _PUBLIC_TRACE_ID},
             "handler.public",
             "middleware.auth.whitelist",
         ),
         (
             "/v1/internal/ping",
             {
-                "X-Trace-ID": "trace-internal",
+                "X-Trace-ID": _INTERNAL_TRACE_ID,
                 "X-Signature": "sig",
                 "X-Timestamp": "1710000000",
                 "X-Nonce": "nonce",
@@ -204,17 +228,17 @@ async def middleware_client(middleware_modules: tuple[ModuleType, ModuleType]) -
         ),
         (
             "/secure",
-            {"X-Trace-ID": "trace-token", "Authorization": "Bearer token-123"},
+            {"X-Trace-ID": _TOKEN_TRACE_ID, "Authorization": "Bearer token-123"},
             "handler.secure",
             "middleware.auth.token",
         ),
     ],
 )
-async def test_middlewares_create_request_root_and_auth_child_spans(
+async def test_middlewares_create_real_request_and_auth_spans(
     configured_logger: Path,
-    patched_request_context: _ContextStore,
     middleware_modules: tuple[ModuleType, ModuleType],
     middleware_client: AsyncClient,
+    tracing_runtime: InMemorySpanExporter,
     monkeypatch: pytest.MonkeyPatch,
     path: str,
     headers: dict[str, str],
@@ -222,58 +246,84 @@ async def test_middlewares_create_request_root_and_auth_child_spans(
     auth_span_name: str,
 ) -> None:
     auth_module, _ = middleware_modules
-
     if auth_span_name == "middleware.auth.internal":
-        monkeypatch.setattr(auth_module, "signature_auth_handler", SimpleNamespace(verify=MagicMock(return_value=True)))
+        monkeypatch.setattr(
+            auth_module,
+            "signature_auth_handler",
+            SimpleNamespace(verify=MagicMock(return_value=True)),
+        )
     elif auth_span_name == "middleware.auth.token":
         fake_svc = AsyncMock()
         fake_svc.verify_token = AsyncMock(return_value={"id": 123})
         monkeypatch.setattr(auth_module, "new_auth_service", lambda: fake_svc)
 
     response = await middleware_client.get(path, headers=headers)
-
+    expected_trace_id = headers["X-Trace-ID"]
     assert response.status_code == 200
-    assert response.headers["X-Trace-ID"] == headers["X-Trace-ID"]
+    assert response.headers["X-Trace-ID"] == expected_trace_id
+
+    finished = {span.name: span for span in tracing_runtime.get_finished_spans()}
+    root = finished["middleware.request"]
+    auth = finished[auth_span_name]
+    assert root.kind is SpanKind.SERVER
+    assert root.parent is None
+    assert f"{root.context.trace_id:032x}" == expected_trace_id
+    assert auth.parent is not None
+    assert auth.parent.span_id == root.context.span_id
 
     loguru_logger.complete()
-    records = _read_json_records(_default_log_file(configured_logger))
-
-    root_start = _find_span_record(records, "span.start", "middleware.request")
-    auth_start = _find_span_record(records, "span.start", auth_span_name)
+    records = _read_json_records(configured_logger)
     handler_record = _find_record(records, handler_message)
     access_record = _find_record_prefix(records, "access log,")
     response_record = _find_record_prefix(records, "response log,")
-
-    assert root_start["parent_span_seq"] is None
-    assert access_record["span_name"] == "middleware.request"
-    assert response_record["span_name"] == "middleware.request"
-
-    assert auth_start["parent_span_seq"] == root_start["span_seq"]
-    assert handler_record["span_seq"] == root_start["span_seq"]
-    assert handler_record["parent_span_seq"] is None
-    assert handler_record["span_name"] == "middleware.request"
-    assert handler_record["span_path"] == root_start["span_path"]
+    root_span_id = f"{root.context.span_id:016x}"
+    assert handler_record["trace_id"] == expected_trace_id
+    assert handler_record["span_id"] == root_span_id
+    assert access_record["span_id"] == root_span_id
+    assert response_record["span_id"] == root_span_id
 
 
 @pytest.mark.asyncio
-async def test_missing_token_logs_root_and_auth_span_errors(
+async def test_missing_token_marks_auth_and_request_spans_as_error(
     configured_logger: Path,
-    patched_request_context: _ContextStore,
     middleware_client: AsyncClient,
+    tracing_runtime: InMemorySpanExporter,
 ) -> None:
-    response = await middleware_client.get("/secure", headers={"X-Trace-ID": "trace-missing"})
+    response = await middleware_client.get(
+        "/secure",
+        headers={"X-Trace-ID": _MISSING_TOKEN_TRACE_ID},
+    )
 
     assert response.status_code == 200
-    assert response.headers["X-Trace-ID"] == "trace-missing"
+    assert response.headers["X-Trace-ID"] == _MISSING_TOKEN_TRACE_ID
     assert response.json()["code"] == errors.Unauthorized.code
 
+    finished = {span.name: span for span in tracing_runtime.get_finished_spans()}
+    root = finished["middleware.request"]
+    auth = finished["middleware.auth.token"]
+    assert root.status.status_code is StatusCode.ERROR
+    assert auth.status.status_code is StatusCode.ERROR
+    assert [event.name for event in root.events].count("exception") == 1
+    assert [event.name for event in auth.events].count("exception") == 1
+
     loguru_logger.complete()
-    records = _read_json_records(_default_log_file(configured_logger))
-
-    root_error = _find_span_record(records, "span.error", "middleware.request")
-    auth_error = _find_span_record(records, "span.error", "middleware.auth.token")
+    records = _read_json_records(configured_logger)
     exception_record = _find_record_prefix(records, "Business exception,")
+    assert exception_record["trace_id"] == _MISSING_TOKEN_TRACE_ID
+    assert exception_record["span_id"] == f"{root.context.span_id:016x}"
 
-    assert root_error["parent_span_seq"] is None
-    assert auth_error["parent_span_seq"] == root_error["span_seq"]
-    assert exception_record["span_name"] == "middleware.request"
+
+@pytest.mark.asyncio
+async def test_invalid_x_trace_id_is_replaced_with_uuid7(
+    configured_logger: Path,
+    middleware_client: AsyncClient,
+) -> None:
+    response = await middleware_client.get(
+        "/v1/public/ping",
+        headers={"X-Trace-ID": "not-a-w3c-trace-id"},
+    )
+
+    returned_trace_id = response.headers["X-Trace-ID"]
+    assert returned_trace_id != "not-a-w3c-trace-id"
+    assert len(returned_trace_id) == 32
+    assert int(returned_trace_id, 16) != 0

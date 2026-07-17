@@ -1,7 +1,7 @@
 import time
-from typing import Any
 
 from fastapi.exceptions import RequestValidationError
+from opentelemetry.trace import SpanKind, StatusCode
 from fastapi.responses import Response
 from starlette.datastructures import MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -12,45 +12,9 @@ from pkg import request_context as context
 from pkg.toolkit.exc import get_business_exec_tb, get_unexpected_exec_tb
 from pkg.toolkit.middleware import BaseMiddlewareContext
 from pkg.api_response import error_response
-from pkg.ids import uuid6_unique_str_id
+from pkg.ids import normalize_uuid7_trace_id, uuid6_unique_str_id
 
 _REQUEST_SPAN_NAME = "middleware.request"
-
-
-class _RecorderSpanScope:
-    """为 recorder 封装可显式标记错误的 span scope。"""
-
-    __slots__ = ("_captured_exc", "_span_ctx")
-
-    def __init__(self, *, span_name: str) -> None:
-        self._captured_exc: BaseException | None = None
-        self._span_ctx = span_context(span_name)
-
-    def mark_error(self, exc: BaseException) -> None:
-        if not isinstance(exc, BaseException):
-            raise TypeError(f"exc must be a BaseException, got {type(exc).__name__}")
-        self._captured_exc = exc
-
-    async def __aenter__(self) -> "_RecorderSpanScope":
-        await self._span_ctx.__aenter__()
-        return self
-
-    async def __aexit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        tb: Any,
-    ) -> bool:
-        effective_exc = exc if exc is not None else self._captured_exc
-        effective_exc_type = (
-            exc_type if exc_type is not None else (type(effective_exc) if effective_exc is not None else None)
-        )
-        effective_tb = tb if tb is not None else (effective_exc.__traceback__ if effective_exc is not None else None)
-        return await self._span_ctx.__aexit__(effective_exc_type, effective_exc, effective_tb)
-
-
-def _recorder_span_context(span_name: str) -> _RecorderSpanScope:
-    return _RecorderSpanScope(span_name=span_name)
 
 
 class _RequestContext(BaseMiddlewareContext):
@@ -66,7 +30,14 @@ class _RequestContext(BaseMiddlewareContext):
         "_process_time",
     )
 
-    def __init__(self, scope: Scope, *, client_host: str, query_string: str, receive: Receive | None = None) -> None:
+    def __init__(
+        self,
+        scope: Scope,
+        *,
+        client_host: str,
+        query_string: str,
+        receive: Receive | None = None,
+    ) -> None:
         super().__init__(scope)
         self._client_host = client_host
         self._query_string = query_string
@@ -76,8 +47,8 @@ class _RequestContext(BaseMiddlewareContext):
         self._response_started = False
         self._process_time: float | None = None
 
-        # 优先使用请求头中的 trace_id
-        header_trace_id = self.headers.get("X-Trace-ID")
+        # 只接受无连字符 UUIDv7 hex；非法外部输入不会进入请求上下文。
+        header_trace_id = normalize_uuid7_trace_id(self.headers.get("X-Trace-ID"))
         if header_trace_id:
             self._trace_id = header_trace_id
 
@@ -148,11 +119,15 @@ class ASGIRecordMiddleware:
             exc: 捕获的异常
         """
         if isinstance(exc, AppException):
-            logger.opt(depth=1).warning(f"Business exception, exc={get_business_exec_tb(exc)}")
+            logger.opt(depth=1).warning(
+                f"Business exception, exc={get_business_exec_tb(exc)}"
+            )
         elif isinstance(exc, RequestValidationError):
             logger.opt(depth=1).warning(f"Validation Error: {exc}")
         else:
-            logger.opt(depth=1).error(f"Unexpected exception, exc={get_unexpected_exec_tb(exc)}")
+            logger.opt(depth=1).error(
+                f"Unexpected exception, exc={get_unexpected_exec_tb(exc)}"
+            )
 
     @staticmethod
     def _build_error_response(exc: Exception) -> Response:
@@ -168,7 +143,9 @@ class ASGIRecordMiddleware:
         if isinstance(exc, AppException):
             return error_response(error=exc.error, message=exc.message)
         elif isinstance(exc, RequestValidationError):
-            return error_response(error=errors.BadRequest, message=f"Validation Error: {exc}")
+            return error_response(
+                error=errors.BadRequest, message=f"Validation Error: {exc}"
+            )
         else:
             return error_response(error=errors.InternalServerError, message=str(exc))
 
@@ -185,14 +162,16 @@ class ASGIRecordMiddleware:
             receive=receive,
         )
         send_wrapper: Send = send
-        request_span: _RecorderSpanScope | None = None
 
         # 全局异常捕获,覆盖整个请求处理流程
         try:
             # 1. 初始化上下文
-            context.init(**{context.ContextKey.TRACE_ID: req_ctx.trace_id})
+            context.init(**{context.ContextKey.TRACE_ID.value: req_ctx.trace_id})
             send_wrapper = req_ctx.create_send_wrapper(send, scope)
-            async with _recorder_span_context(_REQUEST_SPAN_NAME) as request_span:
+            async with span_context(
+                _REQUEST_SPAN_NAME,
+                span_kind=SpanKind.SERVER,
+            ) as request_span:
                 # 2. 记录访问日志
                 logger.info(
                     f"access log, ip={req_ctx.client_host}, method={req_ctx.method}, "
@@ -204,10 +183,13 @@ class ASGIRecordMiddleware:
                     await self.app(scope, receive, send_wrapper)
 
                     # 4. 记录响应日志
-                    logger.info(f"response log, processing time={req_ctx.process_time:.4f}s")
+                    logger.info(
+                        f"response log, processing time={req_ctx.process_time:.4f}s"
+                    )
                 except Exception as exc:
                     # 5. 统一异常处理
-                    request_span.mark_error(exc)
+                    request_span.record_exception(exc)
+                    request_span.set_status(StatusCode.ERROR, type(exc).__name__)
                     self._log_exception(exc)
 
                     if not req_ctx.response_started:

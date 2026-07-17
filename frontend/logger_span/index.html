@@ -1,0 +1,796 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Logger Span Viewer</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0f1216;
+        --bg-elev: #171b21;
+        --bg-elev-2: #1f242c;
+        --border: #262c36;
+        --text: #e8edf5;
+        --text-dim: #9aa3b2;
+        --accent: #6ea8fe;
+        --ok: #4ec9a4;
+        --ok-soft: rgba(78, 201, 164, 0.16);
+        --err: #f16a6a;
+        --err-soft: rgba(241, 106, 106, 0.18);
+        --warn: #e6b34a;
+        --track: #21262e;
+        --shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+        font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", "Segoe UI", Roboto, sans-serif;
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); min-height: 100vh; }
+      body { font-size: 14px; line-height: 1.5; }
+      a { color: var(--accent); text-decoration: none; }
+      code, pre, .mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
+
+      header.app-header {
+        padding: 20px 28px;
+        border-bottom: 1px solid var(--border);
+        background: linear-gradient(180deg, #131820 0%, var(--bg) 100%);
+      }
+      header.app-header h1 {
+        margin: 0 0 4px 0;
+        font-size: 18px;
+        letter-spacing: 0.2px;
+      }
+      header.app-header p {
+        margin: 0;
+        color: var(--text-dim);
+        font-size: 12px;
+      }
+
+      main { padding: 20px 28px 60px; max-width: 1280px; margin: 0 auto; }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        align-items: center;
+        padding: 14px;
+        background: var(--bg-elev);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        margin-bottom: 16px;
+      }
+      .controls label {
+        font-size: 12px;
+        color: var(--text-dim);
+        margin-right: 4px;
+      }
+      .controls input[type="text"] {
+        flex: 1 1 260px;
+        min-width: 220px;
+        padding: 8px 10px;
+        border-radius: 6px;
+        border: 1px solid var(--border);
+        background: var(--bg-elev-2);
+        color: var(--text);
+        font-family: inherit;
+        font-size: 13px;
+      }
+      .controls input[type="text"]:focus {
+        outline: none;
+        border-color: var(--accent);
+      }
+      .controls button {
+        padding: 8px 14px;
+        border-radius: 6px;
+        border: 1px solid var(--border);
+        background: var(--bg-elev-2);
+        color: var(--text);
+        cursor: pointer;
+        font-size: 13px;
+      }
+      .controls button.primary {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #0b1120;
+        font-weight: 600;
+      }
+      .controls button:hover { border-color: var(--accent); }
+      .controls .example-row {
+        width: 100%;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 8px;
+        color: var(--text-dim);
+        font-size: 12px;
+        align-items: center;
+      }
+      .controls .example-row button {
+        padding: 4px 10px;
+        font-size: 12px;
+        background: transparent;
+        color: var(--text-dim);
+      }
+      .controls .example-row button:hover { color: var(--text); }
+
+      .summary {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        gap: 10px;
+        padding: 14px;
+        background: var(--bg-elev);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        margin-bottom: 16px;
+      }
+      .summary .cell {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        padding: 6px 10px;
+        border-left: 3px solid var(--border);
+      }
+      .summary .cell.status-ok { border-left-color: var(--ok); }
+      .summary .cell.status-error { border-left-color: var(--err); }
+      .summary .cell .k {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        color: var(--text-dim);
+      }
+      .summary .cell .v { font-size: 14px; }
+      .summary .cell .v.mono { font-size: 13px; }
+
+      .status-badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+      }
+      .status-badge.ok { background: var(--ok-soft); color: var(--ok); }
+      .status-badge.error { background: var(--err-soft); color: var(--err); }
+
+      section.card {
+        background: var(--bg-elev);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        margin-bottom: 16px;
+        overflow: hidden;
+      }
+      section.card > header {
+        padding: 10px 14px;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 13px;
+        color: var(--text-dim);
+      }
+      section.card > header strong { color: var(--text); }
+      section.card > .body { padding: 12px 14px; }
+
+      /* waterfall */
+      .waterfall {
+        display: grid;
+        grid-template-columns: minmax(220px, 40%) 1fr 90px;
+        column-gap: 10px;
+        row-gap: 6px;
+        align-items: center;
+      }
+      .wf-head {
+        font-size: 11px;
+        color: var(--text-dim);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        padding: 4px 6px;
+        border-bottom: 1px dashed var(--border);
+      }
+      .wf-name {
+        padding: 4px 6px 4px 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 12px;
+      }
+      .wf-name .depth-bar {
+        display: inline-block;
+        width: 10px;
+        height: 10px;
+        margin-right: 6px;
+        border-left: 1px solid var(--border);
+      }
+      .wf-track {
+        position: relative;
+        height: 18px;
+        background: var(--track);
+        border-radius: 4px;
+        overflow: hidden;
+      }
+      .wf-bar {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        min-width: 3px;
+        background: var(--ok);
+        border-radius: 3px;
+      }
+      .wf-bar.error { background: var(--err); }
+      .wf-bar .bar-label {
+        position: absolute;
+        left: 4px;
+        right: 4px;
+        top: 0;
+        bottom: 0;
+        display: flex;
+        align-items: center;
+        justify-content: flex-start;
+        color: #0b1120;
+        font-size: 11px;
+        font-weight: 600;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .wf-elapsed {
+        text-align: right;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 12px;
+        color: var(--text-dim);
+      }
+      .wf-elapsed.error { color: var(--err); }
+
+      /* tree */
+      .tree {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 12px;
+        line-height: 1.6;
+      }
+      .tree ul { list-style: none; padding-left: 18px; margin: 0; border-left: 1px dashed var(--border); }
+      .tree > ul { padding-left: 0; border-left: none; }
+      .tree li { padding: 2px 0; }
+      .tree .node {
+        display: inline-flex;
+        gap: 8px;
+        padding: 2px 6px;
+        border-radius: 4px;
+      }
+      .tree .node.status-error { background: var(--err-soft); }
+      .tree .node .seq { color: var(--text-dim); }
+      .tree .node .name { color: var(--text); }
+      .tree .node .status-badge { align-self: center; }
+
+      /* raw json */
+      pre.json {
+        margin: 0;
+        padding: 12px;
+        background: #0b0f14;
+        border-radius: 8px;
+        border: 1px solid var(--border);
+        overflow: auto;
+        max-height: 320px;
+        font-size: 12px;
+        color: #cbd4e1;
+      }
+
+      .empty, .error-panel {
+        padding: 24px;
+        text-align: center;
+        color: var(--text-dim);
+      }
+      .error-panel { color: var(--err); }
+
+      /* tooltip */
+      [data-tip] { cursor: help; }
+      .wf-name [data-tip], .tree [data-tip] { cursor: help; }
+      .app-tooltip {
+        position: fixed;
+        z-index: 10000;
+        max-width: 340px;
+        padding: 8px 12px;
+        border-radius: 6px;
+        background: #0b0f14;
+        color: var(--text);
+        border: 1px solid var(--border);
+        font-size: 12px;
+        line-height: 1.5;
+        white-space: pre-wrap;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+        pointer-events: none;
+        opacity: 0;
+        transform: translateY(2px);
+        transition: opacity 0.12s ease, transform 0.12s ease;
+      }
+      .app-tooltip.visible {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    </style>
+  </head>
+  <body>
+    <header class="app-header">
+      <h1>Logger Span Viewer</h1>
+      <p>输入 <code data-tip="trace_id 是整条链路的唯一 ID。同一次请求内所有 span 共享同一个 trace_id，用于日志检索和跨服务串联。">trace_id</code> 加载 <span data-tip="OpenTelemetry（OTEL）是业界主流的分布式追踪标准：一次请求拆成一棵 span 树，每个 span 记录一个子级操作的名称、时间区间、状态和属性。">OTEL</span> 风格链路可视化；未命中缓存时后端会基于 trace_id 合成<span data-tip="Mock 数据按 sha256(trace_id) 的首字节分为 7 个桶（6 个失败步骤 + 1 个成功路径），同一个 trace_id 多次请求结果形状完全一致，仅时间戳随调用时间小幅变动。">确定性 mock 数据</span>。</p>
+    </header>
+
+    <main>
+      <section class="controls">
+        <label for="trace-id-input" data-tip="输入 32 位非全零十六进制 Trace ID。先查询进程内 LRU，未命中则合成确定性 mock 数据。">trace_id</label>
+        <input id="trace-id-input" type="text" placeholder="例如：019b52a34f6d7e91a6418d6219c68537" autocomplete="off" />
+        <button class="primary" id="load-btn" type="button" data-tip="发送 GET /v1/public/logger-span/traces/{trace_id} 并渲染。回车也等价。">Load</button>
+        <button id="copy-url-btn" type="button" title="拷贝当前 trace_id 的直链" data-tip="拷贝带 #trace_id=... hash 的页面链接，分享后对方打开就会自动加载同一 trace。">Copy Link</button>
+        <div class="example-row">
+          <span data-tip="注意：按钮标签名只是方便记忆，实际返回结果取决于 trace_id 的 hash 落桶，可能与标签不一致（这是已知行为，持久化完成后会直接用真实 trace）。">快速示例：</span>
+          <button data-example="00000000000000000000000000000001">example-1</button>
+          <button data-example="00000000000000000000000000000002">example-2</button>
+          <button data-example="00000000000000000000000000000003">example-3</button>
+          <button data-example="00000000000000000000000000000004">example-4</button>
+          <button data-example="00000000000000000000000000000005">example-5</button>
+          <button data-example="00000000000000000000000000000006">example-6</button>
+          <button data-example="00000000000000000000000000000007">example-7</button>
+        </div>
+      </section>
+
+      <div id="viewport"></div>
+    </main>
+
+    <script>
+      (function () {
+        "use strict";
+
+        const TRACES_ENDPOINT = "/v1/public/logger-span/traces/";
+        const viewport = document.getElementById("viewport");
+        const input = document.getElementById("trace-id-input");
+        const loadBtn = document.getElementById("load-btn");
+        const copyBtn = document.getElementById("copy-url-btn");
+
+        // 概念词汇表，给 summary / card 标题 / 瀑布列头提供解释。
+        const CONCEPT_TIPS = {
+          status: "整条链路的成败：只要任意一个 span 抛出异常，异常会沿祖先链传到 root，root 也会被标 error。",
+          trace_id: "整条链路的唯一 ID，同一次请求的所有 span 共享。可用于日志检索和跨服务串联。",
+          scenario: "调用场景标识；由客户端传入 POST /simulate，仅用于日志与响应回显，不影响实际执行流程。mock 路径的值形如 mock-XX（XX 为 trace_id hash 第二字节）。",
+          root_span: "当前演示采集范围的根节点，由 root_span_id 精确标识。",
+          elapsed_ms: "root span 的总耗时（毫秒），包含所有子 span 的时间。",
+          span_count: "本次链路采集到的 span 总数；失败时仅包含失败步骤的祖先 + 失败步骤自身 + 它的所有后代。",
+          failed_step: "触发模拟异常的步骤名。异常已在 Service 最外层被捕获，不会返回 HTTP 错误状态。",
+          waterfall: "瀑布图：每行一个 span，以最早的 span 起点为 0，按时间轴线性展示每个 span 的开始 / 结束区间，直观看先后顺序、子 span 并发情况和耗时分布。",
+          span_tree: "根据 span_id / parent_span_id 还原出的真实 OTel 父子树；timeline 看时序，tree 看层次。",
+          raw_json: "GET /v1/public/logger-span/traces/{trace_id} 返回的原始响应体，可直接参照 SpanSimulateRespSchema 对拍。",
+          wf_span: "当前 span 的名称，按嵌套层级缩进。将鼠标悬停到名称上可看到具体含义。",
+          wf_timeline: "时间轴：已 span 最早开始时刻为 0。横向位置 = 相对 root 开始的偏移；长度 = 本 span 耗时；颜色 = 状态（绿=ok / 红=error）。",
+          wf_elapsed: "单个 span 自身耗时，包含其子 span。",
+          status_ok: "所有 span 正常结束，链路成功。",
+          status_error: "至少一个 span 抛出了异常，已沿祖先链传到 root。",
+        };
+
+        // Span 名称汇表（按 span_name 精确匹配）。
+        const SPAN_TIPS = {
+          "otel.demo.simulate.root": "演示范围根 span：包含本次模拟的所有下游步骤；它在完整 HTTP Trace 中仍可能有 SERVER 父 Span。",
+          "otel.demo.validate": "参数校验：模拟对请求参数、权限、频控等做入口合法性检查。不命中就直接失败，水下游步骤不会跑。",
+          "otel.demo.db.read": "读取业务数据：模拟从 DB 拉取用户 / 订单等上下文，往下供意图识别、RAG、LLM 等下游步骤使用。",
+          "otel.demo.db.query.users": "查询 users 表：一条真实业务中典型的主键 / 索引 SELECT。",
+          "otel.demo.db.query.orders": "查询 orders 表：一条典型的列表 / 分页 SELECT，耗时一般比 users 查询高。",
+          "otel.demo.llm.intent": "LLM 意图识别：让 LLM 判断用户意图 / 分类，决定后续是否需要 RAG 召回、应当调用哪个工具链。",
+          "otel.demo.llm.intent.prompt.build": "拼装意图识别的 prompt：system 提示 + few-shot + 当前 user message。",
+          "otel.demo.llm.intent.request": "向 LLM 发起 chat completion 拿回意图分类结果；耗时受网络 + 服务端排队影响。",
+          "otel.demo.rag.recall": "RAG 召回：把用户 query 转向量、从向量库检索相关知识片段、再用 rerank 模型精排，为业务 LLM 提供上下文。",
+          "otel.demo.rag.recall.embed": "对 query 做 embedding：调用向量模型把文本转为固定长度向量，给向量库作为查询入口。",
+          "otel.demo.rag.recall.vector.search": "向量检索：在向量库里按余弦相似度（或 dot product）取 top-k 候选，可能叠加元数据过滤。",
+          "otel.demo.rag.recall.rerank": "重排序：用 rerank 模型（如 bge-reranker）对 top-k 候选做精排，提升高相关片段的排名。",
+          "otel.demo.llm.business": "LLM 业务处理：把检索到的知识片段作为 context 与用户 query 一起送入 LLM，生成最终业务回复。",
+          "otel.demo.llm.business.prompt.build": "拼装业务 prompt：把 RAG 命中片段 + 用户 query 拼进 system / user message。",
+          "otel.demo.llm.business.request": "向 LLM 发起最终 chat completion 获取回复；实际业务中可能是链路里最耗时的一步。",
+          "otel.demo.cache.write": "缓存写入：把最终结果写回 Redis / 内存缓存，后续相同请求可以直接命中、跳过 RAG + LLM。",
+        };
+
+        // 全局 tooltip（优先使用 position:fixed，不受父容器 overflow 影响）。
+        const tipEl = document.createElement("div");
+        tipEl.className = "app-tooltip";
+        tipEl.setAttribute("role", "tooltip");
+        document.body.appendChild(tipEl);
+
+        function positionTip(target) {
+          const rect = target.getBoundingClientRect();
+          // 先把 tooltip 推到左上角测量真实尺寸，避免它因为满到右侧自动换行。
+          tipEl.style.left = "0px";
+          tipEl.style.top = "0px";
+          const tipRect = tipEl.getBoundingClientRect();
+          const margin = 8;
+          let left = rect.left + rect.width / 2 - tipRect.width / 2;
+          let top = rect.top - tipRect.height - margin;
+          if (left < margin) left = margin;
+          if (left + tipRect.width > window.innerWidth - margin) {
+            left = window.innerWidth - margin - tipRect.width;
+          }
+          if (top < margin) top = rect.bottom + margin;
+          tipEl.style.left = left + "px";
+          tipEl.style.top = top + "px";
+        }
+
+        document.addEventListener("mouseover", (ev) => {
+          const target = ev.target && ev.target.closest ? ev.target.closest("[data-tip]") : null;
+          if (!target) return;
+          const text = target.getAttribute("data-tip");
+          if (!text) return;
+          tipEl.textContent = text;
+          tipEl.classList.add("visible");
+          positionTip(target);
+        });
+        document.addEventListener("mouseout", (ev) => {
+          const from = ev.target && ev.target.closest ? ev.target.closest("[data-tip]") : null;
+          const to = ev.relatedTarget && ev.relatedTarget.closest
+            ? ev.relatedTarget.closest("[data-tip]")
+            : null;
+          if (from && from !== to) tipEl.classList.remove("visible");
+        });
+        window.addEventListener("scroll", () => tipEl.classList.remove("visible"), { passive: true });
+        window.addEventListener("resize", () => tipEl.classList.remove("visible"));
+
+        const state = {
+          currentTraceId: null,
+          currentPayload: null,
+        };
+
+        function q(sel, root) { return (root || document).querySelector(sel); }
+
+        function el(tag, attrs, children) {
+          const node = document.createElement(tag);
+          if (attrs) {
+            for (const [k, v] of Object.entries(attrs)) {
+              if (k === "class") node.className = v;
+              else if (k === "text") node.textContent = v;
+              else if (k === "html") node.innerHTML = v;
+              else node.setAttribute(k, v);
+            }
+          }
+          if (children) {
+            for (const c of children) {
+              if (c == null) continue;
+              node.appendChild(typeof c === "string" ? document.createTextNode(c) : c);
+            }
+          }
+          return node;
+        }
+
+        function esc(s) {
+          if (s == null) return "";
+          return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+        }
+
+        function formatMs(ms) {
+          if (ms == null || isNaN(ms)) return "-";
+          if (ms >= 1000) return (ms / 1000).toFixed(3) + " s";
+          return ms.toFixed(ms >= 10 ? 1 : 3) + " ms";
+        }
+
+        function formatDate(iso) {
+          if (!iso) return "-";
+          try {
+            const d = new Date(iso);
+            const pad = (n) => String(n).padStart(2, "0");
+            return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${String(d.getMilliseconds()).padStart(3, "0")}`;
+          } catch (_) {
+            return iso;
+          }
+        }
+
+        function renderEmpty(msg) {
+          viewport.innerHTML = "";
+          viewport.appendChild(el("div", { class: "empty" }, [msg || "输入 trace_id 后点击 Load 加载数据。"]));
+        }
+
+        function renderError(msg) {
+          viewport.innerHTML = "";
+          viewport.appendChild(el("div", { class: "error-panel" }, [msg]));
+        }
+
+        function renderSummary(payload) {
+          const failed = payload.failed_step;
+          const statusClass = failed ? "status-error" : "status-ok";
+          const badge = failed
+            ? el("span", { class: "status-badge error", text: "ERROR", "data-tip": CONCEPT_TIPS.status_error })
+            : el("span", { class: "status-badge ok", text: "OK", "data-tip": CONCEPT_TIPS.status_ok });
+
+          const statusValueChildren = [badge];
+          if (failed) {
+            statusValueChildren.push(" failed at ");
+            statusValueChildren.push(
+              el("span", { class: "mono", text: failed, "data-tip": CONCEPT_TIPS.failed_step })
+            );
+          }
+
+          const wrap = el("div", { class: "summary" }, [
+            el("div", { class: `cell ${statusClass}` }, [
+              el("span", { class: "k", text: "status", "data-tip": CONCEPT_TIPS.status }),
+              el("span", { class: "v" }, statusValueChildren),
+            ]),
+            el("div", { class: "cell" }, [
+              el("span", { class: "k", text: "trace_id", "data-tip": CONCEPT_TIPS.trace_id }),
+              el("span", { class: "v mono", text: payload.trace_id }),
+            ]),
+            el("div", { class: "cell" }, [
+              el("span", { class: "k", text: "scenario", "data-tip": CONCEPT_TIPS.scenario }),
+              el("span", { class: "v mono", text: payload.scenario }),
+            ]),
+            el("div", { class: "cell" }, [
+              el("span", { class: "k", text: "root span", "data-tip": CONCEPT_TIPS.root_span }),
+              el("span", { class: "v mono", text: payload.root_span_name }),
+            ]),
+            el("div", { class: "cell" }, [
+              el("span", { class: "k", text: "elapsed_ms", "data-tip": CONCEPT_TIPS.elapsed_ms }),
+              el("span", { class: "v mono", text: formatMs(payload.elapsed_ms) }),
+            ]),
+            el("div", { class: "cell" }, [
+              el("span", { class: "k", text: "span_count", "data-tip": CONCEPT_TIPS.span_count }),
+              el("span", { class: "v mono", text: String(payload.span_count) }),
+            ]),
+          ]);
+          return wrap;
+        }
+
+        function buildDepthMap(spans) {
+          const byId = new Map();
+          for (const s of spans) byId.set(s.span_id, s);
+          const depthMap = new Map();
+          function depthOf(spanId) {
+            if (depthMap.has(spanId)) return depthMap.get(spanId);
+            const node = byId.get(spanId);
+            const parent = node && node.parent_span_id ? byId.get(node.parent_span_id) : null;
+            const d = parent ? depthOf(parent.span_id) + 1 : 0;
+            depthMap.set(spanId, d);
+            return d;
+          }
+          for (const s of spans) depthOf(s.span_id);
+          return depthMap;
+        }
+
+        function renderWaterfall(payload) {
+          const spans = (payload.spans || []).slice().sort((a, b) => new Date(a.started_at) - new Date(b.started_at));
+          if (spans.length === 0) {
+            return el("div", { class: "empty", text: "没有 span 数据。" });
+          }
+
+          const startTimes = spans.map((s) => new Date(s.started_at).getTime());
+          const endTimes = spans.map((s) => new Date(s.finished_at).getTime());
+          const t0 = Math.min.apply(null, startTimes);
+          const t1 = Math.max.apply(null, endTimes);
+          const totalMs = Math.max(t1 - t0, 1);
+          const depthMap = buildDepthMap(spans);
+
+          const grid = el("div", { class: "waterfall" });
+          grid.appendChild(el("div", { class: "wf-head", text: "SPAN", "data-tip": CONCEPT_TIPS.wf_span }));
+          grid.appendChild(el("div", { class: "wf-head", text: `TIMELINE (Δ${formatMs(totalMs)})`, "data-tip": CONCEPT_TIPS.wf_timeline }));
+          grid.appendChild(el("div", { class: "wf-head", text: "ELAPSED", "data-tip": CONCEPT_TIPS.wf_elapsed }));
+
+          for (const span of spans) {
+            const depth = depthMap.get(span.span_id) || 0;
+            const offsetMs = new Date(span.started_at).getTime() - t0;
+            const durMs = new Date(span.finished_at).getTime() - new Date(span.started_at).getTime();
+            const leftPct = (offsetMs / totalMs) * 100;
+            const widthPct = Math.max((durMs / totalMs) * 100, 0.5);
+            const isError = span.status === "error";
+            const spanTip = SPAN_TIPS[span.span_name];
+
+            const indent = el("span");
+            for (let i = 0; i < depth; i++) indent.appendChild(el("span", { class: "depth-bar" }));
+
+            const nameLabelAttrs = { text: span.span_name };
+            if (spanTip) nameLabelAttrs["data-tip"] = spanTip;
+            const nameCell = el("div", { class: "wf-name" }, [
+              indent,
+              el("span", { class: "seq", text: `${span.span_id.slice(-8)} ` }),
+              el("span", nameLabelAttrs),
+            ]);
+
+            const track = el("div", { class: "wf-track" });
+            const bar = el("div", { class: "wf-bar" + (isError ? " error" : "") });
+            bar.style.left = leftPct.toFixed(3) + "%";
+            bar.style.width = widthPct.toFixed(3) + "%";
+            bar.title = `${span.span_name}\nstart=${formatDate(span.started_at)}\nend=${formatDate(span.finished_at)}\nelapsed=${formatMs(span.elapsed_ms)}${isError ? "\nerror=" + (span.error_type || "unknown") : ""}`;
+            const barLabel = el("span", { class: "bar-label", text: formatMs(span.elapsed_ms) });
+            bar.appendChild(barLabel);
+            track.appendChild(bar);
+
+            const elapsed = el("div", { class: "wf-elapsed" + (isError ? " error" : ""), text: formatMs(span.elapsed_ms) });
+
+            grid.appendChild(nameCell);
+            grid.appendChild(track);
+            grid.appendChild(elapsed);
+          }
+          return grid;
+        }
+
+        function renderTree(payload) {
+          const spans = (payload.spans || []).slice().sort((a, b) => new Date(a.started_at) - new Date(b.started_at));
+          const byId = new Map();
+          const childrenBy = new Map();
+          for (const s of spans) byId.set(s.span_id, s);
+          for (const s of spans) {
+            const key = s.parent_span_id;
+            if (!childrenBy.has(key)) childrenBy.set(key, []);
+            childrenBy.get(key).push(s);
+          }
+          for (const [, arr] of childrenBy) {
+            arr.sort((a, b) => new Date(a.started_at) - new Date(b.started_at));
+          }
+
+          function renderNode(span) {
+            if (!span) return null;
+            const ul = el("ul");
+            const li = el("li");
+            const badge = span.status === "error"
+              ? el("span", { class: "status-badge error", text: span.error_type || "error", "data-tip": CONCEPT_TIPS.status_error })
+              : el("span", { class: "status-badge ok", text: "ok", "data-tip": CONCEPT_TIPS.status_ok });
+            const spanTip = SPAN_TIPS[span.span_name];
+            const nameAttrs = { class: "name", text: span.span_name };
+            if (spanTip) nameAttrs["data-tip"] = spanTip;
+            const node = el("span", { class: "node" + (span.status === "error" ? " status-error" : "") }, [
+              el("span", { class: "seq", text: span.span_id.slice(-8) }),
+              el("span", nameAttrs),
+              badge,
+              el("span", { class: "seq", text: formatMs(span.elapsed_ms) }),
+            ]);
+            li.appendChild(node);
+
+            const kids = childrenBy.get(span.span_id) || [];
+            if (kids.length > 0) {
+              const childList = el("ul");
+              for (const child of kids) {
+                const rendered = renderNode(child);
+                if (rendered && rendered.firstElementChild) {
+                  childList.appendChild(rendered.firstElementChild);
+                }
+              }
+              li.appendChild(childList);
+            }
+            ul.appendChild(li);
+            return ul;
+          }
+
+          const wrap = el("div", { class: "tree" });
+          let root = byId.get(payload.root_span_id);
+          if (!root) {
+            root = spans.find((span) => !byId.has(span.parent_span_id));
+          }
+          const rootUl = renderNode(root);
+          if (rootUl) {
+            wrap.appendChild(rootUl);
+          } else {
+            wrap.appendChild(el("div", { class: "empty", text: "没有 span 数据。" }));
+          }
+          return wrap;
+        }
+
+        /* demo 根节点可能仍引用响应范围外的 HTTP SERVER Span，因此由 root_span_id 明确指定展示子树根节点。 */
+
+        function renderPayload(payload) {
+          viewport.innerHTML = "";
+          viewport.appendChild(renderSummary(payload));
+
+          const waterfallCard = el("section", { class: "card" }, [
+            el("header", null, [
+              el("strong", { text: "Timeline (Waterfall)", "data-tip": CONCEPT_TIPS.waterfall }),
+              el("span", { text: `${payload.span_count} spans` }),
+            ]),
+            (function () {
+              const body = el("div", { class: "body" });
+              body.appendChild(renderWaterfall(payload));
+              return body;
+            })(),
+          ]);
+          viewport.appendChild(waterfallCard);
+
+          const treeCard = el("section", { class: "card" }, [
+            el("header", null, [
+              el("strong", { text: "Span Tree", "data-tip": CONCEPT_TIPS.span_tree }),
+              el("span", { class: "mono", text: payload.root_span_id }),
+            ]),
+            (function () {
+              const body = el("div", { class: "body" });
+              body.appendChild(renderTree(payload));
+              return body;
+            })(),
+          ]);
+          viewport.appendChild(treeCard);
+
+          const jsonCard = el("section", { class: "card" }, [
+            el("header", null, [
+              el("strong", { text: "Raw JSON", "data-tip": CONCEPT_TIPS.raw_json }),
+              el("span", { text: "GET " + TRACES_ENDPOINT + payload.trace_id }),
+            ]),
+            (function () {
+              const body = el("div", { class: "body" });
+              body.appendChild(el("pre", { class: "json mono", text: JSON.stringify(payload, null, 2) }));
+              return body;
+            })(),
+          ]);
+          viewport.appendChild(jsonCard);
+        }
+
+        async function loadTrace(traceId) {
+          const id = (traceId || "").trim();
+          if (!id) {
+            renderEmpty("请输入 trace_id 后再点击 Load。");
+            return;
+          }
+          state.currentTraceId = id;
+          input.value = id;
+
+          viewport.innerHTML = "";
+          viewport.appendChild(el("div", { class: "empty", text: "Loading " + id + " ..." }));
+
+          try {
+            const resp = await fetch(TRACES_ENDPOINT + encodeURIComponent(id), {
+              method: "GET",
+              headers: { Accept: "application/json" },
+            });
+            const raw = await resp.text();
+            let body;
+            try {
+              body = JSON.parse(raw);
+            } catch (_) {
+              renderError("响应不是合法 JSON：\n" + raw);
+              return;
+            }
+            if (!resp.ok || (body && typeof body.code === "number" && body.code >= 40000)) {
+              const msg = body && body.message ? body.message : "HTTP " + resp.status;
+              renderError("加载失败：" + msg);
+              return;
+            }
+            const data = body && body.data ? body.data : body;
+            state.currentPayload = data;
+            renderPayload(data);
+            updateUrlHash(id);
+          } catch (err) {
+            renderError("请求异常：" + (err && err.message ? err.message : String(err)));
+          }
+        }
+
+        function updateUrlHash(id) {
+          try {
+            const nextHash = "#trace_id=" + encodeURIComponent(id);
+            if (window.location.hash !== nextHash) {
+              window.history.replaceState(null, "", nextHash);
+            }
+          } catch (_) { /* ignore */ }
+        }
+
+        function readInitialTraceId() {
+          const hash = window.location.hash || "";
+          const m = hash.match(/trace_id=([^&]+)/);
+          if (m && m[1]) return decodeURIComponent(m[1]);
+          const params = new URLSearchParams(window.location.search);
+          return params.get("trace_id");
+        }
+
+        loadBtn.addEventListener("click", () => loadTrace(input.value));
+        input.addEventListener("keydown", (ev) => {
+          if (ev.key === "Enter") loadTrace(input.value);
+        });
+        for (const btn of document.querySelectorAll(".example-row button[data-example]")) {
+          btn.addEventListener("click", () => loadTrace(btn.getAttribute("data-example")));
+        }
+        copyBtn.addEventListener("click", async () => {
+          if (!state.currentTraceId) return;
+          const url = window.location.origin + window.location.pathname + "#trace_id=" + encodeURIComponent(state.currentTraceId);
+          try {
+            await navigator.clipboard.writeText(url);
+            copyBtn.textContent = "Copied!";
+            setTimeout(() => (copyBtn.textContent = "Copy Link"), 1200);
+          } catch (_) {
+            window.prompt("复制以下链接：", url);
+          }
+        });
+
+        const initial = readInitialTraceId();
+        if (initial) {
+          loadTrace(initial);
+        } else {
+          renderEmpty();
+        }
+      })();
+    </script>
+  </body>
+</html>

@@ -1,13 +1,14 @@
 import sys
-from datetime import UTC, time, timedelta, timezone as dt_timezone
+from datetime import UTC, time, timedelta
+from datetime import timezone as dt_timezone
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
 import loguru
+from opentelemetry import trace
 
-from pkg.logger.span import configure_span_logger, get_span_record_extra
 from pkg import request_context as context
 from pkg.toolkit.json import orjson_dumps
 from pkg.toolkit.timer import format_iso_datetime
@@ -71,7 +72,9 @@ class LoggerHandler:
 
         # --- 根据 log_format 确定格式化器 ---
         is_json = self.log_format == LogFormat.JSON
-        self.console_format = self._json_formatter if is_json else self._console_formatter
+        self.console_format = (
+            self._json_formatter if is_json else self._console_formatter
+        )
         self.file_format = self._json_formatter if is_json else self._text_formatter
         self.colorize = not is_json
 
@@ -110,7 +113,9 @@ class LoggerHandler:
                     f"Use ZoneInfo for non-UTC timezones, e.g., ZoneInfo('Asia/Shanghai')."
                 )
         else:
-            raise TypeError(f"timezone must be str, ZoneInfo, or datetime.timezone, got {type(timezone).__name__}")
+            raise TypeError(
+                f"timezone must be str, ZoneInfo, or datetime.timezone, got {type(timezone).__name__}"
+            )
 
     def _normalize_rotation(self, rotation: RotationType) -> RotationType:
         """
@@ -156,12 +161,13 @@ class LoggerHandler:
         """
         return self.base_log_dir
 
-    def setup(self, *, write_to_file: bool = True, write_to_console: bool = True) -> "loguru.Logger":
+    def setup(
+        self, *, write_to_file: bool = True, write_to_console: bool = True
+    ) -> "loguru.Logger":
         """
         应用配置并初始化系统日志。
         注意：setup 不再接收配置参数，而是使用 __init__ 中保存的属性。
         """
-        configure_span_logger(None)
         self._logger.remove()
 
         # 1. 准备基础配置
@@ -169,10 +175,7 @@ class LoggerHandler:
             "extra": {
                 "json_content": None,
                 "trace_id": "-",
-                "span_seq": None,
-                "parent_span_seq": None,
-                "span_name": None,
-                "span_path": None,
+                "span_id": None,
             },
         }
 
@@ -210,8 +213,9 @@ class LoggerHandler:
                 format=self.file_format,
             )
 
-        configure_span_logger(self._logger)
-        tz_name = self.timezone.key if hasattr(self.timezone, "key") else str(self.timezone)
+        tz_name = (
+            self.timezone.key if hasattr(self.timezone, "key") else str(self.timezone)
+        )
         self._logger.info(
             f"Logger initialized. Timezone: {tz_name} | Format: {self.log_format} | Rotation: {self.rotation} | Level: {self.level}"
         )
@@ -251,7 +255,8 @@ class LoggerHandler:
             "<green>{extra[_formatted_time]}</green> | "
             "<level>{level: <8}</level> | "
             "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> | "
-            "<magenta>{extra[_formatted_trace_id]}</magenta>{extra[_formatted_span_segment]} | "
+            "<magenta>{extra[_formatted_trace_id]}</magenta> | "
+            "<magenta>{extra[_formatted_span_id]}</magenta> | "
             "<level>{message}</level>"
         )
 
@@ -273,7 +278,8 @@ class LoggerHandler:
             "{extra[_formatted_time]} | "
             "{level: <8} | "
             "{name}:{function}:{line} | "
-            "{extra[_formatted_trace_id]}{extra[_formatted_span_segment]} | "
+            "{extra[_formatted_trace_id]} | "
+            "{extra[_formatted_span_id]} | "
             "{message}"
         )
 
@@ -298,27 +304,22 @@ class LoggerHandler:
         extra_data.pop("_text_json", None)
         extra_data.pop("_formatted_time", None)
         extra_data.pop("_formatted_trace_id", None)
-        extra_data.pop("_formatted_span_segment", None)
+        extra_data.pop("_formatted_span_id", None)
 
-        trace_id = self._get_record_trace_id(record)
-        span_seq = extra_data.pop("span_seq", None)
-        parent_span_seq = extra_data.pop("parent_span_seq", None)
-        span_name = extra_data.pop("span_name", None)
-        span_path = extra_data.pop("span_path", None)
-        extra_data.pop("trace_id", None)
+        trace_id = extra_data.pop("trace_id", "-") or "-"
+        span_id = extra_data.pop("span_id", None)
 
         if not isinstance(json_content, (dict, list, str, type(None))):
-            raise TypeError(f"json_content must be types or None. Got {type(json_content)}")
+            raise TypeError(
+                f"json_content must be types or None. Got {type(json_content)}"
+            )
 
         log_record = {
             "time": formatted_time,
             "level": record["level"].name,
             "trace_id": trace_id,
-            "span_seq": span_seq,
-            "parent_span_seq": parent_span_seq,
-            "span_name": span_name,
-            "span_path": span_path,
-            "location": f"{record["name"]}.{record["function"]}:{record["line"]}",
+            "span_id": span_id,
+            "location": f"{record['name']}.{record['function']}:{record['line']}",
             "text": "",
             "message": record["message"],
             **extra_data,
@@ -352,8 +353,9 @@ class LoggerHandler:
 
         def patcher(record: Any):
             record["time"] = record["time"].astimezone(target_tz)
-            record["extra"]["trace_id"] = self._safe_get_trace_id()
-            record["extra"].update(get_span_record_extra())
+            trace_id, span_id = self._get_current_trace_fields()
+            record["extra"]["trace_id"] = trace_id
+            record["extra"]["span_id"] = span_id
 
         return patcher
 
@@ -362,26 +364,22 @@ class LoggerHandler:
         """确保目录存在，如果父目录不存在则自动创建"""
         path.mkdir(parents=True, exist_ok=True)
 
-    @classmethod
-    def _get_record_trace_id(cls, record: Any) -> str:
-        trace_id = record["extra"].get("trace_id")
-        if isinstance(trace_id, str) and trace_id:
-            return trace_id
-        return "-"
-
     def _populate_text_format_extra(self, record: Any) -> None:
         record["extra"]["_formatted_time"] = self._format_record_time(record)
-        record["extra"]["_formatted_trace_id"] = self._get_record_trace_id(record)
-        record["extra"]["_formatted_span_segment"] = self._build_text_span_segment(record)
+        record["extra"]["_formatted_trace_id"] = record["extra"].get("trace_id") or "-"
+        span_id = record["extra"].get("span_id")
+        record["extra"]["_formatted_span_id"] = (
+            span_id if isinstance(span_id, str) and span_id else "-"
+        )
 
     @classmethod
-    def _build_text_span_segment(cls, record: Any) -> str:
-        span_seq = record["extra"].get("span_seq")
-        if span_seq is None:
-            return ""
+    def _get_current_trace_fields(cls) -> tuple[str, str | None]:
+        """优先读取当前 OTel Span；无有效 Span 时回退请求关联 ID。"""
 
-        span_name = str(record["extra"].get("span_name") or "-")
-        return f" | {span_seq}:{span_name}"
+        span_context = trace.get_current_span().get_span_context()
+        if span_context.is_valid:
+            return f"{span_context.trace_id:032x}", f"{span_context.span_id:016x}"
+        return cls._safe_get_trace_id(), None
 
     @classmethod
     def _safe_get_trace_id(cls) -> str:

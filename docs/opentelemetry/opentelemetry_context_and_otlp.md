@@ -48,6 +48,20 @@ OpenTelemetry 统一的是这些数据从应用产生到发送给后端之前的
 OpenTelemetry 本身不是可观测性后端，通常不负责遥测数据的长期存储、查询、仪表盘、告警和最终展示。
 这些能力由 Jaeger、Prometheus、Grafana 生态或商业可观测性平台提供。
 
+### 1.4 当前项目的接入边界
+
+当前项目只接入轻量 Trace SDK，不接入 OTLP Exporter 或自动 Instrumentation：
+
+- 业务埋点统一使用 `async with span_context(...)`，内部根据 `OTEL_TRACING_ENABLED` 决定创建真实 Span
+  还是返回 non-recording Span。
+- `OTEL_TRACING_ENABLED` 和 `OTEL_SERVICE_NAME` 的实际值维护在 `configs/.env.{APP_ENV}`。
+- 浏览器暂不接入 OpenTelemetry，只传递 UUIDv7 hex 格式的 `X-Trace-ID`。
+- FastAPI recorder middleware 校验 `X-Trace-ID` 并写入 request context；没有合法值时由服务端生成。
+- 没有远程父上下文时，FastAPI SERVER Span 使用 request context 中的 ID 作为 Root Trace ID。
+- 当前不解析 `traceparent` / `tracestate`；未来扩展优先级为
+  `traceparent > X-Trace-ID > OpenTelemetry SDK 生成`。
+- 当前没有 Exporter，因此 Span 不会通过 OTLP 发送到 Collector 或可观测性后端。
+
 ## 2. 先区分两条数据路径
 
 理解 OpenTelemetry 的关键，是区分“业务请求中的上下文传播”和“遥测数据上报”。

@@ -18,8 +18,15 @@ from datetime import UTC, time, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from pkg.logger.handler import LogFormat, LoggerHandler, RetentionType, RotationType, TimezoneType
-from pkg.logger.span import span_context, with_span
+from pkg.logger.handler import (
+    LogFormat,
+    LoggerHandler,
+    RetentionType,
+    RotationType,
+    TimezoneType,
+)
+from pkg.logger.otel import init_tracing, shutdown_tracing
+from pkg.logger.span import span_context
 from pkg.lazy_proxy import lazy_proxy
 
 if TYPE_CHECKING:
@@ -84,7 +91,9 @@ def init_logger(
         enqueue=enqueue,
         log_format=log_format,
     )
-    _logger = _logger_manager.setup(write_to_file=write_to_file, write_to_console=write_to_console)
+    _logger = _logger_manager.setup(
+        write_to_file=write_to_file, write_to_console=write_to_console
+    )
 
     return _logger
 
@@ -110,8 +119,9 @@ __all__ = [
     # 初始化函数
     "init_logger",
     "get_logger_manager",
+    "init_tracing",
+    "shutdown_tracing",
     # Logger 实例
     "logger",
     "span_context",
-    "with_span",
 ]

@@ -7,10 +7,13 @@ from internal import BASE_LOG_DIR
 from internal.config import init_settings, settings
 from internal.infra.database import close_async_db, init_async_db
 from internal.infra.redis import close_async_redis, init_async_redis
-from internal.utils.background_tasks import close_background_task_manager, init_background_task_manager
+from internal.utils.background_tasks import (
+    close_background_task_manager,
+    init_background_task_manager,
+)
 from internal.utils.signature import init_signature_auth_handler
 from internal.utils.snowflake import init_snowflake_id_generator
-from pkg.logger import init_logger, logger
+from pkg.logger import init_logger, init_tracing, logger, shutdown_tracing
 
 
 def create_app() -> FastAPI:
@@ -90,6 +93,10 @@ async def lifespan(_app: FastAPI):
 
     # 初始化日志（使用配置中的格式）
     init_logger(log_format=settings.LOG_FORMAT, base_log_dir=BASE_LOG_DIR)
+    init_tracing(
+        enabled=settings.OTEL_TRACING_ENABLED,
+        service_name=settings.OTEL_SERVICE_NAME,
+    )
     # 初始化 DB（使用配置中的 echo）
     init_async_db(echo=settings.DB_ECHO)
     # 初始化 Redis
@@ -110,3 +117,4 @@ async def lifespan(_app: FastAPI):
     await close_async_redis()
     await close_background_task_manager()
     logger.warning("Application is about to close.")
+    shutdown_tracing()

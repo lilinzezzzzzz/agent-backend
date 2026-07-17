@@ -14,6 +14,20 @@ def uuid6_unique_str_id() -> str:
     return uuid6.uuid7().hex
 
 
+def normalize_uuid7_trace_id(value: str | None) -> str | None:
+    """校验并规范化前端传入的 UUIDv7 hex Trace ID。"""
+
+    if not isinstance(value, str) or len(value) != 32:
+        return None
+    try:
+        parsed = uuid.UUID(hex=value)
+    except ValueError:
+        return None
+    if parsed.version != 7 or parsed.int == 0:
+        return None
+    return parsed.hex
+
+
 def auto_snowflake_node_id() -> int:
     """基于机器信息自动生成 node_id (0-1023)"""
     try:

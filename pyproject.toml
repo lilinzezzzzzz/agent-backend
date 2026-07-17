@@ -70,6 +70,8 @@ dependencies = [
     "mcp>=1,<2",
     "pypinyin>=0.55.0",
     "agentscope>=2,<3",
+    "opentelemetry-api>=1.42.1,<2",
+    "opentelemetry-sdk>=1.42.1,<2",
 ]
 
 # 分组依赖 —— 开发环境才需要

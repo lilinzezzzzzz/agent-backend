@@ -1,351 +1,211 @@
 import asyncio
 import json
-from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import anyio
 import pytest
 from loguru import logger as loguru_logger
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+from opentelemetry.trace import SpanKind, StatusCode
 
-from pkg import request_context as context
 from pkg.logger import LogFormat, LoggerHandler
-from pkg.logger.span import configure_span_logger, get_current_span, span_context, with_span
+import pkg.logger.otel as otel_runtime
+from pkg.logger.otel import RequestContextIdGenerator, init_tracing, shutdown_tracing
+from pkg.logger.span import span_context
+
+_TRACE_ID = "019da8cd058b76ed8a4a52141c1c6b38"
 
 
-@with_span(span_name="decorated.default")
-async def decorated_default_name() -> str | None:
-    current = get_current_span()
-    loguru_logger.info("decorated.default")
-    return None if current is None else current.span_name
-
-
-@with_span(span_name="custom.db.query")
-async def decorated_custom_name() -> str | None:
-    current = get_current_span()
-    loguru_logger.info("decorated.custom")
-    return None if current is None else current.span_name
-
-
-def _configure_logger(
-    tmp_path: Path,
-    *,
-    log_format: LogFormat,
-    enqueue: bool,
-) -> tuple[LoggerHandler, Path]:
-    base_log_dir = tmp_path / "logs"
-    manager = LoggerHandler(
-        base_log_dir=base_log_dir,
-        log_format=log_format,
-        enqueue=enqueue,
+@pytest.fixture
+def tracing_runtime(monkeypatch: pytest.MonkeyPatch) -> InMemorySpanExporter:
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider(id_generator=RequestContextIdGenerator())
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    monkeypatch.setattr(
+        otel_runtime.request_context,
+        "get_trace_id",
+        lambda: _TRACE_ID,
     )
-    manager.setup(write_to_console=False)
-    return manager, base_log_dir
-
-
-def _default_log_file(base_log_dir: Path) -> Path:
-    files = list(base_log_dir.glob("*.log"))
-    assert len(files) == 1
-    return files[0]
-
-
-def _read_json_records(file_path: Path) -> list[dict]:
-    records: list[dict] = []
-    for line in file_path.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
-        records.append(json.loads(line))
-    return records
-
-
-def _find_record(records: list[dict], message: str) -> dict:
-    for record in records:
-        if record.get("message") == message:
-            return record
-    raise AssertionError(f"record not found for message={message}")
+    init_tracing(
+        enabled=True,
+        service_name="test-agent-backend",
+        tracer_provider=provider,
+    )
+    yield exporter
+    shutdown_tracing()
+    provider.shutdown()
 
 
 @pytest.fixture(autouse=True)
-def cleanup_loguru():
-    context.init(trace_id="test-trace-id")
-    configure_span_logger(None)
+def cleanup_runtime() -> None:
+    shutdown_tracing()
     yield
+    shutdown_tracing()
     loguru_logger.remove()
-    configure_span_logger(None)
-    context.clear()
+
+
+def _span_context_ids(span) -> tuple[str, str]:
+    current = span.get_span_context()
+    return f"{current.trace_id:032x}", f"{current.span_id:016x}"
+
+
+def _configure_json_logger(tmp_path: Path) -> Path:
+    base_log_dir = tmp_path / "logs"
+    LoggerHandler(
+        base_log_dir=base_log_dir,
+        log_format=LogFormat.JSON,
+        enqueue=False,
+    ).setup(write_to_console=False)
+    return base_log_dir
+
+
+def _read_records(base_log_dir: Path) -> list[dict]:
+    files = list(base_log_dir.glob("*.log"))
+    assert len(files) == 1
+    return [
+        json.loads(line)
+        for line in files[0].read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
 
 
 @pytest.mark.asyncio
-async def test_async_with_span_injects_fields_and_restores_context(tmp_path):
-    _, base_log_dir = _configure_logger(tmp_path, log_format=LogFormat.JSON, enqueue=False)
+async def test_disabled_span_context_is_non_recording_and_preserves_exception() -> None:
+    init_tracing(enabled=False, service_name="test-agent-backend")
 
-    async with span_context("outer") as current_span:
-        assert current_span.span_seq == 1
-        assert current_span.parent_span_seq is None
-        assert current_span.span_name == "outer"
-        assert current_span.span_path == "1:outer"
-        assert get_current_span() == current_span
-        loguru_logger.info("inside.outer")
+    with pytest.raises(RuntimeError, match="boom"):
+        async with span_context("disabled") as span:
+            assert span.is_recording() is False
+            raise RuntimeError("boom")
 
-    assert get_current_span() is None
-
-    loguru_logger.complete()
-    records = _read_json_records(_default_log_file(base_log_dir))
-
-    inside_record = _find_record(records, "inside.outer")
-    assert inside_record["trace_id"] == "test-trace-id"
-    assert inside_record["span_seq"] == 1
-    assert inside_record["parent_span_seq"] is None
-    assert inside_record["span_name"] == "outer"
-    assert inside_record["span_path"] == "1:outer"
-
-    start_record = _find_record(records, "span.start")
-    assert start_record["span_seq"] == 1
-    assert start_record["parent_span_seq"] is None
-
-    end_record = _find_record(records, "span.end")
-    assert end_record["span_seq"] == 1
-    assert end_record["parent_span_seq"] is None
-    assert isinstance(end_record["json_content"]["elapsed_ms"], float)
-    assert end_record["json_content"]["elapsed_ms"] >= 0
+    assert trace.get_current_span().get_span_context().is_valid is False
 
 
 @pytest.mark.asyncio
-async def test_span_context_requires_configured_logger():
-    with pytest.raises(RuntimeError, match="Span logger not initialized"):
-        async with span_context("missing-logger"):
-            pass
+async def test_root_span_uses_request_context_trace_id_and_exports(
+    tracing_runtime: InMemorySpanExporter,
+) -> None:
+    async with span_context(
+        "root",
+        span_kind=SpanKind.SERVER,
+        attributes={"http.request.method": "GET"},
+    ) as span:
+        trace_id, span_id = _span_context_ids(span)
+        assert trace_id == _TRACE_ID
+        assert len(span_id) == 16
+        assert int(span_id, 16) != 0
+        assert trace.get_current_span() is span
+
+    assert trace.get_current_span().get_span_context().is_valid is False
+    finished = tracing_runtime.get_finished_spans()
+    assert len(finished) == 1
+    assert finished[0].name == "root"
+    assert finished[0].kind is SpanKind.SERVER
+    assert finished[0].parent is None
+    assert finished[0].attributes["http.request.method"] == "GET"
 
 
 @pytest.mark.asyncio
-async def test_instrument_span_supports_explicit_names(tmp_path):
-    _, base_log_dir = _configure_logger(tmp_path, log_format=LogFormat.JSON, enqueue=False)
+async def test_nested_spans_use_real_parent_identity(
+    tracing_runtime: InMemorySpanExporter,
+) -> None:
+    async with span_context("outer") as outer:
+        outer_context = outer.get_span_context()
+        async with span_context("inner") as inner:
+            inner_context = inner.get_span_context()
+            assert inner_context.trace_id == outer_context.trace_id
+            assert inner_context.span_id != outer_context.span_id
+        assert trace.get_current_span() is outer
 
-    async with span_context("outer") as outer_span:
-        default_name = await decorated_default_name()
-        custom_name = await decorated_custom_name()
-
-    assert default_name == "decorated.default"
-    assert custom_name == "custom.db.query"
-    assert outer_span.span_path == "1:outer"
-
-    loguru_logger.complete()
-    records = _read_json_records(_default_log_file(base_log_dir))
-
-    default_record = _find_record(records, "decorated.default")
-    assert default_record["parent_span_seq"] == outer_span.span_seq
-    assert default_record["span_name"] == "decorated.default"
-    assert default_record["span_path"] == f"{outer_span.span_path}|2:decorated.default"
-
-    custom_record = _find_record(records, "decorated.custom")
-    assert custom_record["parent_span_seq"] == outer_span.span_seq
-    assert custom_record["span_name"] == "custom.db.query"
-    assert custom_record["span_path"] == f"{outer_span.span_path}|3:custom.db.query"
+    finished = {span.name: span for span in tracing_runtime.get_finished_spans()}
+    assert finished["inner"].parent is not None
+    assert finished["inner"].parent.span_id == finished["outer"].context.span_id
 
 
 @pytest.mark.asyncio
-async def test_nested_error_logs_and_restores_parent_span(tmp_path):
-    _, base_log_dir = _configure_logger(tmp_path, log_format=LogFormat.JSON, enqueue=False)
-
-    async with span_context("outer") as outer_span:
-        with pytest.raises(RuntimeError, match="boom"):
+async def test_exception_records_error_and_restores_parent(
+    tracing_runtime: InMemorySpanExporter,
+) -> None:
+    async with span_context("outer") as outer:
+        with pytest.raises(ValueError, match="invalid"):
             async with span_context("inner"):
-                loguru_logger.info("before.error")
-                raise RuntimeError("boom")
-        assert get_current_span() == outer_span
-        loguru_logger.info("after.inner.error")
+                raise ValueError("invalid")
+        assert trace.get_current_span() is outer
 
-    assert get_current_span() is None
-
-    loguru_logger.complete()
-    records = _read_json_records(_default_log_file(base_log_dir))
-
-    error_record = _find_record(records, "span.error")
-    assert error_record["parent_span_seq"] == outer_span.span_seq
-    assert error_record["span_name"] == "inner"
-    assert error_record["span_path"] == "1:outer|2:inner"
-    assert error_record["json_content"]["error_type"] == "RuntimeError"
-    assert error_record["json_content"]["elapsed_ms"] >= 0
-
-    recovered_record = _find_record(records, "after.inner.error")
-    assert recovered_record["parent_span_seq"] is None
-    assert recovered_record["span_name"] == "outer"
-    assert recovered_record["span_path"] == "1:outer"
+    finished = {span.name: span for span in tracing_runtime.get_finished_spans()}
+    inner = finished["inner"]
+    assert inner.status.status_code is StatusCode.ERROR
+    assert [event.name for event in inner.events].count("exception") == 1
+    assert finished["outer"].status.status_code is StatusCode.UNSET
 
 
 @pytest.mark.asyncio
-async def test_asyncio_create_task_inherits_parent_span_and_keeps_siblings_isolated(tmp_path):
-    _, base_log_dir = _configure_logger(tmp_path, log_format=LogFormat.JSON, enqueue=False)
-    results: dict[str, tuple[int, int | None, str]] = {}
+async def test_asyncio_and_anyio_children_keep_parent_context(
+    tracing_runtime: InMemorySpanExporter,
+) -> None:
+    child_ids: set[int] = set()
 
-    async def worker(name: str, delay: float) -> None:
-        await anyio.sleep(delay)
-        async with span_context(name) as worker_span:
-            results[name] = (worker_span.span_seq, worker_span.parent_span_seq, worker_span.span_path)
-            loguru_logger.info(f"asyncio.{name}")
+    async def worker(name: str) -> None:
+        async with span_context(name) as span:
+            child_ids.add(span.get_span_context().span_id)
+            await anyio.sleep(0)
 
-    async with span_context("root") as root_span:
-        left_task = asyncio.create_task(worker("left", 0.05))
-        right_task = asyncio.create_task(worker("right", 0.0))
-        await asyncio.gather(left_task, right_task)
-
-    assert root_span.span_path == "1:root"
-    assert {results["left"][0], results["right"][0]} == {2, 3}
-    assert results["left"][1] == root_span.span_seq
-    assert results["right"][1] == root_span.span_seq
-    assert results["left"][2].startswith("1:root|")
-    assert results["right"][2].startswith("1:root|")
-
-    loguru_logger.complete()
-    records = _read_json_records(_default_log_file(base_log_dir))
-    left_record = _find_record(records, "asyncio.left")
-    right_record = _find_record(records, "asyncio.right")
-
-    assert left_record["parent_span_seq"] == root_span.span_seq
-    assert right_record["parent_span_seq"] == root_span.span_seq
-    assert left_record["span_path"] == results["left"][2]
-    assert right_record["span_path"] == results["right"][2]
-    assert "right" not in left_record["span_path"]
-    assert "left" not in right_record["span_path"]
-
-
-@pytest.mark.asyncio
-async def test_anyio_task_group_shares_seq_runtime_without_stack_pollution(tmp_path):
-    _, base_log_dir = _configure_logger(tmp_path, log_format=LogFormat.JSON, enqueue=False)
-    results: dict[str, tuple[int, int | None, str]] = {}
-
-    async def worker(name: str, delay: float) -> None:
-        await anyio.sleep(delay)
-        async with span_context(name) as worker_span:
-            results[name] = (worker_span.span_seq, worker_span.parent_span_seq, worker_span.span_path)
-            loguru_logger.info(f"task-group.{name}")
-
-    async with span_context("root") as root_span:
+    async with span_context("root") as root:
+        root_span_id = root.get_span_context().span_id
+        await asyncio.gather(worker("asyncio.left"), worker("asyncio.right"))
         async with anyio.create_task_group() as task_group:
-            task_group.start_soon(worker, "alpha", 0.05)
-            task_group.start_soon(worker, "beta", 0.0)
+            task_group.start_soon(worker, "anyio.left")
+            task_group.start_soon(worker, "anyio.right")
 
-    assert {results["alpha"][0], results["beta"][0]} == {2, 3}
-    assert results["alpha"][1] == root_span.span_seq
-    assert results["beta"][1] == root_span.span_seq
-
-    loguru_logger.complete()
-    records = _read_json_records(_default_log_file(base_log_dir))
-    alpha_record = _find_record(records, "task-group.alpha")
-    beta_record = _find_record(records, "task-group.beta")
-
-    assert alpha_record["parent_span_seq"] == root_span.span_seq
-    assert beta_record["parent_span_seq"] == root_span.span_seq
-    assert alpha_record["span_path"] == results["alpha"][2]
-    assert beta_record["span_path"] == results["beta"][2]
-    assert alpha_record["span_path"].startswith("1:root|")
-    assert beta_record["span_path"].startswith("1:root|")
+    assert len(child_ids) == 4
+    finished = tracing_runtime.get_finished_spans()
+    children = [span for span in finished if span.name != "root"]
+    assert len(children) == 4
+    assert all(span.parent is not None for span in children)
+    assert all(span.parent.span_id == root_span_id for span in children if span.parent)
 
 
 @pytest.mark.asyncio
-async def test_text_formatter_only_adds_span_segment_for_active_span(tmp_path):
-    _, base_log_dir = _configure_logger(tmp_path, log_format=LogFormat.TEXT, enqueue=False)
+async def test_json_logs_use_current_otel_trace_and_span_ids(
+    tmp_path: Path,
+    tracing_runtime: InMemorySpanExporter,
+) -> None:
+    base_log_dir = _configure_json_logger(tmp_path)
 
-    async with span_context("text-root"):
-        loguru_logger.info("text.inside")
-    loguru_logger.info("text.outside")
-
+    async with span_context("logged") as span:
+        expected_trace_id, expected_span_id = _span_context_ids(span)
+        loguru_logger.info("inside")
+    loguru_logger.info("outside")
     loguru_logger.complete()
-    lines = _default_log_file(base_log_dir).read_text(encoding="utf-8").splitlines()
 
-    inside_line = next(line for line in lines if "text.inside" in line)
-    outside_line = next(line for line in lines if "text.outside" in line)
-
-    assert " | 1:text-root | " in inside_line
-    assert " | 1:text-root | " not in outside_line
-
-
-@pytest.mark.asyncio
-async def test_text_formatter_keeps_json_content_inline(tmp_path):
-    _, base_log_dir = _configure_logger(tmp_path, log_format=LogFormat.TEXT, enqueue=False)
-
-    async with span_context("inline-json"):
-        pass
-
-    loguru_logger.complete()
-    lines = _default_log_file(base_log_dir).read_text(encoding="utf-8").splitlines()
-
-    end_line = next(line for line in lines if "span.end" in line)
-
-    assert ' | {"elapsed_ms":' in end_line
-    assert end_line.count("span.end") == 1
+    records = {record["message"]: record for record in _read_records(base_log_dir)}
+    assert records["inside"]["trace_id"] == expected_trace_id
+    assert records["inside"]["span_id"] == expected_span_id
+    assert records["outside"]["trace_id"] == _TRACE_ID
+    assert records["outside"]["span_id"] is None
+    assert "span.start" not in records
+    assert "span.end" not in records
 
 
-@pytest.mark.asyncio
-async def test_enqueue_true_keeps_span_fields_because_patcher_runs_before_queue(tmp_path):
-    _, base_log_dir = _configure_logger(tmp_path, log_format=LogFormat.JSON, enqueue=True)
-
-    loguru_logger.info("outside.queue")
-    async with span_context("queued"):
-        loguru_logger.info("inside.queue")
-
-    loguru_logger.complete()
-    records = _read_json_records(_default_log_file(base_log_dir))
-
-    outside_record = _find_record(records, "outside.queue")
-    assert outside_record["span_seq"] is None
-    assert outside_record["parent_span_seq"] is None
-    assert outside_record["span_name"] is None
-    assert outside_record["span_path"] is None
-
-    inside_record = _find_record(records, "inside.queue")
-    assert inside_record["span_seq"] == 1
-    assert inside_record["parent_span_seq"] is None
-    assert inside_record["span_name"] == "queued"
-    assert inside_record["span_path"] == "1:queued"
-
-
-def test_with_span_rejects_sync_function():
-    with pytest.raises(TypeError, match="async def only"):
-
-        @with_span(span_name="sync.func")
-        def sync_func():
-            return "not allowed"
-
-
-def test_with_span_requires_span_name():
-    with pytest.raises(TypeError, match="missing 1 required keyword-only argument: 'span_name'"):
-
-        @with_span()
-        async def missing_span_name():
-            return None
-
-
-def test_span_context_rejects_sync_with_usage(tmp_path):
-    _configure_logger(tmp_path, log_format=LogFormat.JSON, enqueue=False)
-
+def test_span_context_rejects_sync_usage_and_invalid_arguments() -> None:
     with pytest.raises(TypeError, match="async with"):
         with span_context("sync"):
             pass
 
+    with pytest.raises(ValueError, match="span_name cannot be empty"):
+        span_context("  ")
 
-def test_span_context_rejects_invalid_span_name(tmp_path):
-    _configure_logger(tmp_path, log_format=LogFormat.JSON, enqueue=False)
-
-    with pytest.raises(ValueError, match="span_name must contain only letters, digits"):
+    with pytest.raises(ValueError, match="span_name must contain only"):
         span_context("bad/name")
 
+    dynamic_span_context: Any = span_context
 
-def test_with_span_rejects_invalid_explicit_span_name():
-    with pytest.raises(ValueError, match="span_name must contain only letters, digits"):
+    with pytest.raises(TypeError, match="span_kind must be a SpanKind"):
+        dynamic_span_context("bad.kind", span_kind="SERVER")
 
-        @with_span(span_name="bad:name")
-        async def invalid_span_name():
-            return None
-
-
-def test_time_field_uses_iso_8601_format(tmp_path):
-    _, base_log_dir = _configure_logger(tmp_path, log_format=LogFormat.JSON, enqueue=False)
-
-    loguru_logger.info("time.check")
-    loguru_logger.complete()
-
-    record = _find_record(_read_json_records(_default_log_file(base_log_dir)), "time.check")
-    parsed_time = datetime.fromisoformat(record["time"].replace("Z", "+00:00"))
-
-    assert parsed_time.tzinfo is not None
-    assert parsed_time.tzinfo == UTC
+    with pytest.raises(TypeError, match="attributes must be a mapping"):
+        dynamic_span_context("bad.attributes", attributes=[])

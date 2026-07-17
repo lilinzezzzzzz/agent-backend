@@ -16,8 +16,8 @@ import asyncio
 import os
 import sys
 import types
+import uuid
 from collections.abc import AsyncGenerator, Generator
-from contextlib import asynccontextmanager
 from datetime import UTC, datetime, time, timedelta
 from enum import StrEnum
 from pathlib import Path
@@ -26,6 +26,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import pytest_asyncio
+import uuid6
 from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
 from redis.asyncio import ConnectionPool, Redis
@@ -54,7 +55,11 @@ _skip_context_mock = False
 if sys.argv:
     for arg in sys.argv:
         normalized_arg = arg.replace("\\", "/")
-        if "tests/logger" in normalized_arg or "logger/" in normalized_arg or "test_logger" in normalized_arg:
+        if (
+            "tests/logger" in normalized_arg
+            or "logger/" in normalized_arg
+            or "test_logger" in normalized_arg
+        ):
             _skip_logger_mock = True
         if "test_context" in normalized_arg:
             _skip_context_mock = True
@@ -83,7 +88,7 @@ if not _skip_logger_mock:
         RotationType,
         TimezoneType,
     )
-    from pkg.logger.span import span_context, with_span  # noqa: PLC0415
+    from pkg.logger.span import span_context  # noqa: PLC0415
 
     def init_logger(
         *,
@@ -108,7 +113,9 @@ if not _skip_logger_mock:
             enqueue=enqueue,
             log_format=log_format,
         )
-        logger_obj = logger_manager.setup(write_to_file=write_to_file, write_to_console=write_to_console)
+        logger_obj = logger_manager.setup(
+            write_to_file=write_to_file, write_to_console=write_to_console
+        )
         mock_logger_module._logger_manager = logger_manager
         mock_logger_module._logger = logger_obj
         mock_logger_module.logger = logger_obj
@@ -117,12 +124,10 @@ if not _skip_logger_mock:
     def get_logger_manager():
         logger_manager = getattr(mock_logger_module, "_logger_manager", None)
         if logger_manager is None:
-            raise RuntimeError("LoggerHandler not initialized. Call init_logger() first.")
+            raise RuntimeError(
+                "LoggerHandler not initialized. Call init_logger() first."
+            )
         return logger_manager
-
-    @asynccontextmanager
-    async def noop_span_context(_span_name: str):
-        yield None
 
     mock_logger_module.LogFormat = LogFormat
     mock_logger_module.LoggerHandler = LoggerHandler
@@ -130,10 +135,10 @@ if not _skip_logger_mock:
     mock_logger_module.RetentionType = RetentionType
     mock_logger_module.TimezoneType = TimezoneType
     mock_logger_module.init_logger = init_logger
+    mock_logger_module.init_tracing = MagicMock()
+    mock_logger_module.shutdown_tracing = MagicMock()
     mock_logger_module.get_logger_manager = get_logger_manager
     mock_logger_module.span_context = span_context
-    mock_logger_module.with_span = with_span
-    mock_logger_module.noop_span_context = noop_span_context
     mock_logger_module._logger_manager = None
     mock_logger_module._logger = None
 else:
@@ -148,6 +153,7 @@ else:
 
 # Mock pkg.request_context 模块
 if not _skip_context_mock:
+
     class MockContextKey(StrEnum):
         USER_ID = "user_id"
         TRACE_ID = "trace_id"
@@ -169,6 +175,9 @@ if not _skip_context_mock:
     logger_handler_module = sys.modules.get("pkg.logger.handler")
     if logger_handler_module is not None:
         logger_handler_module.context = mock_context
+    logger_otel_module = sys.modules.get("pkg.logger.otel")
+    if logger_otel_module is not None:
+        logger_otel_module.request_context = mock_context
 
 # Mock snowflake ID 生成器
 _id_counter = 0
@@ -199,7 +208,22 @@ mock_snowflake_module = types.ModuleType("pkg.ids")
 mock_snowflake_module.snowflake_id_generator = mock_snowflake_generator
 mock_snowflake_module.SnowflakeIDGenerator = MockSnowflakeIDGenerator
 mock_snowflake_module.auto_snowflake_node_id = MagicMock(return_value=1)
-mock_snowflake_module.uuid6_unique_str_id = MagicMock(side_effect=lambda: f"mock-id-{mock_gen_id()}")
+mock_snowflake_module.uuid6_unique_str_id = MagicMock(
+    side_effect=lambda: uuid6.uuid7().hex
+)
+
+
+def _normalize_uuid7_trace_id(value: str | None) -> str | None:
+    if not isinstance(value, str) or len(value) != 32:
+        return None
+    try:
+        parsed = uuid.UUID(hex=value)
+    except ValueError:
+        return None
+    return parsed.hex if parsed.version == 7 and parsed.int != 0 else None
+
+
+mock_snowflake_module.normalize_uuid7_trace_id = _normalize_uuid7_trace_id
 sys.modules["pkg.ids"] = mock_snowflake_module
 
 # ==========================================
@@ -228,7 +252,9 @@ def pytest_configure(config: pytest.Config):
     - 设置测试环境
     """
     # 注册自定义 markers
-    config.addinivalue_line("markers", "integration: 集成测试，需要 Redis/Celery 等外部服务")
+    config.addinivalue_line(
+        "markers", "integration: 集成测试，需要 Redis/Celery 等外部服务"
+    )
     config.addinivalue_line("markers", "slow: 慢速测试，耗时较长")
     config.addinivalue_line("markers", "unit: 单元测试，不依赖外部服务")
 
@@ -243,7 +269,9 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     """
     for item in items:
         # 为所有 async 测试函数自动添加 asyncio marker
-        if isinstance(item, pytest.Function) and asyncio.iscoroutinefunction(item.function):
+        if isinstance(item, pytest.Function) and asyncio.iscoroutinefunction(
+            item.function
+        ):
             item.add_marker(pytest.mark.asyncio)
 
 
@@ -263,19 +291,28 @@ def restore_default_module_mocks(request: pytest.FixtureRequest):
         logger_handler_module = sys.modules.get("pkg.logger.handler")
         if logger_handler_module is not None:
             logger_handler_module.context = mock_context
+        logger_otel_module = sys.modules.get("pkg.logger.otel")
+        if logger_otel_module is not None:
+            logger_otel_module.request_context = mock_context
 
-    should_configure_span_logger = not _skip_logger_mock and "tests/logger" not in test_path
-    if should_configure_span_logger:
-        from pkg.logger.span import configure_span_logger  # noqa: PLC0415
+    restore_logger: tuple[object, object] | None = None
+    if _skip_logger_mock and "tests/logger" not in test_path:
+        from loguru import logger as real_logger  # noqa: PLC0415
 
-        configure_span_logger(mock_logger)
+        import pkg.logger as pkg_logger_module  # noqa: PLC0415
+
+        restore_logger = (
+            pkg_logger_module._logger,
+            pkg_logger_module._logger_manager,
+        )
+        pkg_logger_module._logger = real_logger
 
     yield
 
-    if should_configure_span_logger:
-        from pkg.logger.span import configure_span_logger  # noqa: PLC0415
+    if restore_logger is not None:
+        import pkg.logger as pkg_logger_module  # noqa: PLC0415
 
-        configure_span_logger(None)
+        pkg_logger_module._logger, pkg_logger_module._logger_manager = restore_logger
 
 
 # ==========================================
@@ -321,7 +358,9 @@ async def db_engine() -> AsyncGenerator[AsyncEngine, None]:
 
 
 @pytest_asyncio.fixture(scope="function")
-async def db_session(db_engine: AsyncEngine) -> AsyncGenerator[async_sessionmaker[AsyncSession], None]:
+async def db_session(
+    db_engine: AsyncEngine,
+) -> AsyncGenerator[async_sessionmaker[AsyncSession], None]:
     """
     创建测试用的数据库会话工厂。
 
@@ -352,7 +391,9 @@ async def db_session(db_engine: AsyncEngine) -> AsyncGenerator[async_sessionmake
 
 
 @pytest_asyncio.fixture
-async def db_session_with_rollback(db_engine: AsyncEngine) -> AsyncGenerator[AsyncSession, None]:
+async def db_session_with_rollback(
+    db_engine: AsyncEngine,
+) -> AsyncGenerator[AsyncSession, None]:
     """
     创建带有自动回滚的数据库会话。
 
@@ -522,8 +563,7 @@ def sample_user_data() -> dict[str, Any]:
 def sample_users_data() -> list[dict[str, Any]]:
     """提供批量测试用户数据"""
     return [
-        {"username": f"user_{i}", "email": f"user_{i}@example.com"}
-        for i in range(5)
+        {"username": f"user_{i}", "email": f"user_{i}@example.com"} for i in range(5)
     ]
 
 
@@ -557,7 +597,9 @@ def freeze_time():
     with patch("datetime.datetime") as mock_dt:
         mock_dt.utcnow.return_value = frozen_time.replace(tzinfo=None)
         mock_dt.now.return_value = frozen_time
-        mock_dt.side_effect = lambda *args, **kwargs: datetime(*args, **kwargs) if args else frozen_time
+        mock_dt.side_effect = lambda *args, **kwargs: (
+            datetime(*args, **kwargs) if args else frozen_time
+        )
         yield frozen_time
 
 

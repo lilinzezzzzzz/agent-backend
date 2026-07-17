@@ -17,6 +17,12 @@
 - [Python `@dataclass` 实战指南](development/dataclass_use_guide.md)
 - [程序员常用 Markdown 语法速查](development/md_use_guide.md)
 
+## `opentelemetry/`
+
+日志、指标、分布式追踪和可观测性数据传输相关文档。
+
+- [OpenTelemetry 上下文传播与 OTLP 上报机制](opentelemetry/opentelemetry_context_and_otlp.md)
+
 ## `plans/`
 
 尚未执行、待验证或待拆分的开发计划。

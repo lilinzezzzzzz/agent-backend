@@ -1,18 +1,18 @@
 import time
 
 from fastapi.exceptions import RequestValidationError
-from opentelemetry.trace import SpanKind, StatusCode
 from fastapi.responses import Response
+from opentelemetry.trace import SpanKind, StatusCode
 from starlette.datastructures import MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from internal.core import AppException, errors
-from pkg.logger import logger, span_context
 from pkg import request_context as context
-from pkg.toolkit.exc import get_business_exec_tb, get_unexpected_exec_tb
-from pkg.toolkit.middleware import BaseMiddlewareContext
 from pkg.api_response import error_response
 from pkg.ids import normalize_uuid7_trace_id, uuid6_unique_str_id
+from pkg.logger import logger, span_context
+from pkg.toolkit.exc import get_business_exec_tb, get_unexpected_exec_tb
+from pkg.toolkit.middleware import BaseMiddlewareContext
 
 _REQUEST_SPAN_NAME = "middleware.request"
 

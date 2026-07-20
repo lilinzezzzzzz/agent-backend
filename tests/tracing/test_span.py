@@ -12,10 +12,14 @@ from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.trace import SpanKind, StatusCode
 
+import pkg.tracing.otel as otel_runtime
 from pkg.logger import LogFormat, LoggerHandler
-import pkg.logger.otel as otel_runtime
-from pkg.logger.otel import RequestContextIdGenerator, init_tracing, shutdown_tracing
-from pkg.logger.span import span_context
+from pkg.tracing import (
+    RequestContextIdGenerator,
+    init_tracing,
+    shutdown_tracing,
+    span_context,
+)
 
 _TRACE_ID = "019da8cd058b76ed8a4a52141c1c6b38"
 
@@ -107,6 +111,7 @@ async def test_root_span_uses_request_context_trace_id_and_exports(
     assert finished[0].kind is SpanKind.SERVER
     assert finished[0].parent is None
     assert finished[0].attributes["http.request.method"] == "GET"
+    assert finished[0].instrumentation_scope.name == "pkg.tracing.span"
 
 
 @pytest.mark.asyncio

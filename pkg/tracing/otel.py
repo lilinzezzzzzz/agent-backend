@@ -4,15 +4,17 @@ from dataclasses import dataclass
 from threading import Lock
 
 from opentelemetry import trace
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.sdk.trace.id_generator import RandomIdGenerator
 from opentelemetry.sdk.trace.sampling import ALWAYS_ON, ParentBased
 from opentelemetry.trace import Tracer
 
 from pkg import request_context
 
-_INSTRUMENTATION_SCOPE_NAME = "pkg.logger.span"
+_INSTRUMENTATION_SCOPE_NAME = "pkg.tracing.span"
 
 
 class RequestContextIdGenerator(RandomIdGenerator):
@@ -43,6 +45,8 @@ class TracingRuntime:
 
     enabled: bool
     service_name: str
+    otlp_traces_endpoint: str | None
+    exporter_timeout_seconds: float | None
     provider: TracerProvider | None
     tracer: Tracer | None
     owns_provider: bool
@@ -56,6 +60,8 @@ def init_tracing(
     *,
     enabled: bool,
     service_name: str,
+    otlp_traces_endpoint: str | None = None,
+    exporter_timeout_seconds: float = 10.0,
     tracer_provider: TracerProvider | None = None,
 ) -> None:
     """初始化进程级 tracing runtime。
@@ -65,10 +71,23 @@ def init_tracing(
     """
 
     normalized_service_name = service_name.strip()
+    normalized_endpoint = (
+        otlp_traces_endpoint.strip() if otlp_traces_endpoint is not None else None
+    )
+    effective_endpoint = normalized_endpoint if enabled else None
+    effective_timeout = (
+        exporter_timeout_seconds if effective_endpoint is not None else None
+    )
     if not normalized_service_name:
         raise ValueError("service_name cannot be empty")
+    if normalized_endpoint == "":
+        raise ValueError("otlp_traces_endpoint cannot be empty")
+    if exporter_timeout_seconds <= 0:
+        raise ValueError("exporter_timeout_seconds must be greater than zero")
     if not enabled and tracer_provider is not None:
         raise ValueError("tracer_provider requires enabled tracing")
+    if tracer_provider is not None and normalized_endpoint is not None:
+        raise ValueError("otlp_traces_endpoint cannot be used with tracer_provider")
 
     global _runtime
     with _runtime_lock:
@@ -79,6 +98,8 @@ def init_tracing(
             if (
                 _runtime.enabled == enabled
                 and _runtime.service_name == normalized_service_name
+                and _runtime.otlp_traces_endpoint == effective_endpoint
+                and _runtime.exporter_timeout_seconds == effective_timeout
                 and same_provider
             ):
                 return
@@ -90,6 +111,8 @@ def init_tracing(
             _runtime = TracingRuntime(
                 enabled=False,
                 service_name=normalized_service_name,
+                otlp_traces_endpoint=None,
+                exporter_timeout_seconds=None,
                 provider=None,
                 tracer=None,
                 owns_provider=False,
@@ -104,6 +127,16 @@ def init_tracing(
             id_generator=RequestContextIdGenerator(),
         )
 
+        if owns_provider and effective_endpoint is not None:
+            provider.add_span_processor(
+                BatchSpanProcessor(
+                    OTLPSpanExporter(
+                        endpoint=effective_endpoint,
+                        timeout=exporter_timeout_seconds,
+                    )
+                )
+            )
+
         if owns_provider:
             trace.set_tracer_provider(provider)
             if trace.get_tracer_provider() is not provider:
@@ -115,6 +148,8 @@ def init_tracing(
         _runtime = TracingRuntime(
             enabled=True,
             service_name=normalized_service_name,
+            otlp_traces_endpoint=effective_endpoint,
+            exporter_timeout_seconds=effective_timeout,
             provider=provider,
             tracer=provider.get_tracer(_INSTRUMENTATION_SCOPE_NAME),
             owns_provider=owns_provider,
@@ -153,6 +188,7 @@ def get_tracer() -> Tracer:
 
 __all__ = [
     "RequestContextIdGenerator",
+    "TracingRuntime",
     "get_tracer",
     "init_tracing",
     "is_tracing_enabled",

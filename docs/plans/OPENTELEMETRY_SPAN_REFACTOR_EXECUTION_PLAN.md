@@ -1,6 +1,6 @@
 # OpenTelemetry Span 彻底重构执行计划
 
-状态：已实施。项目已使用 OpenTelemetry Span 替换 `pkg/logger/span.py` 中的自研 Span 树，不保留
+状态：已实施。项目已使用 OpenTelemetry Span 替换 `pkg/tracing/span.py` 中的自研 Span 树，不保留
 `SpanFrame`、`span_seq`、`parent_span_seq`、`span_path` 或 `span.start` / `span.end` / `span.error`
 兼容协议。验证结果见第 13 节。
 
@@ -52,7 +52,7 @@ FastAPI / Celery startup
 init_tracing(enabled=..., service_name=...)
         │
         ▼
-pkg.logger.otel.TracingRuntime
+pkg.tracing.otel.TracingRuntime
         │
         ▼
 span_context 内部判断
@@ -117,7 +117,7 @@ OTEL_SERVICE_NAME=agent-backend
 
 ### 3.2 启动时注入
 
-应用层只负责把配置注入基础设施，不让 `pkg/logger` 反向依赖 `internal.config`：
+应用层只负责把配置注入基础设施，不让 `pkg/tracing` 反向依赖 `internal.config`：
 
 ```python
 init_tracing(
@@ -147,7 +147,7 @@ FastAPI lifespan 和 Celery Worker hook 分别初始化和关闭 tracing runtime
 - Celery 自动 instrumentation
 - OpenTelemetry Logs SDK
 
-### 4.2 新增 `pkg/logger/otel.py`
+### 4.2 新增 `pkg/tracing/otel.py`
 
 该模块负责：
 
@@ -199,7 +199,7 @@ class RequestContextIdGenerator(RandomIdGenerator):
 - 不构造虚假的前端父 Span。
 - 未来有有效远程父上下文时，SDK 直接继承父 Trace ID，不调用 Root Trace ID Generator。
 
-## 5. 彻底重写 `pkg/logger/span.py`
+## 5. 彻底重写 `pkg/tracing/span.py`
 
 ### 5.1 删除内容
 
@@ -329,7 +329,7 @@ class SpanNodeSchema(BaseModel):
 实现要求：
 
 - demo service 在进入 Span 前读取当前父 SpanContext，在进入后读取真实 Trace ID / Span ID。
-- demo 展示所需计时留在 service 层，不回填到 `pkg/logger/span.py`。
+- demo 展示所需计时留在 service 层，不回填到 `pkg/tracing/span.py`。
 - 前端使用 `span_id -> parent_span_id` 建树。
 - tracing 关闭时，模拟接口返回明确的“Tracing 未启用”错误，不生成虚假 Span。
 - mock trace 必须生成合法且确定性的 Trace ID / Span ID，不能继续使用 seq 模拟身份。
@@ -417,17 +417,17 @@ class SpanNodeSchema(BaseModel):
 
 ```bash
 uv run pytest \
-  tests/logger/test_span.py \
+  tests/tracing/test_span.py \
   tests/logger/test_middleware_span.py \
   tests/logger/test_logger.py \
   -q
 
-uv run pytest tests/logger tests/middlewares -q
+uv run pytest tests/tracing tests/logger tests/middlewares -q
 uv run pytest -q
 
-uv run ruff check pkg/logger internal/middlewares tests/logger
-uv run ruff format --check pkg/logger internal/middlewares tests/logger
-uv run mypy pkg/logger internal/middlewares/recorder.py
+uv run ruff check pkg/tracing pkg/logger internal/middlewares tests/tracing tests/logger
+uv run ruff format --check pkg/tracing pkg/logger internal/middlewares tests/tracing tests/logger
+uv run mypy pkg/tracing pkg/logger internal/middlewares/recorder.py
 
 git diff --check
 git status --short
@@ -458,7 +458,7 @@ git status --short
 
 ## 12. 完成标准
 
-- `pkg/logger/span.py` 中不存在自研 Span 树、Span 身份或手工计时。
+- `pkg/tracing/span.py` 中不存在自研 Span 树、Span 身份或手工计时。
 - `span_context` 是唯一公共埋点入口，全仓不存在 `with_span` 的定义、导出或调用。
 - 全仓不存在 `SpanFrame`、`span_seq`、`parent_span_seq`、`span_path` 的有效代码引用。
 - 全仓不存在 `span.start`、`span.end`、`span.error` 兼容日志依赖。

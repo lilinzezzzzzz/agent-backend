@@ -19,11 +19,11 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 from opentelemetry.trace import SpanKind, StatusCode
 
 import pkg.logger as logger_module
-import pkg.logger.otel as otel_runtime
+import pkg.tracing.otel as otel_runtime
 from internal.core import errors
 from pkg import request_context as context
 from pkg.logger import LogFormat, init_logger
-from pkg.logger.otel import RequestContextIdGenerator, init_tracing, shutdown_tracing
+from pkg.tracing import RequestContextIdGenerator, init_tracing, shutdown_tracing
 
 _PUBLIC_TRACE_ID = "019da8cd058b76ed8a4a52141c1c6b38"
 _INTERNAL_TRACE_ID = "019da8cd058b76ed8a4a52141c1c6b39"

@@ -50,17 +50,22 @@ OpenTelemetry 本身不是可观测性后端，通常不负责遥测数据的长
 
 ### 1.4 当前项目的接入边界
 
-当前项目只接入轻量 Trace SDK，不接入 OTLP Exporter 或自动 Instrumentation：
+当前项目接入轻量 Trace SDK 和 OTLP/HTTP Exporter，不接入自动 Instrumentation：
 
+- tracing runtime 与 `span_context` 的公共 API 统一位于 `pkg.tracing`。
 - 业务埋点统一使用 `async with span_context(...)`，内部根据 `OTEL_TRACING_ENABLED` 决定创建真实 Span
   还是返回 non-recording Span。
-- `OTEL_TRACING_ENABLED` 和 `OTEL_SERVICE_NAME` 的实际值维护在 `configs/.env.{APP_ENV}`。
+- `OTEL_TRACING_ENABLED`、`OTEL_SERVICE_NAME`、`OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`
+  和 `OTEL_EXPORTER_OTLP_TIMEOUT_SECONDS` 的实际值维护在 `configs/.env.{APP_ENV}`。
 - 浏览器暂不接入 OpenTelemetry，只传递 UUIDv7 hex 格式的 `X-Trace-ID`。
 - FastAPI recorder middleware 校验 `X-Trace-ID` 并写入 request context；没有合法值时由服务端生成。
 - 没有远程父上下文时，FastAPI SERVER Span 使用 request context 中的 ID 作为 Root Trace ID。
 - 当前不解析 `traceparent` / `tracestate`；未来扩展优先级为
   `traceparent > X-Trace-ID > OpenTelemetry SDK 生成`。
-- 当前没有 Exporter，因此 Span 不会通过 OTLP 发送到 Collector 或可观测性后端。
+- 配置 `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` 后，进程级 `TracerProvider` 会挂载
+  `BatchSpanProcessor + OTLPSpanExporter`，并在 FastAPI / Celery 进程关闭时 flush 和 shutdown。
+- `simulate_logger_span` 产生的真实 Span 会异步上报到 Collector；接口只返回 `trace_id`，
+  不代表 ClickHouse 已完成持久化。
 
 ## 2. 先区分两条数据路径
 

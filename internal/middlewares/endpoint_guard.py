@@ -14,9 +14,10 @@ from internal.cache.endpoint_guard import EndpointGuardCache, new_endpoint_guard
 from internal.config import settings
 from internal.core import AppException, errors
 from internal.schemas import IgnoreExtraModel
-from pkg.logger import logger, span_context
+from pkg.logger import logger
 from pkg.toolkit.json import orjson_loads
 from pkg.toolkit.middleware import BaseMiddlewareContext
+from pkg.tracing import span_context
 
 _SPAN_NAME = "middleware.endpoint_guard"
 _ANY_METHOD = "*"

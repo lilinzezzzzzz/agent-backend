@@ -18,6 +18,8 @@ def _base_env_values() -> dict[str, str]:
         "DEBUG": "true",
         "OTEL_TRACING_ENABLED": "false",
         "OTEL_SERVICE_NAME": "agent-backend-test",
+        "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT": "http://collector:4318/v1/traces",
+        "OTEL_EXPORTER_OTLP_TIMEOUT_SECONDS": "7",
         "JWT_ALGORITHM": "HS256",
         "DB_TYPE": "postgresql",
         "DB_HOST": "dotenv-db",
@@ -78,6 +80,37 @@ def test_shell_environment_is_fallback_when_dotenv_value_is_missing(
     settings = _new_settings(env_path, secrets_path)
 
     assert settings.REDIS_HOST == "shell-redis"
+
+
+def test_otlp_exporter_config_values_are_loaded(tmp_path: Path) -> None:
+    env_path = tmp_path / ".env.test"
+    secrets_path = tmp_path / ".secrets"
+    _write_env_file(env_path, _base_env_values())
+    _write_env_file(secrets_path, _secret_values())
+
+    settings = _new_settings(env_path, secrets_path)
+
+    assert (
+        str(settings.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT)
+        == "http://collector:4318/v1/traces"
+    )
+    assert settings.OTEL_EXPORTER_OTLP_TIMEOUT_SECONDS == 7
+
+
+def test_tracing_requires_otlp_traces_endpoint(tmp_path: Path) -> None:
+    env_path = tmp_path / ".env.test"
+    secrets_path = tmp_path / ".secrets"
+    env_values = _base_env_values()
+    env_values["OTEL_TRACING_ENABLED"] = "true"
+    env_values.pop("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
+    _write_env_file(env_path, env_values)
+    _write_env_file(secrets_path, _secret_values())
+
+    with pytest.raises(
+        ValidationError,
+        match="OTEL_EXPORTER_OTLP_TRACES_ENDPOINT is required",
+    ):
+        _new_settings(env_path, secrets_path)
 
 
 def test_celery_publish_confirmation_timeout_exceeds_reconciler_interval(

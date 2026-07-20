@@ -25,8 +25,6 @@ from pkg.logger.handler import (
     RotationType,
     TimezoneType,
 )
-from pkg.logger.otel import init_tracing, shutdown_tracing
-from pkg.logger.span import span_context
 from pkg.lazy_proxy import lazy_proxy
 
 if TYPE_CHECKING:
@@ -119,9 +117,6 @@ __all__ = [
     # 初始化函数
     "init_logger",
     "get_logger_manager",
-    "init_tracing",
-    "shutdown_tracing",
     # Logger 实例
     "logger",
-    "span_context",
 ]

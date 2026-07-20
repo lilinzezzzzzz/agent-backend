@@ -10,9 +10,10 @@ from internal.core import AppException, errors
 from pkg import request_context as context
 from pkg.api_response import error_response
 from pkg.ids import normalize_uuid7_trace_id, uuid6_unique_str_id
-from pkg.logger import logger, span_context
+from pkg.logger import logger
 from pkg.toolkit.exc import get_business_exec_tb, get_unexpected_exec_tb
 from pkg.toolkit.middleware import BaseMiddlewareContext
+from pkg.tracing import span_context
 
 _REQUEST_SPAN_NAME = "middleware.request"
 

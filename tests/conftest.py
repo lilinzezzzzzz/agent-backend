@@ -88,7 +88,6 @@ if not _skip_logger_mock:
         RotationType,
         TimezoneType,
     )
-    from pkg.logger.span import span_context  # noqa: PLC0415
 
     def init_logger(
         *,
@@ -135,10 +134,7 @@ if not _skip_logger_mock:
     mock_logger_module.RetentionType = RetentionType
     mock_logger_module.TimezoneType = TimezoneType
     mock_logger_module.init_logger = init_logger
-    mock_logger_module.init_tracing = MagicMock()
-    mock_logger_module.shutdown_tracing = MagicMock()
     mock_logger_module.get_logger_manager = get_logger_manager
-    mock_logger_module.span_context = span_context
     mock_logger_module._logger_manager = None
     mock_logger_module._logger = None
 else:
@@ -175,9 +171,9 @@ if not _skip_context_mock:
     logger_handler_module = sys.modules.get("pkg.logger.handler")
     if logger_handler_module is not None:
         logger_handler_module.context = mock_context
-    logger_otel_module = sys.modules.get("pkg.logger.otel")
-    if logger_otel_module is not None:
-        logger_otel_module.request_context = mock_context
+    tracing_otel_module = sys.modules.get("pkg.tracing.otel")
+    if tracing_otel_module is not None:
+        tracing_otel_module.request_context = mock_context
 
 # Mock snowflake ID 生成器
 _id_counter = 0
@@ -291,9 +287,9 @@ def restore_default_module_mocks(request: pytest.FixtureRequest):
         logger_handler_module = sys.modules.get("pkg.logger.handler")
         if logger_handler_module is not None:
             logger_handler_module.context = mock_context
-        logger_otel_module = sys.modules.get("pkg.logger.otel")
-        if logger_otel_module is not None:
-            logger_otel_module.request_context = mock_context
+        tracing_otel_module = sys.modules.get("pkg.tracing.otel")
+        if tracing_otel_module is not None:
+            tracing_otel_module.request_context = mock_context
 
     restore_logger: tuple[object, object] | None = None
     if _skip_logger_mock and "tests/logger" not in test_path:

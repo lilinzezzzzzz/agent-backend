@@ -39,7 +39,7 @@
 - `pkg/http_client/`：基于 httpx 的异步 HTTP 客户端封装。
 - `pkg/ids/`：UUIDv7 / Snowflake ID 生成。
 - `pkg/llm/AGENTS.md`：OpenAI-compatible LLM 客户端、provider 能力和结构化输出契约。
-- `pkg/logger/AGENTS.md`：Loguru 封装、span 上下文、延迟初始化协议。
+- `pkg/logger/AGENTS.md`：Loguru 封装与延迟初始化协议。
 - `pkg/oss/AGENTS.md`：对象存储统一契约、后端注册。
 - `pkg/lazy_proxy/`：延迟初始化代理。
 - `pkg/redis/`：Redis 原语客户端、JSON 编解码和分布式锁。
@@ -50,4 +50,5 @@
 - `pkg/celery_queue/`：Celery 客户端、任务提交和 worker hook。
 - `pkg/third_party_auth/AGENTS.md`：第三方登录策略 + 工厂扩展。
 - `pkg/toolkit/AGENTS.md`：细粒度通用工具定位、兼容性和禁忌。
+- `pkg/tracing/AGENTS.md`：OpenTelemetry runtime、Span 门面和进程生命周期。
 - `pkg/vectors/AGENTS.md`：向量检索抽象、repository、backend。

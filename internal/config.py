@@ -10,6 +10,7 @@ from typing import Any, Literal
 from dotenv import dotenv_values
 from loguru import logger
 from pydantic import (
+    AnyHttpUrl,
     MySQLDsn,
     PositiveInt,
     PostgresDsn,
@@ -76,6 +77,8 @@ class Settings(BaseSettings):
     # --- OpenTelemetry ---
     OTEL_TRACING_ENABLED: bool
     OTEL_SERVICE_NAME: str
+    OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: AnyHttpUrl | None = None
+    OTEL_EXPORTER_OTLP_TIMEOUT_SECONDS: PositiveInt = 10
 
     # --- 密钥配置 ---
     AES_SECRET: SecretStr
@@ -211,6 +214,19 @@ class Settings(BaseSettings):
                 except Exception as e:
                     logger.error(f"Failed to decrypt field '{field}': {str(e)}")
                     raise ValueError(f"Failed to decrypt field '{field}'") from e
+        return self
+
+    @model_validator(mode="after")
+    def validate_tracing_exporter(self) -> "Settings":
+        """启用 tracing 时必须配置真实的 OTLP/HTTP Trace 接收端。"""
+        if (
+            self.OTEL_TRACING_ENABLED
+            and self.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT is None
+        ):
+            raise ValueError(
+                "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT is required when "
+                "OTEL_TRACING_ENABLED=true"
+            )
         return self
 
     @model_validator(mode="after")

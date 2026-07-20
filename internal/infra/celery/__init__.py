@@ -22,7 +22,8 @@ from internal.tasks.scheduler import (
     CELERY_TASK_ROUTES,
     STATIC_BEAT_SCHEDULE,
 )
-from pkg.logger import init_logger, init_tracing, logger, shutdown_tracing
+from pkg.logger import init_logger, logger
+from pkg.tracing import init_tracing, shutdown_tracing
 from pkg import request_context as context
 from pkg.celery_queue import CeleryClient
 
@@ -55,6 +56,12 @@ def _worker_startup():
     init_tracing(
         enabled=settings.OTEL_TRACING_ENABLED,
         service_name=settings.OTEL_SERVICE_NAME,
+        otlp_traces_endpoint=(
+            str(settings.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT)
+            if settings.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT is not None
+            else None
+        ),
+        exporter_timeout_seconds=settings.OTEL_EXPORTER_OTLP_TIMEOUT_SECONDS,
     )
     logger.info(f"Celery worker initialized with APP_ENV: {settings.APP_ENV}")
     logger.info(">>> Worker Process Starting: Initializing basic resources...")

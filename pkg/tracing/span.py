@@ -13,7 +13,7 @@ from opentelemetry.trace import (
 )
 from opentelemetry.util.types import AttributeValue
 
-from pkg.logger.otel import get_tracer, is_tracing_enabled
+from pkg.tracing.otel import get_tracer, is_tracing_enabled
 
 _SPAN_NAME_PATTERN = re.compile(r"^[A-Za-z0-9]+([._-][A-Za-z0-9]+)*$")
 _NOOP_SPAN = NonRecordingSpan(INVALID_SPAN_CONTEXT)

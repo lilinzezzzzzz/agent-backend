@@ -88,7 +88,7 @@ def test_text_formatter_shows_current_otel_span_id():
     record = {
         "time": datetime(2026, 4, 20, 2, 51, 41, 837000, tzinfo=UTC),
         "level": type("Level", (), {"name": "ERROR"})(),
-        "name": "pkg.logger.span",
+        "name": "pkg.tracing.span",
         "function": "__aexit__",
         "line": 211,
         "message": "request failed",
@@ -123,7 +123,7 @@ def test_text_formatter_keeps_braces_in_dynamic_values():
     record = {
         "time": datetime(2026, 4, 20, 2, 51, 41, 837000, tzinfo=UTC),
         "level": type("Level", (), {"name": "INFO"})(),
-        "name": "pkg.logger.span",
+        "name": "pkg.tracing.span",
         "function": "__aenter__",
         "line": 181,
         "message": "message-{raw}",

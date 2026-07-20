@@ -12,7 +12,7 @@ class SpanStatus(StrEnum):
 
     OK = "ok"
     ERROR = "error"
- 
+
 
 class SpanSimulateReqSchema(BaseModel):
     """Span 模拟请求。"""
@@ -29,7 +29,7 @@ class SpanSimulateReqSchema(BaseModel):
 
 
 class SpanNodeSchema(BaseModel):
-    """单个真实或确定性模拟的 OTel Span 节点。"""
+    """单个 OTel Span 节点。"""
 
     trace_id: str = Field(pattern=r"^[0-9a-f]{32}$")
     span_id: str = Field(pattern=r"^[0-9a-f]{16}$")
@@ -48,7 +48,7 @@ class SpanNodeSchema(BaseModel):
 
 
 class SpanSimulateRespSchema(BaseModel):
-    """完整 Trace 的模拟响应。"""
+    """完整 Trace 响应。"""
 
     scenario: str
     trace_id: str = Field(pattern=r"^[0-9a-f]{32}$")
@@ -58,6 +58,12 @@ class SpanSimulateRespSchema(BaseModel):
     elapsed_ms: float = Field(ge=0.0)
     failed_step: str | None = None
     spans: list[SpanNodeSchema]
+
+
+class SpanSimulateResultSchema(BaseModel):
+    """触发 OTel Span 模拟流程后的响应。"""
+
+    trace_id: str = Field(pattern=r"^[0-9a-f]{32}$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,7 +98,17 @@ class SpanNodeDTO:
 
 @dataclass(frozen=True, slots=True)
 class SpanSimulateDTO:
-    """Service 层承载的完整 Trace。"""
+    """Service 层承载的 Span 模拟结果。"""
+
+    trace_id: str
+
+    def to_schema(self) -> SpanSimulateResultSchema:
+        return SpanSimulateResultSchema(trace_id=self.trace_id)
+
+
+@dataclass(frozen=True, slots=True)
+class SpanTraceDTO:
+    """Service 层承载的完整 mock Trace。"""
 
     scenario: str
     trace_id: str

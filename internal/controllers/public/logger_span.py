@@ -2,12 +2,10 @@
 
 - `GET /v1/public/logger-span/viewer` 返回根目录 `frontend/logger_span/index.html`
   内容，供浏览器直接打开可视化页面，不需要另启前端服务。
-- `GET /v1/public/logger-span/traces/{trace_id}` 为上述页面提供无需登录的
-  数据镜像，与 authenticated `GET /v1/logger-span/traces/{trace_id}` 共享同一
-  Service，返回完全一致的 DTO。
+- `GET /v1/public/logger-span/traces/{trace_id}` 与 authenticated
+  `GET /v1/logger-span/traces/{trace_id}` 共享同一 Service。
 
-当前阶段为 demo 用途，trace store 仅保存在进程内；后续持久化方案
-落地后，本接口可以直接切换为从 DB 读取。
+当前返回确定性 mock Trace，不读取真实可观测性存储。
 """
 
 from pathlib import Path as FsPath
@@ -45,7 +43,7 @@ async def get_logger_span_trace_public(
             min_length=32,
             max_length=32,
             pattern=r"^[0-9a-fA-F]{32}$",
-            description="32 位十六进制 trace_id，命中进程内缓存时返回真实采集结果。",
+            description="32 位十六进制 trace_id，用于生成确定性 mock Trace。",
         ),
     ],
 ) -> ResponsePayload:
@@ -56,20 +54,18 @@ async def get_logger_span_trace_public(
         供浏览器内可视化页面直接拉取 span 数据。
 
     权限边界:
-        无需认证（`/v1/public` 前缀）；trace store 不区分用户维度，
-        不适合导入真实业务数据；后续持久化完成后需重新评估可否保留开放。
+        无需认证（`/v1/public` 前缀）；只返回确定性 mock 数据。
 
     业务边界:
-        只读接口，不修改进程内 LRU 缓存以外的 state，不访问数据库、Redis
-        或外部服务；trace_id 会在传输层和 Service 层分别校验。
+        只读接口，不访问数据库、Redis 或外部服务，也不读取 `/simulate`
+        产生的真实 Span；trace_id 会在传输层和 Service 层分别校验。
 
     Args:
         service: 通过依赖注入获取的 `LoggerSpanService` 实例。
         trace_id: 目标 trace_id，路径参数，必须是 32 位十六进制字符串。
 
     Returns:
-        `BaseResponse[SpanSimulateRespSchema]`：命中时返回真实 trace；未命中时
-        返回确定性 mock 结果。
+        `BaseResponse[SpanSimulateRespSchema]`：返回确定性 mock Trace 数据。
     """
     result = await service.get_trace(trace_id=trace_id)
     return success_response(data=result.to_schema())

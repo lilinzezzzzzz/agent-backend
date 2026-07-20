@@ -13,7 +13,8 @@ from internal.utils.background_tasks import (
 )
 from internal.utils.signature import init_signature_auth_handler
 from internal.utils.snowflake import init_snowflake_id_generator
-from pkg.logger import init_logger, init_tracing, logger, shutdown_tracing
+from pkg.logger import init_logger, logger
+from pkg.tracing import init_tracing, shutdown_tracing
 
 
 def create_app() -> FastAPI:
@@ -96,6 +97,12 @@ async def lifespan(_app: FastAPI):
     init_tracing(
         enabled=settings.OTEL_TRACING_ENABLED,
         service_name=settings.OTEL_SERVICE_NAME,
+        otlp_traces_endpoint=(
+            str(settings.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT)
+            if settings.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT is not None
+            else None
+        ),
+        exporter_timeout_seconds=settings.OTEL_EXPORTER_OTLP_TIMEOUT_SECONDS,
     )
     # 初始化 DB（使用配置中的 echo）
     init_async_db(echo=settings.DB_ECHO)

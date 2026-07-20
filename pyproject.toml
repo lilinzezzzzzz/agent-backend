@@ -71,6 +71,7 @@ dependencies = [
     "pypinyin>=0.55.0",
     "agentscope>=2,<3",
     "opentelemetry-api>=1.42.1,<2",
+    "opentelemetry-exporter-otlp-proto-http>=1.42.1,<2",
     "opentelemetry-sdk>=1.42.1,<2",
 ]
 

@@ -4,6 +4,7 @@ import asyncio
 import sys
 import types
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 if "pkg.vectors" not in sys.modules:
@@ -127,15 +128,36 @@ def test_chunk_repository_supports_domain_as_regular_filter():
 
 
 def test_new_chunk_repository_requires_embedder(monkeypatch):
+    import internal.rag.repositories.chunk_vector as chunk_vector_module
     import pkg.vectors.backends as backends
 
     backend = MagicMock()
     backend.ensure_collection = AsyncMock()
     embedder = MagicMock()
+    backend_kwargs: dict[str, object] = {}
 
-    monkeypatch.setattr(backends, "create_backend", lambda **_: backend)
+    def create_backend(**kwargs):
+        backend_kwargs.update(kwargs)
+        return backend
+
+    monkeypatch.setattr(backends, "create_backend", create_backend)
+    monkeypatch.setattr(
+        chunk_vector_module,
+        "settings",
+        SimpleNamespace(
+            MILVUS_URI="http://milvus.example:19530",
+            MILVUS_DB_NAME="rag_test",
+            MILVUS_TIMEOUT_SECONDS=7,
+        ),
+    )
 
     repo = asyncio.run(new_chunk_repository(embedder=embedder, scope_value=1))
 
     assert repo.embedder is embedder
+    assert backend_kwargs == {
+        "provider": backends.BackendProvider.MILVUS,
+        "uri": "http://milvus.example:19530",
+        "db_name": "rag_test",
+        "timeout": 7,
+    }
     backend.ensure_collection.assert_awaited_once_with(spec=repo.collection_spec)

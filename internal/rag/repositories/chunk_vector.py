@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from internal.config import settings
 from pkg.vectors.backends.base import (
     BackendProvider,
     CollectionName,
@@ -207,7 +208,12 @@ async def new_chunk_repository(
     from pkg.vectors.backends import create_backend
 
     repository = ChunkVectorRepository(
-        backend=create_backend(provider=BackendProvider.MILVUS),
+        backend=create_backend(
+            provider=BackendProvider.MILVUS,
+            uri=str(settings.MILVUS_URI),
+            db_name=settings.MILVUS_DB_NAME,
+            timeout=settings.MILVUS_TIMEOUT_SECONDS,
+        ),
         embedder=embedder,
         scope_value=scope_value,
     )

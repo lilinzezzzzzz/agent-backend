@@ -29,6 +29,9 @@ def _base_env_values() -> dict[str, str]:
         "REDIS_HOST": "dotenv-redis",
         "REDIS_PORT": "6379",
         "REDIS_DB": "0",
+        "MILVUS_URI": "http://milvus:19530",
+        "MILVUS_DB_NAME": "test_database",
+        "MILVUS_TIMEOUT_SECONDS": "7",
     }
 
 
@@ -110,6 +113,31 @@ def test_tracing_requires_otlp_traces_endpoint(tmp_path: Path) -> None:
         ValidationError,
         match="OTEL_EXPORTER_OTLP_TRACES_ENDPOINT is required",
     ):
+        _new_settings(env_path, secrets_path)
+
+
+def test_milvus_config_values_are_loaded(tmp_path: Path) -> None:
+    env_path = tmp_path / ".env.test"
+    secrets_path = tmp_path / ".secrets"
+    _write_env_file(env_path, _base_env_values())
+    _write_env_file(secrets_path, _secret_values())
+
+    settings = _new_settings(env_path, secrets_path)
+
+    assert str(settings.MILVUS_URI) == "http://milvus:19530/"
+    assert settings.MILVUS_DB_NAME == "test_database"
+    assert settings.MILVUS_TIMEOUT_SECONDS == 7
+
+
+def test_milvus_database_name_cannot_be_empty(tmp_path: Path) -> None:
+    env_path = tmp_path / ".env.test"
+    secrets_path = tmp_path / ".secrets"
+    env_values = _base_env_values()
+    env_values["MILVUS_DB_NAME"] = "  "
+    _write_env_file(env_path, env_values)
+    _write_env_file(secrets_path, _secret_values())
+
+    with pytest.raises(ValidationError, match="MILVUS_DB_NAME cannot be empty"):
         _new_settings(env_path, secrets_path)
 
 

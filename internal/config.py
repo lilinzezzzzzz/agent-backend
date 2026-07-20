@@ -111,6 +111,11 @@ class Settings(BaseSettings):
     EMBEDDING_DIMENSION: PositiveInt = 1024
     EMBEDDING_TIMEOUT_SECONDS: PositiveInt = 60
 
+    # --- Vector store ---
+    MILVUS_URI: AnyHttpUrl
+    MILVUS_DB_NAME: str = "default"
+    MILVUS_TIMEOUT_SECONDS: PositiveInt = 10
+
     # --- Agent ---
     AGENT_ACTION_CONFIRMATION_SECONDS: PositiveInt = 300
     AGENT_ACTION_IDEMPOTENCY_SECONDS: PositiveInt = 86400
@@ -192,6 +197,14 @@ class Settings(BaseSettings):
         if v not in allowed:
             raise ValueError(f"DB_TYPE must be one of {allowed}, got '{v}'")
         return v
+
+    @field_validator("MILVUS_DB_NAME")
+    def validate_milvus_db_name(cls, value: str) -> str:
+        """Milvus database 名称必须是非空字符串。"""
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("MILVUS_DB_NAME cannot be empty")
+        return normalized
 
     @model_validator(mode="after")
     def decrypt_sensitive_fields(self) -> "Settings":

@@ -22,6 +22,7 @@
 日志、指标、分布式追踪和可观测性数据传输相关文档。
 
 - [OpenTelemetry 上下文传播与 OTLP 上报机制](opentelemetry/opentelemetry_context_and_otlp.md)
+- [当前项目 OpenTelemetry 接入与可观测性数据持久化](opentelemetry/project_integration_and_persistence.md)
 
 ## `plans/`
 

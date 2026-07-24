@@ -1,6 +1,8 @@
 # OpenTelemetry 上下文传播与 OTLP 上报机制
 
 本文说明 OpenTelemetry 如何把跨端调用关联为同一条 Trace，以及 OTLP 在可观测性数据上报链路中的职责边界。
+当前项目的接入方式、实现边界和持久化方案见
+[当前项目 OpenTelemetry 接入与可观测性数据持久化](project_integration_and_persistence.md)。
 
 ## 1. 什么是 OpenTelemetry
 
@@ -47,25 +49,6 @@ OpenTelemetry 统一的是这些数据从应用产生到发送给后端之前的
 
 OpenTelemetry 本身不是可观测性后端，通常不负责可观测性数据的长期存储、查询、仪表盘、告警和最终展示。
 这些能力由 Jaeger、Prometheus、Grafana 生态或商业可观测性平台提供。
-
-### 1.4 当前项目的接入边界
-
-当前项目接入轻量 Trace SDK 和 OTLP/HTTP Exporter，不接入自动 Instrumentation：
-
-- tracing runtime 与 `span_context` 的公共 API 统一位于 `pkg.tracing`。
-- 业务埋点统一使用 `async with span_context(...)`，内部根据 `OTEL_TRACING_ENABLED` 决定创建真实 Span
-  还是返回 non-recording Span。
-- `OTEL_TRACING_ENABLED`、`OTEL_SERVICE_NAME`、`OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`
-  和 `OTEL_EXPORTER_OTLP_TIMEOUT_SECONDS` 的实际值维护在 `configs/.env.{APP_ENV}`。
-- 浏览器暂不接入 OpenTelemetry，只传递 UUIDv7 hex 格式的 `X-Trace-ID`。
-- FastAPI recorder middleware 校验 `X-Trace-ID` 并写入 request context；没有合法值时由服务端生成。
-- 没有远程父上下文时，FastAPI SERVER Span 使用 request context 中的 ID 作为 Root Trace ID。
-- 当前不解析 `traceparent` / `tracestate`；未来扩展优先级为
-  `traceparent > X-Trace-ID > OpenTelemetry SDK 生成`。
-- 配置 `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` 后，进程级 `TracerProvider` 会挂载
-  `BatchSpanProcessor + OTLPSpanExporter`，并在 FastAPI / Celery 进程关闭时 flush 和 shutdown。
-- `simulate_logger_span` 产生的真实 Span 会异步上报到 Collector；接口只返回 `trace_id`，
-  不代表 ClickHouse 已完成持久化。
 
 ## 2. 先区分两条数据路径
 
@@ -235,7 +218,95 @@ OTLP/HTTP 的完全成功和部分成功都返回 `200 OK`，部分成功通过�
 OTLP 只关注相邻客户端和服务端之间的交付，不提供应用到最终存储端的端到端持久化保证。
 Exporter、Collector 和后端仍需根据部署方式配置队列、超时、重试和持久化策略。
 
-## 5. 工程落地检查表
+## 5. 可观测性数据如何持久化
+
+OpenTelemetry 负责生成、处理和传输可观测性数据，但不定义通用的长期存储系统。
+数据持久化由接收 OTLP 的可观测性后端，或 Collector 下游连接的存储系统完成。
+
+### 5.1 组件职责边界
+
+| 组件 | 持久化链路中的职责 | 通常不负责 |
+| --- | --- | --- |
+| API / SDK | 生成数据，执行采样、聚合和批处理 | 长期存储和查询 |
+| Exporter | 按 OTLP 或其他协议发送数据 | 判断最终存储是否可查询 |
+| Collector | 接收、处理、过滤、脱敏、路由和转发数据 | 默认提供完整的长期存储与查询能力 |
+| 可观测性后端 | 写入存储、建立索引并提供查询、仪表盘和告警 | 业务请求中的上下文传播 |
+| 底层存储 | 保存数据副本并执行索引、保留和删除策略 | 理解业务调用链语义，除非上层完成数据建模 |
+
+Collector 可以使用内存或磁盘队列缓冲待导出的数据，但缓冲队列不是最终可观测性存储。
+它解决的是短暂故障期间的传输可靠性；长期查询、保留周期、索引和访问控制仍由后端负责。
+
+### 5.2 典型持久化链路
+
+```mermaid
+flowchart LR
+    App[应用] --> SDK[OpenTelemetry SDK]
+    SDK --> Exporter[Exporter]
+    Exporter -->|OTLP| Receiver[Collector 或后端 Receiver]
+    Receiver --> TracePipeline[Trace pipeline]
+    Receiver --> MetricPipeline[Metric pipeline]
+    Receiver --> LogPipeline[Log pipeline]
+    TracePipeline --> TraceStore[Trace 存储]
+    MetricPipeline --> MetricStore[Metric 时序存储]
+    LogPipeline --> LogStore[Log 存储]
+    TraceStore --> Query[查询 / 仪表盘 / 告警]
+    MetricStore --> Query
+    LogStore --> Query
+```
+
+同一套 Collector 可以把不同信号路由到不同后端。即使 Trace、Metric 和 Log 分别存储，也可以通过
+`trace_id`、`span_id`、`service.name`、时间戳和 Resource 属性建立关联。
+
+OTLP 是传输协议，不是数据库存储格式。后端通常会把 OTLP 数据转换成自己的表结构、索引或时序模型：
+
+| 信号 | 持久化时关注的数据关系 | 典型查询 |
+| --- | --- | --- |
+| Trace | `trace_id`、Span 父子关系、起止时间、状态、属性、事件和 Link | 按 Trace ID 还原调用树，按服务、操作或错误筛选慢请求 |
+| Metric | 时间序列、属性维度、数据点、聚合时间语义和直方图 | 按时间窗口聚合请求量、延迟、错误率和资源使用率 |
+| Log | 时间、严重级别、正文、结构化字段以及 Trace / Span 关联字段 | 按关键词、字段、时间范围或 Trace ID 检索事件 |
+
+后端选型和数据模型需要匹配主要查询方式。能够接收 OTLP 只说明后端具备协议入口，不自动代表它已经提供合适的
+索引、查询 API、仪表盘、告警、数据迁移和容量治理能力。
+
+### 5.3 从“已生成”到“可查询”
+
+一条数据通常依次经历以下状态：
+
+```text
+SDK 已生成
+  → Processor / Reader 已接收
+  → Exporter 已发送
+  → 相邻 Receiver 已接受
+  → 后端已写入
+  → 索引或聚合已可查询
+```
+
+这些状态不能相互替代：
+
+- Span 已结束，不代表 Batch Processor 已完成导出。
+- OTLP 返回完全成功，只能确认相邻 Receiver 已接受数据，不代表最终存储已经写入。
+- Collector 已转发，不代表后端索引立即可见。
+- 查询暂时未命中，可能是数据丢失，也可能是批处理或索引的最终一致性延迟。
+- 查询已经命中，不代表数据会永久保留；后端仍可能按 TTL 或保留策略删除它。
+
+普通业务请求通常不应同步等待最终持久化，否则可观测性后端会成为业务可用性的强依赖。
+需要通过 Collector 与后端指标、队列状态、导出错误和端到端探针监控数据缺口。
+
+### 5.4 持久化设计需要明确什么
+
+- **查询路径**：按 Trace ID、时间范围、服务、操作、错误状态、日志字段或 Metric 维度查询。
+- **索引与基数**：限制动态 Span 名称和高基数属性，评估索引、内存和存储成本。
+- **保留策略**：为原始数据、聚合数据和不同环境分别设置 TTL、归档与删除规则。
+- **容量控制**：明确采样率、聚合方式、单条数据大小、队列上限和峰值写入能力。
+- **可靠性**：配置有界队列、超时、重试、持久缓冲、优雅关闭以及后端不可用时的降级行为。
+- **数据安全**：采集前过滤凭证和个人信息，传输使用 TLS 与认证，查询执行最小权限和租户隔离。
+- **数据治理**：定义 schema 演进、后端升级、备份恢复、审计、迁移和回滚方式。
+- **端到端验收**：使用已知 Trace 或测试数据验证接收、写入、查询、关联、延迟和过期删除行为。
+
+具体项目应在独立文档中记录当前实现、目标后端、部署拓扑和验收状态；本项目见
+[当前项目 OpenTelemetry 接入与可观测性数据持久化](project_integration_and_persistence.md)。
+
+## 6. 工程落地检查表
 
 - 所有需要串联的入口和下游客户端都已启用 Instrumentation。
 - HTTP、gRPC 和消息队列分别在正确载体中注入、提取 Trace Context。
@@ -247,8 +318,10 @@ Exporter、Collector 和后端仍需根据部署方式配置队列、超时、�
 - 批处理、超时、队列、重试和进程关闭时的 flush 行为符合可靠性要求。
 - 采样策略可解释，并能区分“上下文已传播”和“Span 实际已记录并上报”。
 - 使用同一 `trace-id` 验证上下游 Span 是否在后端正确关联。
+- 后端的索引、保留周期、TTL、容量、查询权限和敏感字段治理已经明确。
+- 已区分“Receiver 接受”“后端写入”和“查询可见”，并对持久化延迟、失败和数据丢弃建立监控。
 
-## 6. 参考资料
+## 7. 参考资料
 
 - [OpenTelemetry：What is OpenTelemetry?](https://opentelemetry.io/docs/what-is-opentelemetry/)
 - [OpenTelemetry：Components](https://opentelemetry.io/docs/concepts/components/)

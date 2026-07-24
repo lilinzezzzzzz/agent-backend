@@ -1,11 +1,13 @@
 import json
 from datetime import UTC, datetime
 from typing import Any
+from unittest.mock import patch
+from zoneinfo import ZoneInfo
 
 import pytest
 from loguru import logger as loguru_logger
 
-from pkg.logger import LoggerHandler
+from pkg.logger import LogFormat, LoggerHandler
 
 # 全局变量用于存储测试期间的 manager 实例
 _test_manager: LoggerHandler | None = None
@@ -83,7 +85,54 @@ def test_default_logging(setup_logging):
     assert find_text_log(expected, msg), "未在文本日志中找到目标消息"
 
 
-def test_text_formatter_shows_current_otel_span_id():
+def test_file_logging_only_appends_to_fixed_file(tmp_path):
+    base_log_dir = tmp_path / "logs"
+    archive = base_log_dir / "app.2026-07-23.log"
+    base_log_dir.mkdir(parents=True)
+    archive.write_text("managed by external rotation\n", encoding="utf-8")
+
+    manager = LoggerHandler(base_log_dir=base_log_dir, enqueue=False)
+    logger = manager.setup(write_to_file=True, write_to_console=False)
+    logger.info("first entry")
+    logger.info("second entry")
+
+    assert sorted(path.name for path in base_log_dir.iterdir()) == [
+        "app.2026-07-23.log",
+        "app.log",
+    ]
+    assert archive.read_text(encoding="utf-8") == "managed by external rotation\n"
+    assert find_text_log(base_log_dir / "app.log", "first entry")
+    assert find_text_log(base_log_dir / "app.log", "second entry")
+
+
+def test_file_logging_can_be_disabled_without_creating_directory(tmp_path):
+    base_log_dir = tmp_path / "logs"
+    manager = LoggerHandler(base_log_dir=base_log_dir, enqueue=False)
+
+    manager.setup(write_to_file=False, write_to_console=False)
+
+    assert not base_log_dir.exists()
+
+
+def test_setup_disables_diagnose_for_all_sinks(tmp_path):
+    manager = LoggerHandler(base_log_dir=tmp_path / "logs", enqueue=False)
+
+    with patch.object(manager._logger, "add", wraps=manager._logger.add) as add:
+        manager.setup(write_to_file=True, write_to_console=True)
+
+    assert len(add.call_args_list) == 2
+    assert all(call.kwargs["diagnose"] is False for call in add.call_args_list)
+
+
+def test_timezone_accepts_string_zoneinfo_and_datetime_utc():
+    assert LoggerHandler(timezone="Asia/Shanghai").timezone == ZoneInfo("Asia/Shanghai")
+    assert LoggerHandler(timezone=ZoneInfo("America/New_York")).timezone == ZoneInfo(
+        "America/New_York"
+    )
+    assert LoggerHandler(timezone=UTC).timezone == ZoneInfo("UTC")
+
+
+def test_text_formatter_shows_trace_id_without_span_id():
     handler = LoggerHandler()
 
     record = {
@@ -110,12 +159,10 @@ def test_text_formatter_shows_current_otel_span_id():
         "{level: <8} | "
         "{name}:{function}:{line} | "
         "{extra[_formatted_trace_id]} | "
-        "{extra[_formatted_span_id]} | "
-        "{message} | {extra[_text_json]}\n"
+        "{message} | {extra[_text_json]}\n{exception}"
     )
     assert record["extra"]["_formatted_time"] == "2026-04-20T02:51:41.837Z"
     assert record["extra"]["_formatted_trace_id"] == "019da8cd058b76ed8a4a52141c1c6b38"
-    assert record["extra"]["_formatted_span_id"] == "00f067aa0ba902b7"
 
 
 def test_text_formatter_keeps_braces_in_dynamic_values():
@@ -130,7 +177,6 @@ def test_text_formatter_keeps_braces_in_dynamic_values():
         "message": "message-{raw}",
         "extra": {
             "trace_id": "trace-{raw}",
-            "span_id": "span-{raw}",
             "json_content": None,
         },
     }
@@ -142,14 +188,12 @@ def test_text_formatter_keeps_braces_in_dynamic_values():
         "{level: <8} | "
         "{name}:{function}:{line} | "
         "{extra[_formatted_trace_id]} | "
-        "{extra[_formatted_span_id]} | "
-        "{message}\n"
+        "{message}\n{exception}"
     )
     assert record["extra"]["_formatted_trace_id"] == "trace-{raw}"
-    assert record["extra"]["_formatted_span_id"] == "span-{raw}"
 
 
-def test_text_formatter_uses_placeholder_without_span_id():
+def test_json_formatter_excludes_span_id():
     handler = LoggerHandler()
     record = {
         "time": datetime(2026, 4, 20, 2, 51, 41, 837000, tzinfo=UTC),
@@ -160,12 +204,70 @@ def test_text_formatter_uses_placeholder_without_span_id():
         "message": "initialized",
         "extra": {
             "trace_id": "019da8cd058b76ed8a4a52141c1c6b38",
-            "span_id": None,
+            "span_id": "00f067aa0ba902b7",
+            "request_id": "request-123",
             "json_content": None,
         },
     }
 
-    formatted = handler._text_formatter(record)
+    formatted = handler._json_formatter(record)
+    serialized = json.loads(record["extra"]["_json_out"])
 
-    assert "{extra[_formatted_trace_id]} | {extra[_formatted_span_id]} | " in formatted
-    assert record["extra"]["_formatted_span_id"] == "-"
+    assert formatted == "{extra[_json_out]}\n"
+    assert serialized["trace_id"] == "019da8cd058b76ed8a4a52141c1c6b38"
+    assert serialized["timestamp"] == "2026-04-20T02:51:41.837Z"
+    assert serialized["severity_text"] == "INFO"
+    assert serialized["message"] == "initialized"
+    assert serialized["code"] == {
+        "namespace": "pkg.logger.handler",
+        "function": "setup",
+        "lineno": 1,
+    }
+    assert serialized["attributes"] == {"request_id": "request-123"}
+    assert "time" not in serialized
+    assert "level" not in serialized
+    assert "location" not in serialized
+    assert "text" not in serialized
+    assert "span_id" not in serialized
+
+
+def test_json_logging_keeps_exception_in_single_json_line(tmp_path):
+    base_log_dir = tmp_path / "logs"
+    manager = LoggerHandler(
+        base_log_dir=base_log_dir,
+        log_format=LogFormat.JSON,
+        enqueue=False,
+    )
+    logger = manager.setup(write_to_file=True, write_to_console=False)
+
+    try:
+        raise ValueError("invalid value")
+    except ValueError:
+        logger.exception("operation failed")
+
+    lines = (base_log_dir / "app.log").read_text(encoding="utf-8").splitlines()
+    records = [json.loads(line) for line in lines]
+    exception_record = next(
+        record for record in records if record["message"] == "operation failed"
+    )
+
+    assert all(line.strip() for line in lines)
+    assert exception_record["exception"]["type"] == "ValueError"
+    assert exception_record["exception"]["message"] == "invalid value"
+    assert "ValueError: invalid value" in exception_record["exception"]["stacktrace"]
+
+
+def test_text_logging_keeps_exception_traceback(tmp_path):
+    base_log_dir = tmp_path / "logs"
+    manager = LoggerHandler(base_log_dir=base_log_dir, enqueue=False)
+    logger = manager.setup(write_to_file=True, write_to_console=False)
+
+    try:
+        raise RuntimeError("operation failed")
+    except RuntimeError:
+        logger.exception("unexpected error")
+
+    content = (base_log_dir / "app.log").read_text(encoding="utf-8")
+    assert "unexpected error" in content
+    assert "Traceback (most recent call last)" in content
+    assert "RuntimeError: operation failed" in content

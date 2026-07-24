@@ -26,11 +26,11 @@ from pydantic_settings import (
     SettingsConfigDict,
 )
 
-from internal import BASE_DIR
+from internal import BASE_DIR, BASE_LOG_DIR
 from pkg.crypter.aes import aes_decrypt
+from pkg.lazy_proxy import lazy_proxy
 from pkg.logger import LogFormat
 from pkg.toolkit.string import mask_string
-from pkg.lazy_proxy import lazy_proxy
 
 # =========================================================
 # 配置定义
@@ -74,6 +74,9 @@ class Settings(BaseSettings):
 
     # --- 日志配置 ---
     LOG_FORMAT: LogFormat = LogFormat.TEXT  # 日志格式: TEXT 或 JSON
+    LOG_BASE_DIR: Path = BASE_LOG_DIR
+    LOG_WRITE_TO_FILE: bool = True
+    LOG_WRITE_TO_CONSOLE: bool = True
 
     # --- OpenTelemetry ---
     OTEL_TRACING_ENABLED: bool

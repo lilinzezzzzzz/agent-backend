@@ -18,7 +18,7 @@ import sys
 import types
 import uuid
 from collections.abc import AsyncGenerator, Generator
-from datetime import UTC, datetime, time, timedelta
+from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
@@ -84,8 +84,6 @@ if not _skip_logger_mock:
     from pkg.logger.handler import (  # noqa: PLC0415
         LogFormat,
         LoggerHandler,
-        RetentionType,
-        RotationType,
         TimezoneType,
     )
 
@@ -93,9 +91,6 @@ if not _skip_logger_mock:
         *,
         level: str = "INFO",
         base_log_dir: Path | None = None,
-        rotation: RotationType = time(0, 0, 0, tzinfo=UTC),
-        retention: RetentionType = timedelta(days=30),
-        compression: str | None = None,
         timezone: TimezoneType = "UTC",
         enqueue: bool = True,
         log_format: LogFormat = LogFormat.TEXT,
@@ -105,9 +100,6 @@ if not _skip_logger_mock:
         logger_manager = LoggerHandler(
             level=level,
             base_log_dir=base_log_dir,
-            rotation=rotation,
-            retention=retention,
-            compression=compression,
             timezone=timezone,
             enqueue=enqueue,
             log_format=log_format,
@@ -130,8 +122,6 @@ if not _skip_logger_mock:
 
     mock_logger_module.LogFormat = LogFormat
     mock_logger_module.LoggerHandler = LoggerHandler
-    mock_logger_module.RotationType = RotationType
-    mock_logger_module.RetentionType = RetentionType
     mock_logger_module.TimezoneType = TimezoneType
     mock_logger_module.init_logger = init_logger
     mock_logger_module.get_logger_manager = get_logger_manager

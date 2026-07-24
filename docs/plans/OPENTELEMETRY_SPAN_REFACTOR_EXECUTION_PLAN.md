@@ -77,7 +77,7 @@ span_context 内部判断
 - `span_context` 创建并激活真实 OTel Span。
 - 嵌套和异步任务通过 OTel Context 自动继承父 Span。
 - `span_context` 退出时由 SDK 记录异常、设置状态、结束 Span 并恢复上层 Context。
-- 活跃 Span 内的日志从 OTel `SpanContext` 读取 `trace_id` 和 `span_id`。
+- 活跃 Span 内的日志从 OTel `SpanContext` 读取 `trace_id`；普通日志不输出 `span_id`。
 
 ## 3. 配置设计
 
@@ -266,9 +266,9 @@ async with span_context("service.order.create") as span:
 
 - 删除 `configure_span_logger()` 调用。
 - 删除 `span_seq`、`parent_span_seq`、`span_path`、`span_name` 格式化和输出。
-- patcher 使用 `trace.get_current_span().get_span_context()` 读取当前有效的 `trace_id` 和 `span_id`。
-- 有效 OTel Span 内，日志输出 32 位 `trace_id` 和 16 位 `span_id`。
-- 没有有效 OTel Span 时，`trace_id` 回退到 `request_context.trace_id`，`span_id` 输出 `null` 或文本占位符。
+- patcher 使用 `trace.get_current_span().get_span_context()` 读取当前有效的 `trace_id`。
+- 有效 OTel Span 内，日志输出 32 位 `trace_id`，不输出 `span_id`。
+- 没有有效 OTel Span 时，`trace_id` 回退到 `request_context.trace_id`。
 - 日志不重新维护 `parent_span_id`；真实父子关系由 OTel Span 数据表达。
 
 ### 6.2 `internal/middlewares/recorder.py`

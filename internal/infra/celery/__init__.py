@@ -13,7 +13,6 @@ from collections.abc import Callable, Coroutine
 import anyio
 from celery import Celery
 
-from internal import BASE_LOG_DIR
 from internal.config import init_settings, settings
 from internal.infra.database import close_async_db, init_async_db, reset_async_db
 from internal.infra.redis import close_async_redis, init_async_redis, reset_async_redis
@@ -52,7 +51,13 @@ def _worker_startup():
         raise RuntimeError("Worker configuration initialization failed") from e
 
     # 2. 然后初始化 Logger (依赖配置中的日志格式等)
-    init_logger(level="INFO", base_log_dir=BASE_LOG_DIR / "celery")
+    init_logger(
+        level="INFO",
+        log_format=settings.LOG_FORMAT,
+        base_log_dir=settings.LOG_BASE_DIR / "celery",
+        write_to_file=settings.LOG_WRITE_TO_FILE,
+        write_to_console=settings.LOG_WRITE_TO_CONSOLE,
+    )
     init_tracing(
         enabled=settings.OTEL_TRACING_ENABLED,
         service_name=settings.OTEL_SERVICE_NAME,

@@ -3,7 +3,6 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 
-from internal import BASE_LOG_DIR
 from internal.config import init_settings, settings
 from internal.infra.database import close_async_db, init_async_db
 from internal.infra.redis import close_async_redis, init_async_redis
@@ -93,7 +92,12 @@ async def lifespan(_app: FastAPI):
     init_settings()
 
     # 初始化日志（使用配置中的格式）
-    init_logger(log_format=settings.LOG_FORMAT, base_log_dir=BASE_LOG_DIR)
+    init_logger(
+        log_format=settings.LOG_FORMAT,
+        base_log_dir=settings.LOG_BASE_DIR,
+        write_to_file=settings.LOG_WRITE_TO_FILE,
+        write_to_console=settings.LOG_WRITE_TO_CONSOLE,
+    )
     init_tracing(
         enabled=settings.OTEL_TRACING_ENABLED,
         service_name=settings.OTEL_SERVICE_NAME,

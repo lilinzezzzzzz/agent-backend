@@ -276,11 +276,10 @@ async def test_middlewares_create_real_request_and_auth_spans(
     handler_record = _find_record(records, handler_message)
     access_record = _find_record_prefix(records, "access log,")
     response_record = _find_record_prefix(records, "response log,")
-    root_span_id = f"{root.context.span_id:016x}"
     assert handler_record["trace_id"] == expected_trace_id
-    assert handler_record["span_id"] == root_span_id
-    assert access_record["span_id"] == root_span_id
-    assert response_record["span_id"] == root_span_id
+    assert "span_id" not in handler_record
+    assert "span_id" not in access_record
+    assert "span_id" not in response_record
 
 
 @pytest.mark.asyncio
@@ -310,7 +309,7 @@ async def test_missing_token_marks_auth_and_request_spans_as_error(
     records = _read_json_records(configured_logger)
     exception_record = _find_record_prefix(records, "Business exception,")
     assert exception_record["trace_id"] == _MISSING_TOKEN_TRACE_ID
-    assert exception_record["span_id"] == f"{root.context.span_id:016x}"
+    assert "span_id" not in exception_record
 
 
 @pytest.mark.asyncio

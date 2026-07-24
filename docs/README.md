@@ -17,6 +17,12 @@
 - [Python `@dataclass` 实战指南](development/dataclass_use_guide.md)
 - [程序员常用 Markdown 语法速查](development/md_use_guide.md)
 
+## `logging/`
+
+应用日志输出边界和部署环境的轮转、保留与持久化方案。
+
+- [日志输出与轮转部署方案](logging/log_rotation.md)
+
 ## `opentelemetry/`
 
 日志、指标、分布式追踪和可观测性数据传输相关文档。

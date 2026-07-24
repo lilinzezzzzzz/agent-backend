@@ -125,6 +125,27 @@ def test_otlp_exporter_config_values_are_loaded(tmp_path: Path) -> None:
     assert settings.OTEL_EXPORTER_OTLP_TIMEOUT_SECONDS == 7
 
 
+def test_log_output_config_values_are_loaded(tmp_path: Path) -> None:
+    env_path = tmp_path / ".env.test"
+    secrets_path = tmp_path / ".secrets"
+    env_values = _base_env_values()
+    env_values.update(
+        {
+            "LOG_BASE_DIR": "/var/log/agent-backend",
+            "LOG_WRITE_TO_FILE": "false",
+            "LOG_WRITE_TO_CONSOLE": "true",
+        }
+    )
+    _write_env_file(env_path, env_values)
+    _write_env_file(secrets_path, _secret_values())
+
+    settings = _new_settings(env_path, secrets_path)
+
+    assert settings.LOG_BASE_DIR == Path("/var/log/agent-backend")
+    assert settings.LOG_WRITE_TO_FILE is False
+    assert settings.LOG_WRITE_TO_CONSOLE is True
+
+
 def test_tracing_requires_otlp_traces_endpoint(tmp_path: Path) -> None:
     env_path = tmp_path / ".env.test"
     secrets_path = tmp_path / ".secrets"

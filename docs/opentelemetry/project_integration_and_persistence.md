@@ -16,7 +16,7 @@ Collector pipeline、持久化后端和真实 Trace 查询链路尚未在本仓�
 | 业务 Span | 已实现 | 业务代码使用 `async with span_context(...)` 手动埋点 |
 | Celery Worker tracing runtime | 已实现 | Worker 启动和关闭 hook 初始化、关闭 runtime |
 | OTLP Trace 上报 | 已实现 | `BatchSpanProcessor + OTLPSpanExporter` 使用 OTLP/HTTP 上报 |
-| Trace 与日志关联 | 已实现 | 日志处理器从当前 OTel Context 读取 `trace_id` 和 `span_id` |
+| Trace 与日志关联 | 已实现 | 日志处理器从当前 OTel Context 读取 `trace_id` |
 | W3C Trace Context | 未实现 | 当前不解析或注入 `traceparent` / `tracestate` |
 | 自动 Instrumentation | 未实现 | FastAPI、HTTP client 和 Celery 均未接入自动 Instrumentation |
 | Metric / Log 的 OTel pipeline | 未实现 | 当前只配置 Trace Exporter |
@@ -117,7 +117,8 @@ Span 和属性不得包含密码、Token、完整请求体或个人敏感信息�
 异常由 `span_context` 记录为 exception event 并设置错误状态；业务异常仍按原有应用语义传播或转换，
 不能因为可观测性链路失败而改变业务结果。
 
-日志处理器会读取当前有效 Span 的 `trace_id` 和 `span_id`。这只建立关联字段，不代表 Log 已通过
+日志处理器会读取当前有效 Span 的 `trace_id`。普通日志不输出 `span_id`；Span 身份和父子关系
+由 Trace 数据自身保留。日志中的 `trace_id` 只建立关联字段，不代表 Log 已通过
 OpenTelemetry 导出；当前 Log 仍走项目既有日志处理链路。
 
 ### 2.6 logger-span 演示接口边界

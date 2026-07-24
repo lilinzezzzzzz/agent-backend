@@ -6,7 +6,7 @@
 
 基于 Loguru 的统一日志封装。
 
-- `handler.py`：`LoggerHandler`，封装格式、分文件、rotation、retention、tz。
+- `handler.py`：`LoggerHandler`，封装格式、固定文件输出和时区处理。
 - `__init__.py`：通过 `pkg.lazy_proxy.lazy_proxy` 暴露延迟初始化的 `logger` 和 `init_logger`。
 
 ## 使用协议
@@ -17,14 +17,14 @@
 ## 编码约定
 
 - 新增字段先扩展 `LogFormat` / `LoggerHandler` 的参数；不要在业务代码里散落自定义 format string。
-- rotation / retention 策略通过枚举或类型别名表达，避免在调用点硬编码 `"10 MB"` / `"7 days"` 字符串。
+- 应用内不实现 rotation、retention 或 compression；由 Docker logging driver、Linux logrotate 或 Kubernetes 日志平台管理日志生命周期。
 - 不允许在日志 message 或 extra 里出现 token、密码、密钥、连接串明文；必要时先脱敏再落日志。
 - 若要在 `pkg/` 其他基础包中使用，优先接受 logger 注入（参考 `pkg/decorators/`），保持基础包可独立使用。
 
 ## 兼容性要求
 
 - `logger` 名称和 `init_logger` 签名被业务代码广泛依赖，改动前先全仓检索并补测试。
-- 日志文件路径、命名、rotation 粒度属于运维契约，变更需要同步 `configs/` 与运维文档。
+- 日志文件路径、命名和输出目标属于运维契约，变更需要同步 `configs/` 与运维文档。
 
 ## 验证重点
 

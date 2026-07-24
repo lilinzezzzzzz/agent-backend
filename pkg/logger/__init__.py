@@ -14,15 +14,12 @@ pkg.logger - 统一的日志管理包
     logger.info("Application started")
 """
 
-from datetime import UTC, time, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pkg.logger.handler import (
     LogFormat,
     LoggerHandler,
-    RetentionType,
-    RotationType,
     TimezoneType,
 )
 from pkg.lazy_proxy import lazy_proxy
@@ -53,9 +50,6 @@ def init_logger(
     *,
     level: str = "INFO",
     base_log_dir: Path | None = None,
-    rotation: RotationType = time(0, 0, 0, tzinfo=UTC),
-    retention: RetentionType = timedelta(days=30),
-    compression: str | None = None,
     timezone: TimezoneType = "UTC",
     enqueue: bool = True,
     log_format: LogFormat = LogFormat.TEXT,
@@ -67,13 +61,10 @@ def init_logger(
 
     :param level: 日志等级 (e.g., "INFO", "DEBUG")
     :param base_log_dir: 日志存放的根目录
-    :param rotation: 轮转策略 (默认: 每天 00:00, UTC时间)
-    :param retention: 保留策略 (默认: 30天)
-    :param compression: 压缩格式 (e.g., "zip")
     :param timezone: 日志时区，支持时区字符串（如 "UTC", "Asia/Shanghai"）、ZoneInfo 对象或 datetime.timezone（如 datetime.UTC），默认 "UTC"
-    :param enqueue: 是否使用异步队列写入；不能协调多个独立进程的文件轮转
+    :param enqueue: 是否使用异步队列写入
     :param log_format: 日志格式 (LogFormat.JSON 或 LogFormat.TEXT，默认 LogFormat.TEXT)
-    :param write_to_file: 是否写入文件；多 Worker 不应各自轮转同一个文件路径
+    :param write_to_file: 是否写入固定文件 app.log
     :param write_to_console: 是否输出到控制台
     :return: 初始化后的 Logger 实例
     """
@@ -82,9 +73,6 @@ def init_logger(
     _logger_manager = LoggerHandler(
         level=level,
         base_log_dir=base_log_dir,
-        rotation=rotation,
-        retention=retention,
-        compression=compression,
         timezone=timezone,
         enqueue=enqueue,
         log_format=log_format,
@@ -111,8 +99,6 @@ __all__ = [
     # 枚举
     "LogFormat",
     # 类型别名
-    "RotationType",
-    "RetentionType",
     "TimezoneType",
     # 初始化函数
     "init_logger",

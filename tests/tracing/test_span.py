@@ -175,23 +175,23 @@ async def test_asyncio_and_anyio_children_keep_parent_context(
 
 
 @pytest.mark.asyncio
-async def test_json_logs_use_current_otel_trace_and_span_ids(
+async def test_json_logs_use_current_otel_trace_id_without_span_id(
     tmp_path: Path,
     tracing_runtime: InMemorySpanExporter,
 ) -> None:
     base_log_dir = _configure_json_logger(tmp_path)
 
     async with span_context("logged") as span:
-        expected_trace_id, expected_span_id = _span_context_ids(span)
+        expected_trace_id, _ = _span_context_ids(span)
         loguru_logger.info("inside")
     loguru_logger.info("outside")
     loguru_logger.complete()
 
     records = {record["message"]: record for record in _read_records(base_log_dir)}
     assert records["inside"]["trace_id"] == expected_trace_id
-    assert records["inside"]["span_id"] == expected_span_id
+    assert "span_id" not in records["inside"]
     assert records["outside"]["trace_id"] == _TRACE_ID
-    assert records["outside"]["span_id"] is None
+    assert "span_id" not in records["outside"]
     assert "span.start" not in records
     assert "span.end" not in records
 

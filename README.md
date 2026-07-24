@@ -95,6 +95,9 @@ EMBEDDING_API_KEY=
 ```env
 DEBUG=true
 LOG_FORMAT=text
+LOG_BASE_DIR=logs
+LOG_WRITE_TO_FILE=true
+LOG_WRITE_TO_CONSOLE=true
 CONFIG_ECHO_REVEAL_SECRETS=false
 JWT_ALGORITHM=HS256
 
@@ -140,6 +143,8 @@ ENDPOINT_GUARD_FAIL_OPEN=true
 - `DB_PASSWORD`、`DB_READ_PASSWORD`、`REDIS_PASSWORD` 支持 `ENC(...)`，运行时使用 `AES_SECRET` 解密。
 - 设置 `DB_READ_HOST` 后会初始化只读副本；未设置时读会话自动 fallback 到主库。
 - `CONFIG_ECHO_REVEAL_SECRETS=true` 会在启动配置回显中显示敏感值，只应临时用于本地诊断。
+- Logger 只负责控制台输出和向 `LOG_BASE_DIR/app.log` 追加日志，不在应用内执行轮转、保留或压缩。
+- 启用 `LOG_WRITE_TO_FILE=true` 的长期运行环境必须同时配置外部日志轮转；部署方案见 `docs/logging/log_rotation.md`。
 - `LLM_*` 用于 Chat / Agent 推理模型；`EMBEDDING_*` 用于向量模型，两者不要共用配置。
 - `EMBEDDING_PROVIDER` 当前支持 `openai_compatible`，可接 OpenAI-compatible `/embeddings` 协议的 BGE、vLLM、Xinference、TEI 或自建向量服务。
 - `EMBEDDING_DIMENSION` 必须与向量模型输出维度和向量 collection schema 保持一致。

@@ -77,6 +77,7 @@ def test_default_logging(setup_logging):
     files = list(base_log_dir.glob("*.log"))
     assert len(files) == 1
     expected = files[0]
+    assert expected.name == "app.log"
 
     # 验证文本内容
     assert find_text_log(expected, msg), "未在文本日志中找到目标消息"

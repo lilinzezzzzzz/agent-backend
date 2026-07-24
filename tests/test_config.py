@@ -1,8 +1,11 @@
+import sys
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 from pydantic import ValidationError
 
+import internal.config as config_module
 from internal.config import Settings, _config_echo_value, _sensitive_secret_config_keys
 
 
@@ -47,6 +50,28 @@ def _secret_values() -> dict[str, str]:
 
 def _new_settings(*env_files: Path) -> Settings:
     return Settings(_env_file=list(env_files))  # type: ignore[call-arg]
+
+
+def test_startup_logger_uses_stderr_without_creating_log_file(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    startup_logger = MagicMock()
+    monkeypatch.setattr(config_module, "logger", startup_logger)
+    monkeypatch.setattr(config_module, "BASE_DIR", tmp_path)
+
+    result = config_module._setup_startup_logger()
+
+    assert result is startup_logger
+    startup_logger.remove.assert_called_once_with()
+    startup_logger.add.assert_called_once_with(
+        sys.stderr,
+        level="INFO",
+        enqueue=False,
+        colorize=False,
+        diagnose=False,
+    )
+    assert not (tmp_path / "logs").exists()
 
 
 def test_dotenv_values_take_priority_over_shell_environment(

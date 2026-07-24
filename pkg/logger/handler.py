@@ -15,6 +15,7 @@ from pkg.toolkit.timer import format_iso_datetime
 
 # 默认日志目录
 _DEFAULT_BASE_LOG_DIR = Path("/tmp/fastapi_logs")
+_ACTIVE_LOG_FILE_NAME = "app.log"
 
 # 类型别名
 RotationType = str | int | time | timedelta
@@ -56,7 +57,7 @@ class LoggerHandler:
         :param retention: 保留策略 (默认: 30天)
         :param compression: 压缩格式 (e.g., "zip")
         :param timezone: 日志时区，支持时区字符串（如 "UTC", "Asia/Shanghai"）、ZoneInfo 对象或 datetime.timezone（如 datetime.UTC），默认 "UTC"
-        :param enqueue: 是否使用多进程安全的队列写入
+        :param enqueue: 是否使用异步队列写入；不能协调多个独立进程的文件轮转
         :param log_format: 日志格式 (LogFormat.JSON 或 LogFormat.TEXT，默认 LogFormat.TEXT)
         """
 
@@ -179,9 +180,7 @@ class LoggerHandler:
             },
         }
 
-        # 2. 根据时区配置挂载 patcher
-        # 注意：patcher 影响日志文件名 {time:YYYY-MM-DD}.log 的时区
-        # 保持文件名时间与日志内容时间一致
+        # 2. 根据时区配置挂载 patcher，统一日志内容中的时间与关联字段
         config_params["patcher"] = self._make_record_patcher()
 
         self._logger.configure(**config_params)
@@ -201,7 +200,11 @@ class LoggerHandler:
         if write_to_file:
             log_dir = self._get_log_dir()
             self._ensure_dir(log_dir)
-            sink_path = log_dir / "{time:YYYY-MM-DD}.log"
+            # 活动文件名固定；轮转后由 Loguru 重命名为 app.<创建时间>.log。
+            # 多 Worker 若分别初始化 Handler 并共享该路径，各进程没有统一的轮转锁，
+            # 可能同时 rename、重建或清理文件。生产多进程应由平台统一轮转，
+            # 或改用单一日志写入进程、按进程拆分文件。
+            sink_path = log_dir / _ACTIVE_LOG_FILE_NAME
 
             self._logger.add(
                 sink=sink_path,
@@ -341,10 +344,6 @@ class LoggerHandler:
         1. 将 record["time"] 转换为配置的目标时区
         2. 注入标准 trace_id 字段
         3. 注入当前活跃 span 的字段
-
-        影响：
-        1. 日志文件名 {time:YYYY-MM-DD}.log 的时区
-        2. 保持文件名时间与日志内容时间一致
 
         Returns:
             日志记录补丁函数

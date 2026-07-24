@@ -1,4 +1,5 @@
 import os
+import re
 import time as time_module
 from datetime import UTC, time, timedelta
 
@@ -18,15 +19,19 @@ class TestLogRotationRetention:
         log_dir = base_log_dir
         print(f"log_dir: {log_dir}")
 
-        old_file = log_dir / "2023-01-01.log"
+        old_file = log_dir / "app.2023-01-01_00-00-00_000000.log"
         old_file.write_text("Old logs...")
 
         # 修改为 40 天前
         days_ago_40 = time_module.time() - (40 * 24 * 3600)
         os.utime(old_file, (days_ago_40, days_ago_40))
 
-        new_file = log_dir / "2023-12-01.log"
+        new_file = log_dir / "app.2023-12-01_00-00-00_000000.log"
         new_file.write_text("New logs...")
+
+        unrelated_file = log_dir / "audit.log"
+        unrelated_file.write_text("Audit logs...")
+        os.utime(unrelated_file, (days_ago_40, days_ago_40))
 
         # 2. 实例化 Manager (直接注入配置)
         # 使用 1 byte 轮转触发 retention 检查
@@ -55,6 +60,7 @@ class TestLogRotationRetention:
 
         assert not old_file.exists(), f"旧文件未被删除: {old_file}"
         assert new_file.exists(), f"新文件不应被删除: {new_file}"
+        assert unrelated_file.exists(), "普通日志 retention 不应清理其他日志流"
 
     def test_rotation_creates_new_files(self, tmp_path):
         """
@@ -79,7 +85,7 @@ class TestLogRotationRetention:
         # 2. 第一条日志
         logger.info("Log entry 1")
         files_step_1 = list(log_dir.glob("*.log*"))
-        assert len(files_step_1) >= 1
+        assert files_step_1 == [log_dir / "app.log"]
 
         # 3. 等待超时
         time_module.sleep(1.2)
@@ -89,6 +95,14 @@ class TestLogRotationRetention:
 
         files_step_2 = list(log_dir.glob("*.log*"))
         assert len(files_step_2) > len(files_step_1)
+        assert (log_dir / "app.log").exists()
+
+        rotated_files = [path for path in files_step_2 if path.name != "app.log"]
+        assert len(rotated_files) == 1
+        assert re.fullmatch(
+            r"app\.\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}_\d{6}\.log",
+            rotated_files[0].name,
+        )
 
     def test_init_sets_correct_timezone(self):
         """
@@ -169,4 +183,4 @@ class TestLogRotationRetention:
         logger.info("test")
 
         assert not (base_log_dir / "default").exists()
-        assert len(list(base_log_dir.glob("*.log"))) >= 1
+        assert (base_log_dir / "app.log").exists()

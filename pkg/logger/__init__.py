@@ -71,9 +71,9 @@ def init_logger(
     :param retention: 保留策略 (默认: 30天)
     :param compression: 压缩格式 (e.g., "zip")
     :param timezone: 日志时区，支持时区字符串（如 "UTC", "Asia/Shanghai"）、ZoneInfo 对象或 datetime.timezone（如 datetime.UTC），默认 "UTC"
-    :param enqueue: 是否使用多进程安全的队列写入
+    :param enqueue: 是否使用异步队列写入；不能协调多个独立进程的文件轮转
     :param log_format: 日志格式 (LogFormat.JSON 或 LogFormat.TEXT，默认 LogFormat.TEXT)
-    :param write_to_file: 是否写入文件
+    :param write_to_file: 是否写入文件；多 Worker 不应各自轮转同一个文件路径
     :param write_to_console: 是否输出到控制台
     :return: 初始化后的 Logger 实例
     """

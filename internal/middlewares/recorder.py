@@ -11,7 +11,7 @@ from pkg import request_context as context
 from pkg.api_response import error_response
 from pkg.ids import normalize_uuid7_trace_id, uuid6_unique_str_id
 from pkg.logger import logger
-from pkg.toolkit.exc import get_business_exec_tb, get_unexpected_exec_tb
+from pkg.toolkit.exc import format_exception_traceback
 from pkg.toolkit.middleware import BaseMiddlewareContext
 from pkg.tracing import span_context
 
@@ -121,13 +121,13 @@ class ASGIRecordMiddleware:
         """
         if isinstance(exc, AppException):
             logger.opt(depth=1).warning(
-                f"Business exception, exc={get_business_exec_tb(exc)}"
+                f"Business exception, exc={format_exception_traceback(exc, max_entries=3)}"
             )
         elif isinstance(exc, RequestValidationError):
             logger.opt(depth=1).warning(f"Validation Error: {exc}")
         else:
             logger.opt(depth=1).error(
-                f"Unexpected exception, exc={get_unexpected_exec_tb(exc)}"
+                f"Unexpected exception, exc={format_exception_traceback(exc, max_entries=10)}"
             )
 
     @staticmethod

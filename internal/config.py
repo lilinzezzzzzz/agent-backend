@@ -3,6 +3,7 @@
 包含配置类定义、加载逻辑和全局配置实例
 """
 
+import sys
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Literal
@@ -396,16 +397,14 @@ class Settings(BaseSettings):
 
 
 def _setup_startup_logger():
-    """配置启动日志"""
-    log_dir = BASE_DIR / "logs"
-    log_dir.mkdir(exist_ok=True)
+    """配置启动阶段的同步 stderr 日志，直到正式 Logger 接管。"""
+    logger.remove()
     logger.add(
-        log_dir / "startup.log",
-        rotation="1 day",
-        retention="7 days",
+        sys.stderr,
         level="INFO",
-        enqueue=True,
-        encoding="utf-8",
+        enqueue=False,
+        colorize=False,
+        diagnose=False,
     )
     return logger
 

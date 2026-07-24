@@ -239,14 +239,19 @@ TEST_REDIS_URL = os.getenv("TEST_REDIS_URL", "redis://localhost:6379/15")
 # ==========================================
 
 
-def pytest_configure(config: pytest.Config):
+@pytest.hookimpl(tryfirst=True)
+def pytest_configure(config: pytest.Config) -> None:
     """
     pytest 配置钩子，在测试开始前执行。
 
     用于：
     - 注册自定义 markers
     - 设置测试环境
+    - 设置 pytest 临时目录
     """
+    if config.option.basetemp is None:
+        config.option.basetemp = PROJECT_ROOT / ".pytest-tmp"
+
     # 注册自定义 markers
     config.addinivalue_line(
         "markers", "integration: 集成测试，需要 Redis/Celery 等外部服务"

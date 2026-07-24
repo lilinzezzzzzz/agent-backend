@@ -1,6 +1,6 @@
 # OpenTelemetry 上下文传播与 OTLP 上报机制
 
-本文说明 OpenTelemetry 如何把跨端调用关联为同一条 Trace，以及 OTLP 在遥测数据上报链路中的职责边界。
+本文说明 OpenTelemetry 如何把跨端调用关联为同一条 Trace，以及 OTLP 在可观测性数据上报链路中的职责边界。
 
 ## 1. 什么是 OpenTelemetry
 
@@ -19,9 +19,9 @@ OpenTelemetry（简称 OTel）是一套统一采集和传输可观测性数据�
 | 跨服务链路断裂 | 不同框架或追踪厂商无法识别彼此的 Trace 上下文 | 使用标准 Propagator 和 W3C Trace Context 传播调用链上下文 |
 | 采集管道重复建设 | 每个服务分别实现批处理、重试、过滤、脱敏和多后端转发 | 使用 SDK Processor、Exporter 和 Collector 复用通用采集与转发能力 |
 
-### 1.2 主要遥测信号
+### 1.2 主要可观测性信号
 
-三类主要遥测信号分别回答不同问题：
+三类主要可观测性信号分别回答不同问题：
 
 | 信号 | 主要回答的问题 | 典型内容 |
 | --- | --- | --- |
@@ -37,15 +37,15 @@ OpenTelemetry 统一的是这些数据从应用产生到发送给后端之前的
 | 组成部分 | 职责 |
 | --- | --- |
 | Specification | 定义跨语言实现需要遵守的行为和数据约定 |
-| API | 定义生成和关联遥测数据的编程接口 |
+| API | 定义生成和关联可观测性数据的编程接口 |
 | SDK | 实现采样、处理、聚合和导出等运行时能力 |
 | Instrumentation | 使用 API 对应用、框架和依赖进行手动或自动埋点 |
-| Semantic Conventions | 统一常见遥测属性的名称和语义 |
+| Semantic Conventions | 统一常见可观测性属性的名称和语义 |
 | Propagator | 在进程和服务之间注入、提取追踪上下文 |
-| OTLP | 定义遥测数据的格式、编码、传输和交付语义 |
-| Collector | 接收、处理并转发遥测数据 |
+| OTLP | 定义可观测性数据的格式、编码、传输和交付语义 |
+| Collector | 接收、处理并转发可观测性数据 |
 
-OpenTelemetry 本身不是可观测性后端，通常不负责遥测数据的长期存储、查询、仪表盘、告警和最终展示。
+OpenTelemetry 本身不是可观测性后端，通常不负责可观测性数据的长期存储、查询、仪表盘、告警和最终展示。
 这些能力由 Jaeger、Prometheus、Grafana 生态或商业可观测性平台提供。
 
 ### 1.4 当前项目的接入边界
@@ -69,15 +69,15 @@ OpenTelemetry 本身不是可观测性后端，通常不负责遥测数据的长
 
 ## 2. 先区分两条数据路径
 
-理解 OpenTelemetry 的关键，是区分“业务请求中的上下文传播”和“遥测数据上报”。
+理解 OpenTelemetry 的关键，是区分“业务请求中的上下文传播”和“可观测性数据上报”。
 它们可以共享同一个 `trace-id`，但目的、载体和执行组件不同。
 
 ```mermaid
 flowchart LR
     Client[浏览器或 App] -->|业务请求 + traceparent| ServiceA[服务 A]
     ServiceA -->|业务请求 + traceparent| ServiceB[服务 B]
-    ServiceA -.记录遥测数据.-> SDK[OpenTelemetry SDK]
-    ServiceB -.记录遥测数据.-> SDK
+    ServiceA -.记录可观测性数据.-> SDK[OpenTelemetry SDK]
+    ServiceB -.记录可观测性数据.-> SDK
     SDK --> Exporter[OTLP Exporter]
     Exporter -->|OTLP| Collector[Collector 可选]
     Collector --> Backend[Jaeger / Tempo / 其他后端]
@@ -87,9 +87,9 @@ flowchart LR
 | 路径 | 目的 | 常见载体 | 主要执行者 | 标准或协议 |
 | --- | --- | --- | --- | --- |
 | 上下文传播 | 让下游创建属于同一 Trace 的子 Span | HTTP Header、gRPC metadata、消息属性 | Propagator / Instrumentation | W3C Trace Context 等 |
-| 遥测上报 | 把已生成的 Span、Metric、Log 发送给接收端 | 独立的 HTTP 或 gRPC 请求 | Processor / Reader、Exporter、Receiver | OTLP 等 |
+| 可观测性数据上报 | 把已生成的 Span、Metric、Log 发送给接收端 | 独立的 HTTP 或 gRPC 请求 | Processor / Reader、Exporter、Receiver | OTLP 等 |
 
-> W3C Trace Context 负责把调用链串起来，OTLP 负责把已经采集的遥测数据报上去。
+> W3C Trace Context 负责把调用链串起来，OTLP 负责把已经采集的可观测性数据报上去。
 
 ## 3. W3C Trace Context 如何串联多端
 
@@ -155,7 +155,7 @@ Baggage 不会自动成为 Span 属性或通过 OTLP 上报；如需在后端检
 
 ## 4. OTLP 具体规定什么
 
-OTLP（OpenTelemetry Protocol）是遥测数据的 wire protocol，规定数据如何编码、传输和交付。
+OTLP（OpenTelemetry Protocol）是可观测性数据的 wire protocol，规定数据如何编码、传输和交付。
 它是协议规范，不是可运行程序，因此不会自行执行上报。
 
 ### 4.1 数据模型
@@ -205,7 +205,7 @@ flowchart LR
     Exporter -->|OTLP| Receiver[Collector 或后端的 OTLP Receiver]
 ```
 
-> OpenTelemetry SDK 中的 OTLP Exporter 按照 OTLP 规范，将遥测数据发送给 Collector 或可观测性后端。
+> OpenTelemetry SDK 中的 OTLP Exporter 按照 OTLP 规范，将可观测性数据发送给 Collector 或可观测性后端。
 
 以 Trace 为例，至少需要正确组装：
 

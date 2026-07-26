@@ -34,6 +34,9 @@ case "$WORK_ROOT" in
     / | /var | /var/log | /var/log/agent-backend)
         die "refusing to use a production or broad system directory: $WORK_ROOT"
         ;;
+    "$REPO_ROOT" | "$REPO_ROOT"/*)
+        die "work directory must be outside the repository build context: $WORK_ROOT"
+        ;;
 esac
 
 WORK_DIR=$(mktemp -d "$WORK_ROOT/agent-backend-logrotate.XXXXXX")

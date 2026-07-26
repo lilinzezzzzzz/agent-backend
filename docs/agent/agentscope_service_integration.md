@@ -37,7 +37,7 @@
 - `internal/app.py` 负责路由、中间件和 lifespan；基础设施初始化发生在主应用 lifespan。
 - `/v1` 默认 token 认证，`/v1/public` 无认证，`/v1/internal` 签名认证。
 - 配置由 `internal/config.py` 管理，`APP_ENV` 只在仓库根目录 `.env` 维护；应用据此加载
-  `configs/.env.{APP_ENV}`，最后由 `.secrets` 覆盖同名配置。
+  `configs/.env.{APP_ENV}`，凭据从 `.secrets` 独立读取，两类字段不允许相互覆盖。
 - `.secrets` 只用于敏感值，例如 `AES_SECRET`、`JWT_SECRET`、`DB_PASSWORD`、
   `REDIS_PASSWORD`、LLM provider API key；文档和日志不能泄露真实值。
 - 当前配置回显会按 `.secrets` 中的敏感 key 做掩码；`CONFIG_ECHO_REVEAL_SECRETS=true`

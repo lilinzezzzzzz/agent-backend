@@ -48,6 +48,11 @@
 # 微信开放平台配置
 WECHAT_APP_ID=wx_xxxxxxxxxxxxxx
 WECHAT_APP_SECRET=your_app_secret_here
+```
+
+在当前环境对应的 `configs/.env.{APP_ENV}` 中配置非敏感授权类型：
+
+```env
 WECHAT_GRANT_TYPE=authorization_code
 ```
 

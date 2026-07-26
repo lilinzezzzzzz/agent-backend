@@ -114,6 +114,7 @@ class AuthService:
             config=WeChatConfig(
                 app_id=settings.WECHAT_APP_ID,
                 app_secret=settings.WECHAT_APP_SECRET.get_secret_value(),
+                grant_type=settings.WECHAT_GRANT_TYPE,
             )
         )
 

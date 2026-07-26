@@ -21,8 +21,8 @@ README 只记录当前仓库可直接核对的能力；更细的设计约束和�
 ## 当前能力
 
 - 进程入口：`entrypoints/main.py` 导出 FastAPI `app`，`internal.infra.celery` 导出 Celery `celery_app`，`internal/app.py` 负责路由、中间件和 lifespan。
-- 配置加载：`APP_ENV` 只在根目录 `.env` 维护；应用据此加载 `configs/.env.{APP_ENV}`，再由
-  `.secrets` 覆盖敏感配置。
+- 配置加载：`APP_ENV` 只在根目录 `.env` 维护；应用据此加载 `configs/.env.{APP_ENV}` 和
+  `.secrets`，并严格隔离非敏感配置与凭据字段。
 - 数据库：异步 SQLAlchemy 连接池，支持主库和可选只读副本；配置层支持 PostgreSQL、MySQL、Oracle DSN。
 - Redis：连接池、业务缓存封装、认证 token metadata、Agent action confirmation / idempotency 缓存。
 - 认证：Token 认证、内部签名认证、公共路由白名单、微信登录接入点。
@@ -72,11 +72,11 @@ cp .secrets.example .secrets
 
 1. Compose 把根目录 `.env` 中的 `APP_ENV` 注入容器；本地直接运行时应用会直接读取该文件。
 2. 加载 `configs/.env.{APP_ENV}`。
-3. 再加载不含 `APP_ENV` 的 `.secrets`，同名配置覆盖环境配置文件。
-4. 除显式注入的 `APP_ENV` 外，shell 环境变量只作为缺省兜底，不覆盖配置文件中已有 key。
+3. 加载只包含凭据字段的 `.secrets`；该文件不能覆盖环境配置中的普通参数。
+4. 除显式注入的 `APP_ENV` 外，不从 shell 环境变量读取应用配置。
 
-缺少根目录 `.env` 中的 `APP_ENV`、缺少 `.secrets`、密钥文件残留 `APP_ENV`，或缺少对应的
-`configs/.env.{APP_ENV}`，应用都会在启动阶段失败。
+缺少根目录 `.env` 中的 `APP_ENV`、缺少 `.secrets`、配置文件缺少必填字段、字段位于错误文件，或出现
+未知字段时，应用都会在启动阶段失败。
 
 最小本地配置示例：
 
@@ -93,56 +93,15 @@ AES_SECRET=your_aes_secret_key
 JWT_SECRET=your_jwt_secret_key
 DB_PASSWORD=your_db_password
 REDIS_PASSWORD=
+WECHAT_APP_ID=
+WECHAT_APP_SECRET=
 LLM_MIMO_API_KEY=your_mimo_api_key
 LLM_DEEPSEEK_API_KEY=your_deepseek_api_key
 EMBEDDING_API_KEY=
 ```
 
-`configs/.env.local`
-
-```env
-DEBUG=true
-LOG_FORMAT=text
-LOG_BASE_DIR=logs
-LOG_WRITE_TO_FILE=true
-LOG_WRITE_TO_CONSOLE=true
-CONFIG_ECHO_REVEAL_SECRETS=false
-JWT_ALGORITHM=HS256
-
-DB_TYPE=postgresql
-DB_HOST=127.0.0.1
-DB_PORT=5432
-DB_USERNAME=postgres
-DB_DATABASE=agent_backend
-DB_ECHO=true
-
-REDIS_HOST=127.0.0.1
-REDIS_PORT=6379
-REDIS_DB=0
-
-ACCESS_TOKEN_EXPIRE_MINUTES=30
-AGENT_ACTION_CONFIRMATION_SECONDS=300
-AGENT_ACTION_IDEMPOTENCY_SECONDS=86400
-
-LLM_DEFAULT_PROVIDER=mimo
-LLM_MIMO_BASE_URL=https://api.xiaomimimo.com/v1
-LLM_MIMO_MODEL=mimo-v2.5-pro
-LLM_DEEPSEEK_BASE_URL=https://api.deepseek.com
-LLM_DEEPSEEK_MODEL=deepseek-v4-flash
-
-EMBEDDING_PROVIDER=openai_compatible
-EMBEDDING_BASE_URL=http://bge-embedding:8000/v1
-EMBEDDING_MODEL=bge-m3
-EMBEDDING_DIMENSION=1024
-EMBEDDING_TIMEOUT_SECONDS=60
-
-ENDPOINT_GUARD_ENABLED=true
-ENDPOINT_GUARD_SOURCE=settings
-ENDPOINT_GUARD_RULES=[]
-ENDPOINT_GUARD_REDIS_KEY=endpoint_guard:rules
-ENDPOINT_GUARD_CACHE_TTL_SECONDS=10
-ENDPOINT_GUARD_FAIL_OPEN=true
-```
+非敏感配置直接使用仓库提供的 `configs/.env.local`。该文件中的必填 key 是完整配置契约，调整值即可，
+不要删除 key；条件字段只有在对应能力启用时才需要填写。
 
 配置说明：
 

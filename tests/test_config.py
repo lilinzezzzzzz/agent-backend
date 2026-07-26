@@ -4,9 +4,17 @@ from unittest.mock import MagicMock
 
 import pytest
 from pydantic import ValidationError
+from dotenv import dotenv_values
 
 import internal.config as config_module
-from internal.config import Settings, _config_echo_value, _sensitive_secret_config_keys
+from internal.config import (
+    SECRET_FILE_KEYS,
+    Settings,
+    _config_echo_value,
+    _required_config_keys,
+    _required_secret_keys,
+    _sensitive_secret_config_keys,
+)
 
 
 def _write_env_file(path: Path, values: dict[str, str]) -> None:
@@ -19,22 +27,62 @@ def _write_env_file(path: Path, values: dict[str, str]) -> None:
 def _base_env_values() -> dict[str, str]:
     return {
         "DEBUG": "true",
+        "LOG_FORMAT": "text",
+        "LOG_WRITE_TO_FILE": "false",
+        "LOG_WRITE_TO_CONSOLE": "true",
+        "CONFIG_ECHO_REVEAL_SECRETS": "false",
         "OTEL_TRACING_ENABLED": "false",
         "OTEL_SERVICE_NAME": "agent-backend-test",
         "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT": "http://collector:4318/v1/traces",
         "OTEL_EXPORTER_OTLP_TIMEOUT_SECONDS": "7",
         "JWT_ALGORITHM": "HS256",
+        "ACCESS_TOKEN_EXPIRE_SECONDS": "1800",
+        "BACKEND_CORS_ORIGINS": '["*"]',
+        "WECHAT_GRANT_TYPE": "authorization_code",
+        "LLM_DEFAULT_PROVIDER": "mimo",
+        "LLM_MIMO_BASE_URL": "https://mimo.example/v1",
+        "LLM_MIMO_MODEL": "mimo-test",
+        "LLM_DEEPSEEK_BASE_URL": "https://deepseek.example/v1",
+        "LLM_DEEPSEEK_MODEL": "deepseek-test",
+        "EMBEDDING_PROVIDER": "openai_compatible",
+        "EMBEDDING_BASE_URL": "http://embedding:8000/v1",
+        "EMBEDDING_MODEL": "bge-m3",
+        "EMBEDDING_DIMENSION": "1024",
+        "EMBEDDING_TIMEOUT_SECONDS": "30",
         "DB_TYPE": "postgresql",
         "DB_HOST": "dotenv-db",
         "DB_PORT": "5432",
         "DB_USERNAME": "postgres",
         "DB_DATABASE": "app_test",
+        "DB_ECHO": "false",
         "REDIS_HOST": "dotenv-redis",
         "REDIS_PORT": "6379",
         "REDIS_DB": "0",
         "MILVUS_URI": "http://milvus:19530",
         "MILVUS_DB_NAME": "test_database",
         "MILVUS_TIMEOUT_SECONDS": "7",
+        "AGENT_ACTION_CONFIRMATION_SECONDS": "300",
+        "AGENT_ACTION_IDEMPOTENCY_SECONDS": "86400",
+        "RAG_ALLOWED_DOMAINS": '["order","payment","general"]',
+        "RAG_ALLOWED_KB_IDS": "[1,2,3]",
+        "RAG_MAX_CONTEXT_CHARS": "12000",
+        "CELERY_IDEMPOTENCY_ENABLED": "true",
+        "CELERY_EXECUTION_DEADLINE_GRACE_SECONDS": "30",
+        "CELERY_QUEUE_START_TIMEOUT_SECONDS": "300",
+        "CELERY_PUBLISH_CONFIRM_TIMEOUT_SECONDS": "30",
+        "CELERY_PUBLISH_RECONCILER_INTERVAL_SECONDS": "10",
+        "CELERY_ORPHAN_FENCE_SECONDS": "300",
+        "CELERY_RECONCILER_BEAT_ENABLED": "true",
+        "CELERY_RECONCILER_INTERVAL_SECONDS": "60",
+        "CELERY_RECONCILER_BATCH_SIZE": "100",
+        "CELERY_RECONCILER_QUEUE": "celery_maintenance_queue",
+        "CELERY_TASK_MAX_PAYLOAD_BYTES": "262144",
+        "ENDPOINT_GUARD_ENABLED": "true",
+        "ENDPOINT_GUARD_SOURCE": "settings",
+        "ENDPOINT_GUARD_RULES": "[]",
+        "ENDPOINT_GUARD_REDIS_KEY": "endpoint_guard:rules",
+        "ENDPOINT_GUARD_CACHE_TTL_SECONDS": "10",
+        "ENDPOINT_GUARD_FAIL_OPEN": "true",
     }
 
 
@@ -44,6 +92,11 @@ def _secret_values() -> dict[str, str]:
         "JWT_SECRET": "test-jwt-secret",
         "DB_PASSWORD": "dotenv-db-password",
         "REDIS_PASSWORD": "dotenv-redis-password",
+        "WECHAT_APP_ID": "test-wechat-app-id",
+        "WECHAT_APP_SECRET": "test-wechat-app-secret",
+        "LLM_MIMO_API_KEY": "test-mimo-api-key",
+        "LLM_DEEPSEEK_API_KEY": "test-deepseek-api-key",
+        "EMBEDDING_API_KEY": "test-embedding-api-key",
     }
 
 
@@ -139,7 +192,7 @@ def test_load_config_uses_app_env_outside_secrets(
     assert "APP_ENV" not in _secret_values()
 
 
-def test_load_config_rejects_app_env_in_secrets(
+def test_load_config_rejects_non_secret_key_in_secrets(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -153,11 +206,11 @@ def test_load_config_rejects_app_env_in_secrets(
     _write_env_file(tmp_path / ".env", {"APP_ENV": "test"})
     _write_env_file(tmp_path / ".secrets", {**_secret_values(), "APP_ENV": "test"})
 
-    with pytest.raises(ValueError, match="APP_ENV must be removed"):
+    with pytest.raises(ValueError, match="Non-secret or unsupported keys.*APP_ENV"):
         config_module.load_config()
 
 
-def test_dotenv_values_take_priority_over_shell_environment(
+def test_shell_environment_cannot_override_explicit_files(
     monkeypatch, tmp_path: Path
 ) -> None:
     env_path = tmp_path / ".env.test"
@@ -176,7 +229,7 @@ def test_dotenv_values_take_priority_over_shell_environment(
     assert settings.REDIS_PASSWORD.get_secret_value() == "dotenv-redis-password"
 
 
-def test_shell_environment_is_fallback_when_dotenv_value_is_missing(
+def test_shell_environment_is_not_a_fallback_for_missing_config(
     monkeypatch, tmp_path: Path
 ) -> None:
     env_path = tmp_path / ".env.test"
@@ -188,9 +241,82 @@ def test_shell_environment_is_fallback_when_dotenv_value_is_missing(
 
     monkeypatch.setenv("REDIS_HOST", "shell-redis")
 
-    settings = _new_settings(env_path, secrets_path)
+    with pytest.raises(ValidationError, match="REDIS_HOST"):
+        _new_settings(env_path, secrets_path)
 
-    assert settings.REDIS_HOST == "shell-redis"
+
+def test_load_config_rejects_secret_key_in_environment_file(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    configs_dir = tmp_path / "configs"
+    configs_dir.mkdir()
+    monkeypatch.delenv("APP_ENV", raising=False)
+    monkeypatch.setattr(config_module, "BASE_DIR", tmp_path)
+    monkeypatch.setattr(
+        config_module, "_setup_startup_logger", MagicMock(return_value=MagicMock())
+    )
+    _write_env_file(tmp_path / ".env", {"APP_ENV": "test"})
+    _write_env_file(
+        configs_dir / ".env.test",
+        {**_base_env_values(), "JWT_SECRET": "misplaced-secret"},
+    )
+    _write_env_file(tmp_path / ".secrets", _secret_values())
+
+    with pytest.raises(ValueError, match="Secret keys must be moved.*JWT_SECRET"):
+        config_module.load_config()
+
+
+def test_unknown_configuration_key_is_rejected(tmp_path: Path) -> None:
+    env_path = tmp_path / ".env.test"
+    secrets_path = tmp_path / ".secrets"
+    _write_env_file(env_path, {**_base_env_values(), "DB_HSOT": "typo"})
+    _write_env_file(secrets_path, _secret_values())
+
+    with pytest.raises(ValidationError, match="DB_HSOT"):
+        _new_settings(env_path, secrets_path)
+
+
+def test_repository_environment_files_define_every_required_config_key() -> None:
+    repository_root = Path(__file__).parent.parent
+    required_keys = _required_config_keys()
+    secrets_template = repository_root / ".secrets.example"
+
+    for app_env in ("local", "dev", "test", "prod"):
+        env_path = repository_root / "configs" / f".env.{app_env}"
+        values = dotenv_values(env_path)
+
+        assert required_keys <= set(values), app_env
+        assert not (set(values) & SECRET_FILE_KEYS), app_env
+        Settings(APP_ENV=app_env, _env_file=[env_path, secrets_template])  # type: ignore[call-arg]
+
+
+def test_secret_template_defines_every_required_secret_key() -> None:
+    repository_root = Path(__file__).parent.parent
+    values = dotenv_values(repository_root / ".secrets.example")
+
+    assert _required_secret_keys() <= set(values)
+    assert set(values) <= SECRET_FILE_KEYS
+
+
+def test_settings_defaults_are_limited_to_conditional_fields() -> None:
+    conditional_fields = {
+        "DB_READ_DATABASE",
+        "DB_READ_HOST",
+        "DB_READ_PASSWORD",
+        "DB_READ_PORT",
+        "DB_READ_SERVICE_NAME",
+        "DB_READ_USERNAME",
+        "DB_SERVICE_NAME",
+        "LOG_BASE_DIR",
+        "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+    }
+
+    fields_with_defaults = {
+        name for name, field in Settings.model_fields.items() if not field.is_required()
+    }
+
+    assert fields_with_defaults == conditional_fields
 
 
 def test_otlp_exporter_config_values_are_loaded(tmp_path: Path) -> None:
@@ -251,17 +377,16 @@ def test_relative_log_base_dir_is_resolved_from_project_root(
     assert settings.LOG_BASE_DIR == tmp_path / "logs"
 
 
-def test_log_output_defaults_to_console_only(tmp_path: Path) -> None:
+def test_log_output_targets_must_be_explicit(tmp_path: Path) -> None:
     env_path = tmp_path / ".env.test"
     secrets_path = tmp_path / ".secrets"
-    _write_env_file(env_path, _base_env_values())
+    env_values = _base_env_values()
+    env_values.pop("LOG_WRITE_TO_FILE")
+    _write_env_file(env_path, env_values)
     _write_env_file(secrets_path, _secret_values())
 
-    settings = _new_settings(env_path, secrets_path)
-
-    assert settings.LOG_BASE_DIR is None
-    assert settings.LOG_WRITE_TO_FILE is False
-    assert settings.LOG_WRITE_TO_CONSOLE is True
+    with pytest.raises(ValidationError, match="LOG_WRITE_TO_FILE"):
+        _new_settings(env_path, secrets_path)
 
 
 def test_file_logging_requires_base_log_dir(tmp_path: Path) -> None:
@@ -337,6 +462,25 @@ def test_milvus_database_name_cannot_be_empty(tmp_path: Path) -> None:
     _write_env_file(secrets_path, _secret_values())
 
     with pytest.raises(ValidationError, match="MILVUS_DB_NAME cannot be empty"):
+        _new_settings(env_path, secrets_path)
+
+
+def test_oracle_database_requires_service_name(tmp_path: Path) -> None:
+    env_path = tmp_path / ".env.test"
+    secrets_path = tmp_path / ".secrets"
+    env_values = _base_env_values()
+    env_values.update(
+        {
+            "DB_TYPE": "oracle",
+            "CELERY_IDEMPOTENCY_ENABLED": "false",
+        }
+    )
+    _write_env_file(env_path, env_values)
+    _write_env_file(secrets_path, _secret_values())
+
+    with pytest.raises(
+        ValidationError, match="DB_SERVICE_NAME is required when DB_TYPE=oracle"
+    ):
         _new_settings(env_path, secrets_path)
 
 

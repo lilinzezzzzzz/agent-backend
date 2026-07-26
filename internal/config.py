@@ -63,6 +63,20 @@ SENSITIVE_CONFIG_KEYWORDS = (
 NON_SENSITIVE_CONFIG_KEYS = {
     "CONFIG_ECHO_REVEAL_SECRETS",
 }
+SECRET_FILE_KEYS = frozenset(
+    {
+        "AES_SECRET",
+        "DB_PASSWORD",
+        "DB_READ_PASSWORD",
+        "EMBEDDING_API_KEY",
+        "JWT_SECRET",
+        "LLM_DEEPSEEK_API_KEY",
+        "LLM_MIMO_API_KEY",
+        "REDIS_PASSWORD",
+        "WECHAT_APP_ID",
+        "WECHAT_APP_SECRET",
+    }
+)
 CONFIG_ECHO_MIN_PARTIAL_SECRET_LENGTH = 8
 
 
@@ -73,74 +87,75 @@ class Settings(BaseSettings):
 
     # --- 核心环境配置 ---
     APP_ENV: AppEnv
-    DEBUG: bool = False
+    DEBUG: bool
 
     # --- 日志配置 ---
-    LOG_FORMAT: LogFormat = LogFormat.TEXT  # 日志格式: TEXT 或 JSON
+    LOG_FORMAT: LogFormat  # 日志格式: TEXT 或 JSON
     LOG_BASE_DIR: Path | None = None
-    LOG_WRITE_TO_FILE: bool = False
-    LOG_WRITE_TO_CONSOLE: bool = True
+    LOG_WRITE_TO_FILE: bool
+    LOG_WRITE_TO_CONSOLE: bool
 
     # --- OpenTelemetry ---
     OTEL_TRACING_ENABLED: bool
     OTEL_SERVICE_NAME: str
     OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: AnyHttpUrl | None = None
-    OTEL_EXPORTER_OTLP_TIMEOUT_SECONDS: PositiveInt = 10
+    OTEL_EXPORTER_OTLP_TIMEOUT_SECONDS: PositiveInt
 
     # --- 密钥配置 ---
     AES_SECRET: SecretStr
     JWT_SECRET: SecretStr
     JWT_ALGORITHM: str
-    ACCESS_TOKEN_EXPIRE_SECONDS: int = 3600
-    CONFIG_ECHO_REVEAL_SECRETS: bool = False  # 打印配置时是否显示敏感值
+    ACCESS_TOKEN_EXPIRE_SECONDS: int
+    CONFIG_ECHO_REVEAL_SECRETS: bool  # 打印配置时是否显示敏感值
 
     # --- CORS ---
-    BACKEND_CORS_ORIGINS: list[str] = ["*"]
+    BACKEND_CORS_ORIGINS: list[str]
 
     # --- 第三方登录 ---
-    WECHAT_APP_ID: str = ""
-    WECHAT_APP_SECRET: SecretStr = SecretStr("")
+    WECHAT_APP_ID: str
+    WECHAT_APP_SECRET: SecretStr
+    WECHAT_GRANT_TYPE: str
 
     # --- LLM ---
-    LLM_DEFAULT_PROVIDER: str = "mimo"
-    LLM_MIMO_BASE_URL: str = ""
-    LLM_MIMO_MODEL: str = ""
-    LLM_MIMO_API_KEY: SecretStr = SecretStr("")
-    LLM_DEEPSEEK_BASE_URL: str = ""
-    LLM_DEEPSEEK_MODEL: str = ""
-    LLM_DEEPSEEK_API_KEY: SecretStr = SecretStr("")
+    LLM_DEFAULT_PROVIDER: str
+    LLM_MIMO_BASE_URL: str
+    LLM_MIMO_MODEL: str
+    LLM_MIMO_API_KEY: SecretStr
+    LLM_DEEPSEEK_BASE_URL: str
+    LLM_DEEPSEEK_MODEL: str
+    LLM_DEEPSEEK_API_KEY: SecretStr
 
     # --- Embedding ---
-    EMBEDDING_PROVIDER: EmbeddingProvider = "openai_compatible"
-    EMBEDDING_BASE_URL: str = ""
-    EMBEDDING_MODEL: str = ""
-    EMBEDDING_API_KEY: SecretStr = SecretStr("")
-    EMBEDDING_DIMENSION: PositiveInt = 1024
-    EMBEDDING_TIMEOUT_SECONDS: PositiveInt = 60
+    EMBEDDING_PROVIDER: EmbeddingProvider
+    EMBEDDING_BASE_URL: str
+    EMBEDDING_MODEL: str
+    EMBEDDING_API_KEY: SecretStr
+    EMBEDDING_DIMENSION: PositiveInt
+    EMBEDDING_TIMEOUT_SECONDS: PositiveInt
 
     # --- Vector store ---
     MILVUS_URI: AnyHttpUrl
-    MILVUS_DB_NAME: str = "default"
-    MILVUS_TIMEOUT_SECONDS: PositiveInt = 10
+    MILVUS_DB_NAME: str
+    MILVUS_TIMEOUT_SECONDS: PositiveInt
 
     # --- Agent ---
-    AGENT_ACTION_CONFIRMATION_SECONDS: PositiveInt = 300
-    AGENT_ACTION_IDEMPOTENCY_SECONDS: PositiveInt = 86400
+    AGENT_ACTION_CONFIRMATION_SECONDS: PositiveInt
+    AGENT_ACTION_IDEMPOTENCY_SECONDS: PositiveInt
 
     # --- RAG ---
-    RAG_ALLOWED_DOMAINS: list[str] = ["order", "payment", "general"]
-    RAG_ALLOWED_KB_IDS: list[int] = [1, 2, 3]
-    RAG_MAX_CONTEXT_CHARS: PositiveInt = 12000
+    RAG_ALLOWED_DOMAINS: list[str]
+    RAG_ALLOWED_KB_IDS: list[int]
+    RAG_MAX_CONTEXT_CHARS: PositiveInt
 
     # --- Database ---
     DB_TYPE: DBType  # 数据库类型: mysql, postgresql, oracle (必填)
     DB_HOST: str
-    DB_PORT: int = 3306
+    DB_PORT: int
     DB_USERNAME: str
     DB_PASSWORD: SecretStr
     DB_DATABASE: str
-    DB_SERVICE_NAME: str = ""  # Oracle 专用: Service Name
-    DB_ECHO: bool = False  # 是否输出 SQL 日志
+    DB_SERVICE_NAME: str | None = None  # Oracle 专用: Service Name
+    DB_ECHO: bool  # 是否输出 SQL 日志
 
     # --- Database Read Replica (可选，不配置则不启用读写分离) ---
     DB_READ_HOST: str | None = None
@@ -152,34 +167,34 @@ class Settings(BaseSettings):
 
     # --- Redis ---
     REDIS_HOST: str
-    REDIS_PORT: int = 6379
-    REDIS_PASSWORD: SecretStr = SecretStr("")
-    REDIS_DB: int = 0
+    REDIS_PORT: int
+    REDIS_PASSWORD: SecretStr
+    REDIS_DB: int
 
     # --- Celery PostgreSQL idempotency ---
-    CELERY_IDEMPOTENCY_ENABLED: bool = True
-    CELERY_EXECUTION_DEADLINE_GRACE_SECONDS: PositiveInt = 30
-    CELERY_QUEUE_START_TIMEOUT_SECONDS: PositiveInt = 300
-    CELERY_PUBLISH_CONFIRM_TIMEOUT_SECONDS: PositiveInt = 30
-    CELERY_PUBLISH_RECONCILER_INTERVAL_SECONDS: PositiveInt = 10
-    CELERY_ORPHAN_FENCE_SECONDS: PositiveInt = 300
-    CELERY_RECONCILER_BEAT_ENABLED: bool = True
-    CELERY_RECONCILER_INTERVAL_SECONDS: PositiveInt = 60
-    CELERY_RECONCILER_BATCH_SIZE: PositiveInt = 100
-    CELERY_RECONCILER_QUEUE: str = "celery_maintenance_queue"
-    CELERY_TASK_MAX_PAYLOAD_BYTES: PositiveInt = 262144
+    CELERY_IDEMPOTENCY_ENABLED: bool
+    CELERY_EXECUTION_DEADLINE_GRACE_SECONDS: PositiveInt
+    CELERY_QUEUE_START_TIMEOUT_SECONDS: PositiveInt
+    CELERY_PUBLISH_CONFIRM_TIMEOUT_SECONDS: PositiveInt
+    CELERY_PUBLISH_RECONCILER_INTERVAL_SECONDS: PositiveInt
+    CELERY_ORPHAN_FENCE_SECONDS: PositiveInt
+    CELERY_RECONCILER_BEAT_ENABLED: bool
+    CELERY_RECONCILER_INTERVAL_SECONDS: PositiveInt
+    CELERY_RECONCILER_BATCH_SIZE: PositiveInt
+    CELERY_RECONCILER_QUEUE: str
+    CELERY_TASK_MAX_PAYLOAD_BYTES: PositiveInt
 
     # --- Endpoint Guard ---
-    ENDPOINT_GUARD_ENABLED: bool = True
-    ENDPOINT_GUARD_SOURCE: EndpointGuardSource = "settings"
-    ENDPOINT_GUARD_RULES: str = "[]"
-    ENDPOINT_GUARD_REDIS_KEY: str = "endpoint_guard:rules"
-    ENDPOINT_GUARD_CACHE_TTL_SECONDS: int = 10
-    ENDPOINT_GUARD_FAIL_OPEN: bool = True
+    ENDPOINT_GUARD_ENABLED: bool
+    ENDPOINT_GUARD_SOURCE: EndpointGuardSource
+    ENDPOINT_GUARD_RULES: str
+    ENDPOINT_GUARD_REDIS_KEY: str
+    ENDPOINT_GUARD_CACHE_TTL_SECONDS: int
+    ENDPOINT_GUARD_FAIL_OPEN: bool
 
     model_config = SettingsConfigDict(
         case_sensitive=True,
-        extra="ignore",
+        extra="forbid",
         env_file_encoding="utf-8",
     )
 
@@ -192,8 +207,9 @@ class Settings(BaseSettings):
         dotenv_settings: PydanticBaseSettingsSource,
         file_secret_settings: PydanticBaseSettingsSource,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
-        """Set config file values ahead of ambient shell environment variables."""
-        return init_settings, dotenv_settings, env_settings, file_secret_settings
+        """Load application settings only from explicit arguments and files."""
+        del env_settings
+        return init_settings, dotenv_settings, file_secret_settings
 
     @field_validator("DB_TYPE", mode="before")
     def validate_db_type(cls, v: str) -> str:
@@ -229,6 +245,13 @@ class Settings(BaseSettings):
             )
         if self.LOG_WRITE_TO_FILE and self.LOG_BASE_DIR is None:
             raise ValueError("LOG_BASE_DIR is required when LOG_WRITE_TO_FILE=true")
+        return self
+
+    @model_validator(mode="after")
+    def validate_oracle_service_name(self) -> "Settings":
+        """Oracle 主库必须显式配置 service name。"""
+        if self.DB_TYPE == "oracle" and not self.DB_SERVICE_NAME:
+            raise ValueError("DB_SERVICE_NAME is required when DB_TYPE=oracle")
         return self
 
     @model_validator(mode="after")
@@ -467,7 +490,45 @@ def detect_app_env() -> AppEnv:
     return cast(AppEnv, app_env)
 
 
-def _validate_secrets_file() -> tuple[Path, dict]:
+def _required_config_keys() -> set[str]:
+    """返回必须由环境配置文件显式提供的字段。"""
+    return {
+        name
+        for name, field in Settings.model_fields.items()
+        if field.is_required() and name not in SECRET_FILE_KEYS and name != "APP_ENV"
+    }
+
+
+def _required_secret_keys() -> set[str]:
+    """返回必须由密钥文件显式提供的字段。"""
+    return {
+        name
+        for name, field in Settings.model_fields.items()
+        if field.is_required() and name in SECRET_FILE_KEYS
+    }
+
+
+def _validate_environment_file(env_file_path: Path) -> dict[str, str | None]:
+    """验证环境配置文件的字段来源和完整性。"""
+    env_values = dict(dotenv_values(env_file_path))
+    misplaced_secret_keys = sorted(set(env_values) & SECRET_FILE_KEYS)
+    if misplaced_secret_keys:
+        keys = ", ".join(misplaced_secret_keys)
+        raise ValueError(
+            f"Secret keys must be moved from {env_file_path} to .secrets: {keys}"
+        )
+
+    missing_keys = sorted(_required_config_keys() - set(env_values))
+    if missing_keys:
+        keys = ", ".join(missing_keys)
+        raise ValueError(
+            f"Required configuration keys missing from {env_file_path}: {keys}"
+        )
+
+    return env_values
+
+
+def _validate_secrets_file() -> tuple[Path, dict[str, str | None]]:
     """
     验证 .secrets 文件存在并返回路径和内容
 
@@ -476,7 +537,7 @@ def _validate_secrets_file() -> tuple[Path, dict]:
 
     Raises:
         FileNotFoundError: 文件不存在
-        ValueError: .secrets 中错误地包含 APP_ENV
+        ValueError: .secrets 包含非密钥字段或缺少必填密钥
     """
     secrets_path = BASE_DIR / ".secrets"
 
@@ -487,10 +548,17 @@ def _validate_secrets_file() -> tuple[Path, dict]:
     # 读取配置
     secrets_dict = dotenv_values(secrets_path)
 
-    if "APP_ENV" in secrets_dict:
+    unsupported_keys = sorted(set(secrets_dict) - SECRET_FILE_KEYS)
+    if unsupported_keys:
+        keys = ", ".join(unsupported_keys)
         raise ValueError(
-            f"APP_ENV must be removed from {secrets_path} and configured in the repository-root .env"
+            f"Non-secret or unsupported keys found in {secrets_path}: {keys}"
         )
+
+    missing_keys = sorted(_required_secret_keys() - set(secrets_dict))
+    if missing_keys:
+        keys = ", ".join(missing_keys)
+        raise ValueError(f"Required secret keys missing from {secrets_path}: {keys}")
 
     return secrets_path, secrets_dict
 
@@ -564,7 +632,7 @@ def load_config() -> Settings:
     加载顺序：
     1. 从进程环境或仓库根目录 .env 获取 APP_ENV
     2. 验证 .secrets 文件不再包含 APP_ENV
-    3. 检查对应环境配置文件是否存在
+    3. 验证对应环境配置文件的字段来源和完整性
     4. 加载配置文件 (.env.{env} 和 .secrets)，并显式注入 APP_ENV
     """
     _logger = _setup_startup_logger()
@@ -586,8 +654,13 @@ def load_config() -> Settings:
         _logger.critical(msg)
         raise FileNotFoundError(msg)
 
-    # 4. 加载配置；显式 APP_ENV 的优先级高于配置文件和 shell 环境变量
-    # load_files 顺序：[.env.dev, .secrets] -> 后者覆盖前者
+    try:
+        _validate_environment_file(env_file_path)
+    except ValueError as e:
+        _logger.critical(f"Configuration validation failed: {e}")
+        raise
+
+    # 4. 加载已完成字段隔离校验的配置和密钥文件；不读取其他 shell 环境变量
     load_files = [env_file_path, secrets_path]
     _logger.info(f"Loading files: {[f.name for f in load_files]}")
 

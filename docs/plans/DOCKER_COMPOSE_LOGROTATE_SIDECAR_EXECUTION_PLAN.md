@@ -1,7 +1,7 @@
 # Docker Compose + logrotate Sidecar 实施计划
 
-状态：待实施。本文档只定义 Docker Compose 单机部署中的日志落盘与轮转方案；当前仓库尚未新增
-Compose 文件、logrotate sidecar 镜像或 Linux 运行时验收脚本。
+状态：实施中。Compose、logrotate sidecar、生产日志配置、Linux 验收脚本和运行文档已于 2026-07-26
+落地并通过静态检查；sidecar 镜像构建和目标 Linux 运行时验收仍待执行，因此尚未达到 Definition of Done。
 
 ## 1. 目标与关键结论
 
@@ -34,12 +34,13 @@ Uvicorn Worker，同时满足以下要求：
 - `Dockerfile` 以非 root 的 `app` 用户运行 Uvicorn，当前启动命令未设置 `--workers`，因此默认为一个 Worker。
 - `pkg/logger/handler.py` 将应用日志追加到 `<LOG_BASE_DIR>/app.log`，没有配置 Loguru rotation、retention
   或 compression，符合目标责任边界。
-- `configs/.env.prod` 已配置 `LOG_FORMAT=json`，但尚未显式配置 `LOG_BASE_DIR`、
-  `LOG_WRITE_TO_FILE` 和 `LOG_WRITE_TO_CONSOLE`。
-- 仓库中没有可用于生产部署的 Compose 文件，也没有 logrotate sidecar 构建文件。
-- 现有文档只给出了宿主机 logrotate 示例，尚未给出 sidecar 的构建、调度、状态持久化和故障处理方案。
+- `configs/.env.prod` 已显式配置 JSON、固定日志目录、文件输出开启和控制台业务日志关闭。
+- `compose.prod.yaml` 已定义 API 与单副本 sidecar；根目录 `.env` 负责 Compose 参数，模板为
+  `.env.compose.example`，应用配置和 secrets 继续只读挂载。
+- `deploy/logrotate/` 已提供 digest 锁定的 Alpine 基础镜像、固定 logrotate 版本、轮转策略和前台调度配置。
+- `scripts/verify_logrotate_sidecar.sh` 已覆盖隔离 Linux 多 Worker 验收流程，README 和日志文档已提供运行手册。
 
-以上是实施前基线，不表示部署方案已经可运行。
+以上只证明仓库实现与静态解析状态；目标 Linux 上的权限、inode、`copytruncate`、压缩、state 和故障隔离行为尚未验证。
 
 ## 3. 范围与非目标
 
@@ -166,33 +167,35 @@ sidecar 每 5 分钟检查一次配置；`maxsize` 只在检查时生效，因�
 root sidecar 对 bind mount 内文件具有修改能力，这是该方案的剩余风险。若 Linux 验证证明 logrotate、压缩和
 调度器可在统一数字 UID/GID 下稳定工作，应在后续收紧为非 root；不得为了降权牺牲可验证的轮转行为。
 
-## 6. 计划新增或调整的文件
+## 6. 已新增或调整的文件
 
-计划新增：
+已新增：
 
 ```text
+.env.compose.example
 compose.prod.yaml
 deploy/logrotate/Dockerfile
 deploy/logrotate/agent-backend.conf
 deploy/logrotate/crontab
 scripts/verify_logrotate_sidecar.sh
-docs/plans/DOCKER_COMPOSE_LOGROTATE_SIDECAR_EXECUTION_PLAN.md
 ```
 
-计划调整：
+已调整：
 
 ```text
 configs/.env.prod
 README.md
-docs/README.md
 docs/logging/log_rotation.md
-docs/plans/README.md
+docs/plans/DOCKER_COMPOSE_LOGROTATE_SIDECAR_EXECUTION_PLAN.md
 ```
+
+`docs/README.md` 和 `docs/plans/README.md` 已存在指向本计划的链接，经核对无需修改。
 
 文件职责：
 
 - `compose.prod.yaml`：定义单个 API service、单个 logrotate service、共享 bind mount、状态 volume、
   Worker 数、资源边界和 Docker logging driver。
+- `.env.compose.example`：Compose 非密钥部署参数模板，复制为 Git 忽略的根目录 `.env` 后使用。
 - `deploy/logrotate/Dockerfile`：构建最小 sidecar，安装固定版本的 logrotate，并以前台方式运行调度器。
 - `deploy/logrotate/agent-backend.conf`：唯一轮转策略来源。
 - `deploy/logrotate/crontab`：每 5 分钟触发一次检查，命令明确指定持久化 state 文件。
@@ -200,11 +203,13 @@ docs/plans/README.md
   生产日志目录。
 - `docs/logging/log_rotation.md`：增加 sidecar 运行方案和故障排查，保留宿主机 logrotate 作为另一种部署形态。
 
-实施前必须再次检查 `docs/logging/log_rotation.md` 的未提交用户修改并做增量合并，不得覆盖现有内容。
+实施前已检查工作区和 `docs/logging/log_rotation.md`，当时不存在未提交修改；本次以增量方式增加 sidecar 章节。
 
 ## 7. 分阶段实施
 
 ### Phase 0：基线和部署参数确认
+
+进度：仓库侧参数模板和 Compose 能力已确认；目标 Linux 的 UID/GID、磁盘预算、外部依赖和最终资源值待部署前确认。
 
 目标：在创建部署资产前确认运行用户、Docker Compose 能力和磁盘预算。
 
@@ -226,6 +231,9 @@ docs/plans/README.md
 
 ### Phase 1：构建 logrotate sidecar
 
+进度：镜像定义、固定依赖、配置和调度已实现；镜像构建、`logrotate --debug` 与 SIGTERM 行为待 Docker Engine
+可用后验证。
+
 目标：产生职责单一、可重复构建且可独立验证的 sidecar 镜像。
 
 执行项：
@@ -246,6 +254,8 @@ docs/plans/README.md
 - sidecar 不包含应用源代码和密钥。
 
 ### Phase 2：新增生产 Compose 编排
+
+进度：已完成，并使用 `.env.compose.example` 执行 `docker compose config` 静态验证。
 
 目标：把 API、多 Worker、固定宿主机目录和单个 sidecar 组成可验证的部署单元。
 
@@ -269,6 +279,8 @@ docs/plans/README.md
 
 ### Phase 3：增加可重复的 Linux 验收
 
+进度：验收脚本已实现并通过 `sh -n`；目标 Linux 集成运行尚未执行。
+
 目标：验证真实 bind mount、多 Worker、`copytruncate`、压缩和重建后的持续写入行为。
 
 验收脚本必须使用显式传入的隔离临时目录，不得默认指向生产
@@ -291,6 +303,8 @@ docs/plans/README.md
 
 ### Phase 4：文档、运行手册和上线准备
 
+进度：README、日志运行手册和本计划状态已同步；真实主机参数、告警接入和上线记录待部署阶段完成。
+
 目标：让部署、排障和回滚不依赖口头知识。
 
 执行项：
@@ -312,10 +326,10 @@ docs/plans/README.md
 
 | 层级 | 验证方式 | 通过信号 |
 | --- | --- | --- |
-| 文档 | 检查相对链接、路径、命令和当前/目标状态 | 无断链、无把计划描述为已实现 |
-| Compose | `docker compose -f compose.prod.yaml config` | 退出码为 0，挂载和参数符合预期 |
+| 文档 | 检查相对链接、路径、命令和当前/目标状态 | 无断链，已实现与待验证状态明确区分 |
+| Compose | `docker compose --env-file .env.compose.example -f compose.prod.yaml config` | 退出码为 0，挂载和参数符合预期 |
 | Sidecar 镜像 | 构建镜像并运行 `logrotate --debug` | 构建成功，配置解析成功且无写操作 |
-| 应用 logger | `uv run pytest tests/logger/test_logger.py` | 固定文件追加和关闭文件输出测试通过 |
+| 应用 logger | `uv run --group dev python -m pytest tests/logger/test_logger.py` | 固定文件追加和关闭文件输出测试通过 |
 | Python 静态检查 | `uv run ruff check` | 退出码为 0；如新增 Python 文件则必须执行 |
 | Shell 脚本 | `sh -n scripts/verify_logrotate_sidecar.sh` | 退出码为 0 |
 | Linux 集成 | 隔离目录运行验收脚本 | 多 Worker 在轮转前后持续写入，归档和 state 持久化符合预期 |
@@ -376,14 +390,13 @@ macOS Docker Desktop、本地单元测试或静态 Compose 解析不能替代 Li
 
 ## 12. Definition of Done
 
-- [ ] `compose.prod.yaml` 能通过 Compose 解析，并且不包含真实密钥。
-- [ ] API 使用显式、可配置的多 Worker 启动方式，sidecar 保持单副本。
-- [ ] API 仅追加固定 `app.log`，没有新增 Loguru rotation、retention 或 compression。
+- [x] `compose.prod.yaml` 能通过 Compose 解析，并且不包含真实密钥。
+- [x] API 使用显式、可配置的多 Worker 启动方式，sidecar 保持单副本。
+- [x] API 仅追加固定 `app.log`，没有新增 Loguru rotation、retention 或 compression。
 - [ ] sidecar 镜像可重复构建，基础镜像使用固定版本和 digest。
 - [ ] sidecar 的调度、state 持久化、权限和 SIGTERM 行为已验证。
 - [ ] Linux bind mount 环境中，轮转前后所有 Worker 均可继续写入合法 JSON Lines。
 - [ ] API 和 sidecar 重建后，活动日志、历史日志与轮转状态符合预期。
 - [ ] sidecar 故障不会直接终止 API，并且磁盘增长风险可被监控发现。
-- [ ] README、日志部署文档和计划状态已与最终实现同步。
-- [ ] 已记录 `copytruncate` 非严格零丢失和 Kubernetes 不沿用本 sidecar 的边界。
-
+- [x] README、日志部署文档和计划状态已与当前实现同步。
+- [x] 已记录 `copytruncate` 非严格零丢失和 Kubernetes 不沿用本 sidecar 的边界。

@@ -122,7 +122,7 @@ truncate -s 0 logs/celery/app.log
 | 本地开发 | 无需部署日志基础设施即可实时查看和回溯日志，降低本地调试成本；不解决长期运行时的磁盘增长问题 | stderr + 固定 `app.log` | 不定时轮转，按需手动清理 |
 | Docker / Docker Compose | 避免应用自行轮转和运维人员直接操作 Docker 内部日志文件；限制单机容器日志的磁盘占用 | stderr | Docker `local` logging driver |
 | Linux 直接部署 | 满足传统运维工具对固定日志路径、压缩归档和保留数量的要求，同时让应用继续写入固定文件 | 固定 `app.log` | Linux `logrotate` |
-| Docker Compose 且要求宿主机固定文件 | 兼顾容器化部署和宿主机固定路径需求，便于既有采集器、备份或审计工具读取日志 | bind mount 后的固定 `app.log` | 宿主机 Linux `logrotate` |
+| Docker Compose 且要求宿主机固定文件 | 兼顾容器化部署和宿主机固定路径需求，便于既有采集器、备份或普通业务日志工具读取日志 | bind mount 后的固定 `app.log` | 单副本 logrotate sidecar |
 | Kubernetes | 解决 Pod 日志易失、实例分散以及跨 Pod 检索困难的问题，并由平台统一补充工作负载元数据、集中存储和设置 retention | stdout/stderr | 节点采集 Agent 和集中日志平台 |
 
 Docker `local` logging driver 和 Linux `logrotate` 主要控制单机磁盘占用与历史文件数量，并不提供跨实例集中检索、
@@ -178,9 +178,136 @@ Docker 管理的内部日志文件不是运维契约，不应直接使用 `tail`
 参考 [Docker local logging driver](https://docs.docker.com/engine/logging/drivers/local/) 和
 [Compose logging 配置](https://docs.docker.com/reference/compose-file/services/#logging)。
 
+## Docker Compose logrotate sidecar
+
+当单台 Linux 主机必须在固定宿主机目录交付日志文件时，仓库提供 `compose.prod.yaml` 和
+`deploy/logrotate/`。API 与 sidecar 共享同一个 bind mount：API 只追加
+`/var/log/agent-backend/app.log`，sidecar 保持单副本并负责轮转。sidecar 不挂载应用配置、密钥或 Docker
+socket，不使用网络，根文件系统只读；轮转 state 单独保存在 `logrotate-state` named volume。
+
+该方案只适合允许 `copytruncate` 极小丢失窗口的普通业务日志。审计、计费、合规、多主机或 Kubernetes 场景应使用
+stdout/stderr、节点级单一采集器和集中日志后端。
+
+### Compose 参数和应用配置
+
+从模板创建根目录 `.env`：
+
+```bash
+cp .env.compose.example .env
+```
+
+`.env` 只保存 Compose 部署参数：镜像名、宿主机日志目录、API Worker 数、端口、资源限制、Docker 内部日志上限，
+以及应用配置文件的挂载路径。真实密码、token 和 API key 仍只放在 `configs/.secrets`。关键参数如下：
+
+| 参数 | 作用 |
+| --- | --- |
+| `AGENT_BACKEND_LOG_DIR` | API 与 sidecar 共享的宿主机绝对目录 |
+| `API_WORKERS` | API 容器内 Uvicorn Worker 数量 |
+| `AGENT_BACKEND_IMAGE` / `LOGROTATE_IMAGE` | API 和 sidecar 镜像名 |
+| `APP_CONFIG_ENV` | 配置文件在容器内的环境后缀，生产环境为 `prod` |
+| `APP_ENV_FILE` / `APP_SECRETS_FILE` | 只读挂载的应用配置和密钥文件 |
+| `DOCKER_LOG_MAX_SIZE` / `DOCKER_LOG_MAX_FILE` | API access/error log 与 sidecar stderr 的 Docker `local` driver 上限 |
+
+`APP_CONFIG_ENV` 必须与 `APP_SECRETS_FILE` 中的 `APP_ENV` 一致。`configs/.env.prod` 已将文件日志显式配置为：
+
+```env
+LOG_FORMAT=json
+LOG_BASE_DIR=/var/log/agent-backend
+LOG_WRITE_TO_FILE=true
+LOG_WRITE_TO_CONSOLE=false
+```
+
+### 目录权限和启动
+
+先构建 API 镜像，再根据镜像内 `app` 用户的数字 UID/GID 初始化宿主机目录。以下命令使用模板的默认镜像名和
+日志路径；修改 `.env` 后应同步替换：
+
+```bash
+docker compose -f compose.prod.yaml build api logrotate
+API_UID=$(docker run --rm --entrypoint id agent-backend:prod -u)
+API_GID=$(docker run --rm --entrypoint id agent-backend:prod -g)
+sudo install -d -m 0750 -o "$API_UID" -g "$API_GID" /var/log/agent-backend
+docker compose -f compose.prod.yaml config
+docker compose -f compose.prod.yaml up -d logrotate
+docker compose -f compose.prod.yaml up -d api
+```
+
+Compose 的 bind mount 设置了 `create_host_path: false`，目录或配置文件缺失时应直接失败，避免 Docker 静默创建
+root 所有的目录。先启动 sidecar 可以提前暴露配置、state volume 和权限错误；`missingok` 允许此时 `app.log`
+尚不存在。
+
+### 轮转策略和文件名
+
+唯一策略来源是 `deploy/logrotate/agent-backend.conf`：
+
+```text
+daily
+maxsize 50M
+rotate 30
+missingok
+notifempty
+dateext
+dateformat .%Y-%m-%d_%H-%M-%S
+extension .log
+compress
+delaycompress
+copytruncate
+```
+
+sidecar 每 5 分钟检查一次。`maxsize 50M` 只在检查时生效，活动文件可能在两次检查之间超过阈值；阈值和检查周期
+必须根据峰值日志速率与磁盘预算校准。活动文件及归档命名如下：
+
+```text
+app.log
+app.2026-07-26_14-30-00.log
+app.2026-07-25_14-30-00.log.gz
+```
+
+`delaycompress` 让最新归档保持未压缩，下一次轮转后才压缩。`rotate 30` 表示最多保留 30 个轮转文件，不等同于
+严格保留 30 个自然日。
+
+### 验证与故障排查
+
+调试解析不会执行轮转：
+
+```bash
+docker compose -f compose.prod.yaml exec logrotate \
+  logrotate --debug --state /var/lib/logrotate/status /etc/logrotate.d/agent-backend
+```
+
+只在测试环境或受控维护窗口强制轮转：
+
+```bash
+docker compose -f compose.prod.yaml exec logrotate \
+  logrotate --force --state /var/lib/logrotate/status /etc/logrotate.d/agent-backend
+ls -lh /var/log/agent-backend
+```
+
+检查状态和错误：
+
+```bash
+docker compose -f compose.prod.yaml ps logrotate
+docker compose -f compose.prod.yaml logs --tail=200 logrotate
+docker compose -f compose.prod.yaml exec logrotate test -s /var/lib/logrotate/status
+```
+
+sidecar 停止不会联动终止 API，但 `app.log` 会持续增长。此时应提高磁盘告警等级并恢复原 sidecar；不要临时启动
+第二个周期调度 sidecar，以免轮转竞争。`docker compose down` 默认保留 state volume 和宿主机日志，不要在普通回滚中
+使用 `--volumes` 或删除归档。
+
+目标 Linux 环境的完整验收命令为：
+
+```bash
+./scripts/verify_logrotate_sidecar.sh /tmp/agent-backend-logrotate-acceptance
+```
+
+脚本要求显式隔离目录，覆盖多 Worker 持续写入、JSON Lines、inode、`delaycompress`、`rotate 30`、state 持久化、
+API 重建和 sidecar 故障隔离。macOS Docker Desktop 只能用于功能冒烟，不能替代 Linux bind mount、权限和 inode 验收。
+
 ## Linux logrotate
 
-本方案适用于 Linux 直接部署，也适用于 Docker Compose 容器需要把日志以固定路径暴露到宿主机的场景。
+本方案适用于 Linux 直接部署，或仍由宿主机统一管理 logrotate 的既有环境；它是 sidecar 的替代部署形态，不能与
+sidecar 同时管理同一个 `app.log`。
 
 ### 应用配置
 

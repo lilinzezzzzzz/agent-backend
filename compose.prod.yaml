@@ -1,0 +1,90 @@
+services:
+  api:
+    image: ${AGENT_BACKEND_IMAGE:?set AGENT_BACKEND_IMAGE in .env}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command:
+      - uvicorn
+      - entrypoints.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --loop
+      - uvloop
+      - --http
+      - httptools
+      - --access-log
+      - --workers
+      - ${API_WORKERS:?set API_WORKERS in .env}
+    restart: unless-stopped
+    init: true
+    ports:
+      - ${API_PORT:-8000}:8000
+    volumes:
+      - type: bind
+        source: ${APP_ENV_FILE:?set APP_ENV_FILE in .env}
+        target: /app/configs/.env.${APP_CONFIG_ENV:?set APP_CONFIG_ENV in .env}
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${APP_SECRETS_FILE:?set APP_SECRETS_FILE in .env}
+        target: /app/configs/.secrets
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${AGENT_BACKEND_LOG_DIR:?set AGENT_BACKEND_LOG_DIR in .env}
+        target: /var/log/agent-backend
+        bind:
+          create_host_path: false
+    security_opt:
+      - no-new-privileges:true
+    cpus: ${API_CPUS:-2.0}
+    mem_limit: ${API_MEMORY_LIMIT:-1g}
+    logging:
+      driver: local
+      options:
+        max-size: ${DOCKER_LOG_MAX_SIZE:-10m}
+        max-file: ${DOCKER_LOG_MAX_FILE:-3}
+
+  logrotate:
+    image: ${LOGROTATE_IMAGE:?set LOGROTATE_IMAGE in .env}
+    build:
+      context: ./deploy/logrotate
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    read_only: true
+    network_mode: none
+    volumes:
+      - type: bind
+        source: ${AGENT_BACKEND_LOG_DIR:?set AGENT_BACKEND_LOG_DIR in .env}
+        target: /var/log/agent-backend
+        bind:
+          create_host_path: false
+      - type: volume
+        source: logrotate-state
+        target: /var/lib/logrotate
+    tmpfs:
+      - /run:size=1m,mode=0755
+      - /tmp:size=8m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cpus: ${LOGROTATE_CPUS:-0.25}
+    mem_limit: ${LOGROTATE_MEMORY_LIMIT:-64m}
+    healthcheck:
+      test: ["CMD", "pidof", "crond"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    logging:
+      driver: local
+      options:
+        max-size: ${DOCKER_LOG_MAX_SIZE:-10m}
+        max-file: ${DOCKER_LOG_MAX_FILE:-3}
+
+volumes:
+  logrotate-state:

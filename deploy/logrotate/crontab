@@ -1,0 +1,1 @@
+*/5 * * * * /usr/sbin/logrotate --state /var/lib/logrotate/status /etc/logrotate.d/agent-backend >/proc/1/fd/1 2>/proc/1/fd/2

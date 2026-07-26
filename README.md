@@ -380,6 +380,63 @@ docker run --rm -p 8000:8000 \
 
 如果容器内无法访问宿主机服务，需要把 `DB_HOST`、`REDIS_HOST` 等配置改成容器网络可解析的地址。
 
+### 生产 Compose 与 logrotate sidecar
+
+`compose.prod.yaml` 面向单台 Linux 主机，运行一个可配置多 Worker 的 API service 和一个单副本
+logrotate sidecar。两者共享宿主机日志目录，活动日志固定为 `app.log`；sidecar 每 5 分钟检查一次，负责
+`copytruncate`、压缩和保留 30 个归档。该方案不提供审计级零丢失保证，也不用于 Kubernetes。
+
+部署前需要 Docker Engine、Docker Compose v2、可访问的 PostgreSQL/Redis 等外部依赖，以及包含
+`APP_ENV=prod` 和真实密钥的 `configs/.secrets`。Compose 部署参数使用根目录 `.env`，应用配置和密钥仍通过
+只读文件挂载加载：
+
+```bash
+cp .env.compose.example .env
+```
+
+至少按目标主机调整 `.env` 中的 `AGENT_BACKEND_LOG_DIR`、`API_WORKERS`、镜像、端口和资源限制。
+`.env` 不应存放应用密钥，也不会提交到 Git。
+
+先构建镜像并查询 API 镜像内 `app` 用户的数字 UID/GID：
+
+```bash
+docker compose -f compose.prod.yaml build api logrotate
+API_UID=$(docker run --rm --entrypoint id agent-backend:prod -u)
+API_GID=$(docker run --rm --entrypoint id agent-backend:prod -g)
+sudo install -d -m 0750 -o "$API_UID" -g "$API_GID" /var/log/agent-backend
+```
+
+如果修改了 `.env` 中的 `AGENT_BACKEND_IMAGE` 或 `AGENT_BACKEND_LOG_DIR`，上面的镜像名和目录也必须使用相同值。
+确认配置展开结果只包含密钥文件路径、不包含密钥内容，然后依次启动 sidecar 和 API：
+
+```bash
+docker compose -f compose.prod.yaml config
+docker compose -f compose.prod.yaml up -d logrotate
+docker compose -f compose.prod.yaml up -d api
+docker compose -f compose.prod.yaml ps
+```
+
+常用检查和停止命令：
+
+```bash
+docker compose -f compose.prod.yaml logs --tail=200 -f logrotate
+docker compose -f compose.prod.yaml logs --tail=200 -f api
+docker compose -f compose.prod.yaml exec logrotate \
+  logrotate --debug --state /var/lib/logrotate/status /etc/logrotate.d/agent-backend
+docker compose -f compose.prod.yaml down
+```
+
+`down` 默认保留 `logrotate-state` named volume 和宿主机日志。不要使用 `down --volumes`，除非已经明确批准删除
+轮转状态。目标 Linux 环境的完整多 Worker 验收使用显式隔离目录运行：
+
+```bash
+./scripts/verify_logrotate_sidecar.sh /tmp/agent-backend-logrotate-acceptance
+```
+
+验收脚本会创建自己的临时子目录和 Compose project，结束时删除测试容器及测试 state volume，但保留隔离目录中的
+日志归档供检查。它拒绝在 macOS 或生产日志目录上运行。详细权限、轮转和故障处理见
+`docs/logging/log_rotation.md`。
+
 ## 相关文档
 
 - `docs/README.md`

@@ -403,10 +403,14 @@ cp .env.compose.example .env
 docker compose -f compose.prod.yaml build api logrotate
 API_UID=$(docker run --rm --entrypoint id agent-backend:prod -u)
 API_GID=$(docker run --rm --entrypoint id agent-backend:prod -g)
+sudo chown "$API_UID:$API_GID" configs/.secrets
+sudo chmod 0400 configs/.secrets
 sudo install -d -m 0750 -o "$API_UID" -g "$API_GID" /var/log/agent-backend
 ```
 
 如果修改了 `.env` 中的 `AGENT_BACKEND_IMAGE` 或 `AGENT_BACKEND_LOG_DIR`，上面的镜像名和目录也必须使用相同值。
+密钥文件必须允许镜像内的非 root `app` 用户读取；上述数字 UID/GID 归属只影响宿主机文件元数据，文件仍以只读方式
+挂载到容器。每次更换为不同 UID/GID 的 API 镜像后都应重新执行权限设置。
 确认配置展开结果只包含密钥文件路径、不包含密钥内容，然后依次启动 sidecar 和 API：
 
 ```bash

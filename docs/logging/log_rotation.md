@@ -235,11 +235,17 @@ LOGROTATE_ALPINE_REPOSITORY=https://mirrors.aliyun.com/alpine/v3.22
 docker compose -f compose.prod.yaml build api logrotate
 API_UID=$(docker run --rm --entrypoint id agent-backend:prod -u)
 API_GID=$(docker run --rm --entrypoint id agent-backend:prod -g)
+sudo chown "$API_UID:$API_GID" configs/.secrets
+sudo chmod 0400 configs/.secrets
 sudo install -d -m 0750 -o "$API_UID" -g "$API_GID" /var/log/agent-backend
 docker compose -f compose.prod.yaml config
 docker compose -f compose.prod.yaml up -d logrotate
 docker compose -f compose.prod.yaml up -d api
 ```
+
+API 以镜像内的非 root `app` 用户运行，因此宿主机密钥文件必须由对应数字 UID/GID 持有并保持仅所有者可读；只设置
+root `0600` 会导致容器启动时报 `PermissionError`。更换 API 镜像后如果运行用户 UID/GID 发生变化，需要先重新设置
+密钥文件和日志目录的权限。
 
 Compose 的 bind mount 设置了 `create_host_path: false`，目录或配置文件缺失时应直接失败，避免 Docker 静默创建
 root 所有的目录。先启动 sidecar 可以提前暴露配置、state volume 和权限错误；`missingok` 允许此时 `app.log`

@@ -157,6 +157,8 @@ compose build
 
 API_UID=$(docker run --rm --entrypoint id "$API_IMAGE" -u)
 API_GID=$(docker run --rm --entrypoint id "$API_IMAGE" -g)
+docker run --rm --user 0:0 --entrypoint sh -v "$SECRETS_FILE:/secrets" "$API_IMAGE" \
+    -c "chown $API_UID:$API_GID /secrets && chmod 0400 /secrets"
 docker run --rm --user 0:0 --entrypoint sh -v "$LOG_DIR:/logs" "$API_IMAGE" \
     -c "chown $API_UID:$API_GID /logs && chmod 0750 /logs"
 

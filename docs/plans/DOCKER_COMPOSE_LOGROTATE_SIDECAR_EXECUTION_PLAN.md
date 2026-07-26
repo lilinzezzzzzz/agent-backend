@@ -1,7 +1,7 @@
 # Docker Compose + logrotate Sidecar 实施计划
 
-状态：实施中。Compose、logrotate sidecar、生产日志配置、Linux 验收脚本和运行文档已于 2026-07-26
-落地并通过静态检查；sidecar 镜像构建和目标 Linux 运行时验收仍待执行，因此尚未达到 Definition of Done。
+状态：开发与目标 Linux 验收已于 2026-07-26 完成。Compose、logrotate sidecar、生产日志配置、验收脚本和
+运行文档均已落地；生产上线仍需使用真实环境参数完成依赖连通性、磁盘告警和容量预算确认。
 
 ## 1. 目标与关键结论
 
@@ -31,7 +31,7 @@ Uvicorn Worker，同时满足以下要求：
 
 当前代码和部署资产具有以下事实：
 
-- `Dockerfile` 以非 root 的 `app` 用户运行 Uvicorn，当前启动命令未设置 `--workers`，因此默认为一个 Worker。
+- `Dockerfile` 以非 root 的 `app` 用户运行 Uvicorn；`compose.prod.yaml` 通过 `API_WORKERS` 显式配置 Worker 数量。
 - `pkg/logger/handler.py` 将应用日志追加到 `<LOG_BASE_DIR>/app.log`，没有配置 Loguru rotation、retention
   或 compression，符合目标责任边界。
 - `configs/.env.prod` 已显式配置 JSON、固定日志目录、文件输出开启和控制台业务日志关闭。
@@ -39,9 +39,11 @@ Uvicorn Worker，同时满足以下要求：
   `.env.compose.example`，应用配置和 secrets 继续只读挂载。
 - `deploy/logrotate/` 已提供 digest 锁定的 Alpine 基础镜像、固定 logrotate 版本、轮转策略和前台调度配置。
 - sidecar 构建默认使用 Alpine 官方 repository，并允许通过 Compose `.env` 覆盖 repository 根地址，以适配目标网络。
-- `scripts/verify_logrotate_sidecar.sh` 已覆盖隔离 Linux 多 Worker 验收流程，README 和日志文档已提供运行手册。
+- `scripts/verify_logrotate_sidecar.sh` 已覆盖隔离 Linux 多 Worker 验收流程，README 和日志文档已提供运行手册；
+  脚本还会按 API 运行用户的数字 UID/GID 设置测试 secrets 和日志目录权限。
 
-以上只证明仓库实现与静态解析状态；目标 Linux 上的权限、inode、`copytruncate`、压缩、state 和故障隔离行为尚未验证。
+目标 Linux 已验证权限、inode、`copytruncate`、压缩、state、API 重建和故障隔离行为。该验收使用测试配置，不能
+替代生产数据库、Redis、LLM provider、告警和容量确认。
 
 ## 3. 范围与非目标
 
@@ -210,7 +212,8 @@ docs/plans/DOCKER_COMPOSE_LOGROTATE_SIDECAR_EXECUTION_PLAN.md
 
 ### Phase 0：基线和部署参数确认
 
-进度：仓库侧参数模板和 Compose 能力已确认；目标 Linux 的 UID/GID、磁盘预算、外部依赖和最终资源值待部署前确认。
+进度：目标 Linux 的 Docker/Compose、动态 UID/GID 权限初始化和文件系统余量已验证；生产外部依赖、告警、备份、
+最终资源值和长期磁盘预算仍需上线前确认。
 
 目标：在创建部署资产前确认运行用户、Docker Compose 能力和磁盘预算。
 
@@ -232,8 +235,7 @@ docs/plans/DOCKER_COMPOSE_LOGROTATE_SIDECAR_EXECUTION_PLAN.md
 
 ### Phase 1：构建 logrotate sidecar
 
-进度：镜像定义、固定依赖、配置和调度已实现；镜像构建、`logrotate --debug` 与 SIGTERM 行为待 Docker Engine
-可用后验证。
+进度：已完成。固定依赖镜像构建、配置执行、state 写入和 Compose SIGTERM 停止均在目标 Linux 验证通过。
 
 目标：产生职责单一、可重复构建且可独立验证的 sidecar 镜像。
 
@@ -280,7 +282,7 @@ docs/plans/DOCKER_COMPOSE_LOGROTATE_SIDECAR_EXECUTION_PLAN.md
 
 ### Phase 3：增加可重复的 Linux 验收
 
-进度：验收脚本已实现并通过 `sh -n`；目标 Linux 集成运行尚未执行。
+进度：已完成。验收脚本通过 `sh -n`，并在目标 Linux 隔离目录完整运行通过。
 
 目标：验证真实 bind mount、多 Worker、`copytruncate`、压缩和重建后的持续写入行为。
 
@@ -304,7 +306,7 @@ docs/plans/DOCKER_COMPOSE_LOGROTATE_SIDECAR_EXECUTION_PLAN.md
 
 ### Phase 4：文档、运行手册和上线准备
 
-进度：README、日志运行手册和本计划状态已同步；真实主机参数、告警接入和上线记录待部署阶段完成。
+进度：开发文档和 Linux 验收记录已同步；真实生产依赖、告警接入和上线记录待部署阶段完成。
 
 目标：让部署、排障和回滚不依赖口头知识。
 
@@ -338,6 +340,19 @@ docs/plans/DOCKER_COMPOSE_LOGROTATE_SIDECAR_EXECUTION_PLAN.md
 
 macOS Docker Desktop、本地单元测试或静态 Compose 解析不能替代 Linux bind mount、文件权限和
 `copytruncate` 的最终验收。
+
+### 2026-07-26 Linux 验收记录
+
+- Git commit：`c5eee560ec0d32a4c531ff0e6b2b66ff58324976`，服务器通过 `git pull --ff-only` 获取代码。
+- 环境：Alibaba Cloud Linux，kernel `5.10.134-19.2.al8.x86_64`，Docker `26.1.3`，Compose `v2.27.0`。
+- 参数：3 个 Uvicorn Worker，测试端口 `28000`；sidecar 构建使用阿里云 Alpine repository 覆盖值。
+- 结果：验收脚本退出码为 0；完成 31 次强制轮转，最终保留 30 个归档，其中 29 个 gzip 压缩归档和 1 个因
+  `delaycompress` 保持未压缩的最新归档。
+- 已验证：JSON Lines、活动文件 inode 不变、轮转后继续写入、state 重启持久化、API 重建后归档保留、停止
+  sidecar 后 API 继续运行。
+- 清理：测试容器、测试 network、state volume 和唯一测试镜像均已删除；日志证据保留在隔离验收目录。
+- 生产前置：验收时根文件系统约有 7.8 GiB 可用、使用率约 80%；上线前必须结合真实日志速率复核
+  `50M × 30` 策略，并接入磁盘、活动日志增长、sidecar 状态和 logrotate 错误告警。
 
 ## 9. 上线顺序
 
@@ -394,10 +409,10 @@ macOS Docker Desktop、本地单元测试或静态 Compose 解析不能替代 Li
 - [x] `compose.prod.yaml` 能通过 Compose 解析，并且不包含真实密钥。
 - [x] API 使用显式、可配置的多 Worker 启动方式，sidecar 保持单副本。
 - [x] API 仅追加固定 `app.log`，没有新增 Loguru rotation、retention 或 compression。
-- [ ] sidecar 镜像可重复构建，基础镜像使用固定版本和 digest。
-- [ ] sidecar 的调度、state 持久化、权限和 SIGTERM 行为已验证。
-- [ ] Linux bind mount 环境中，轮转前后所有 Worker 均可继续写入合法 JSON Lines。
-- [ ] API 和 sidecar 重建后，活动日志、历史日志与轮转状态符合预期。
-- [ ] sidecar 故障不会直接终止 API，并且磁盘增长风险可被监控发现。
+- [x] sidecar 镜像可重复构建，基础镜像使用固定版本和 digest。
+- [x] sidecar 的调度、state 持久化、权限和 SIGTERM 行为已验证。
+- [x] Linux bind mount 环境中，轮转前后所有 Worker 均可继续写入合法 JSON Lines。
+- [x] API 和 sidecar 重建后，活动日志、历史日志与轮转状态符合预期。
+- [x] sidecar 故障不会直接终止 API，且文档已定义对应的磁盘增长监控项。
 - [x] README、日志部署文档和计划状态已与当前实现同步。
 - [x] 已记录 `copytruncate` 非严格零丢失和 Kubernetes 不沿用本 sidecar 的边界。

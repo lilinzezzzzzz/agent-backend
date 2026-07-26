@@ -83,6 +83,7 @@ cleanup() {
     if [ "$STARTED" = true ]; then
         compose down --remove-orphans --volumes >/dev/null 2>&1 || true
     fi
+    docker image rm "$API_IMAGE" "$LOGROTATE_IMAGE" >/dev/null 2>&1 || true
 }
 
 on_signal() {

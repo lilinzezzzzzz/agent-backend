@@ -433,8 +433,8 @@ docker compose -f compose.prod.yaml down
 ./scripts/verify_logrotate_sidecar.sh /tmp/agent-backend-logrotate-acceptance
 ```
 
-验收脚本会创建自己的临时子目录和 Compose project，结束时删除测试容器及测试 state volume，但保留隔离目录中的
-日志归档供检查。它拒绝在 macOS 或生产日志目录上运行。详细权限、轮转和故障处理见
+验收脚本会创建自己的临时子目录和 Compose project，结束时删除测试容器、测试 state volume 和测试镜像，但保留
+隔离目录中的日志归档供检查。它拒绝在 macOS 或生产日志目录上运行。详细权限、轮转和故障处理见
 `docs/logging/log_rotation.md`。隔离目录还必须位于仓库之外，避免测试 secrets 或日志进入 Docker build context。
 
 ## 相关文档

@@ -312,7 +312,8 @@ sidecar 停止不会联动终止 API，但 `app.log` 会持续增长。此时应
 
 脚本要求显式隔离目录，覆盖多 Worker 持续写入、JSON Lines、inode、`delaycompress`、`rotate 30`、state 持久化、
 API 重建和 sidecar 故障隔离。隔离目录必须位于仓库之外，防止测试 secrets 或日志进入 API 镜像 build context。
-macOS Docker Desktop 只能用于功能冒烟，不能替代 Linux bind mount、权限和 inode 验收。
+脚本结束时清理测试容器、state volume 和唯一测试镜像，但保留隔离日志供复核。macOS Docker Desktop 只能用于功能
+冒烟，不能替代 Linux bind mount、权限和 inode 验收。
 
 ## Linux logrotate
 

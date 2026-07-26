@@ -13,8 +13,6 @@ from pkg import request_context as context
 from pkg.toolkit.json import orjson_dumps
 from pkg.toolkit.timer import format_iso_datetime
 
-# 默认日志目录
-_DEFAULT_BASE_LOG_DIR = Path("/tmp/fastapi_logs")
 _ACTIVE_LOG_FILE_NAME = "app.log"
 
 TimezoneType = str | ZoneInfo | dt_timezone
@@ -46,7 +44,7 @@ class LoggerHandler:
         构造函数：接收所有配置参数并存储为实例属性。
 
         :param level: 日志等级 (e.g., "INFO", "DEBUG")
-        :param base_log_dir: 日志存放的根目录，默认为 /tmp/fastapi_logs
+        :param base_log_dir: 日志存放的根目录；开启文件输出时必须提供
         :param timezone: 日志时区，支持时区字符串（如 "UTC", "Asia/Shanghai"）、ZoneInfo 对象或 datetime.timezone（如 datetime.UTC），默认 "UTC"
         :param enqueue: 是否使用异步队列写入
         :param log_format: 日志格式 (LogFormat.JSON 或 LogFormat.TEXT，默认 LogFormat.TEXT)
@@ -56,7 +54,7 @@ class LoggerHandler:
 
         # --- 配置属性 ---
         self.level = level
-        self.base_log_dir = base_log_dir or _DEFAULT_BASE_LOG_DIR
+        self.base_log_dir = base_log_dir
         self.enqueue = enqueue
         self.log_format = log_format
 
@@ -106,15 +104,17 @@ class LoggerHandler:
 
     def _get_log_dir(self) -> Path:
         """
-        获取默认系统日志目录。
+        获取显式配置的文件日志目录。
 
         Returns:
             日志目录路径
         """
+        if self.base_log_dir is None:
+            raise ValueError("base_log_dir is required when write_to_file=True")
         return self.base_log_dir
 
     def setup(
-        self, *, write_to_file: bool = True, write_to_console: bool = True
+        self, *, write_to_file: bool = False, write_to_console: bool = True
     ) -> "loguru.Logger":
         """
         应用配置并初始化系统日志。

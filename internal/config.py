@@ -27,7 +27,7 @@ from pydantic_settings import (
     SettingsConfigDict,
 )
 
-from internal import BASE_DIR, BASE_LOG_DIR
+from internal import BASE_DIR
 from pkg.crypter.aes import aes_decrypt
 from pkg.lazy_proxy import lazy_proxy
 from pkg.logger import LogFormat
@@ -77,8 +77,8 @@ class Settings(BaseSettings):
 
     # --- 日志配置 ---
     LOG_FORMAT: LogFormat = LogFormat.TEXT  # 日志格式: TEXT 或 JSON
-    LOG_BASE_DIR: Path = BASE_LOG_DIR
-    LOG_WRITE_TO_FILE: bool = True
+    LOG_BASE_DIR: Path | None = None
+    LOG_WRITE_TO_FILE: bool = False
     LOG_WRITE_TO_CONSOLE: bool = True
 
     # --- OpenTelemetry ---
@@ -212,6 +212,24 @@ class Settings(BaseSettings):
         if not normalized:
             raise ValueError("MILVUS_DB_NAME cannot be empty")
         return normalized
+
+    @field_validator("LOG_BASE_DIR")
+    def resolve_log_base_dir(cls, value: Path | None) -> Path | None:
+        """相对日志目录统一基于项目根目录解析。"""
+        if value is None or value.is_absolute():
+            return value
+        return (BASE_DIR / value).resolve()
+
+    @model_validator(mode="after")
+    def validate_log_output(self) -> "Settings":
+        """校验日志至少有一个输出目标，且文件输出必须配置目录。"""
+        if not self.LOG_WRITE_TO_FILE and not self.LOG_WRITE_TO_CONSOLE:
+            raise ValueError(
+                "LOG_WRITE_TO_FILE and LOG_WRITE_TO_CONSOLE cannot both be false"
+            )
+        if self.LOG_WRITE_TO_FILE and self.LOG_BASE_DIR is None:
+            raise ValueError("LOG_BASE_DIR is required when LOG_WRITE_TO_FILE=true")
+        return self
 
     @model_validator(mode="after")
     def decrypt_sensitive_fields(self) -> "Settings":

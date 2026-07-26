@@ -25,17 +25,42 @@ Logger 不负责：
 | 配置 | 默认值 | 说明 |
 | --- | --- | --- |
 | `LOG_FORMAT` | `text` | `text` 或 `json` |
-| `LOG_BASE_DIR` | 仓库根目录的 `logs/` | FastAPI 写入 `<LOG_BASE_DIR>/app.log` |
-| `LOG_WRITE_TO_FILE` | `true` | 是否写入固定日志文件 |
+| `LOG_BASE_DIR` | 未配置 | 文件输出目录；开启文件输出时必须显式配置 |
+| `LOG_WRITE_TO_FILE` | `false` | 是否写入固定日志文件 |
 | `LOG_WRITE_TO_CONSOLE` | `true` | 是否输出到 stderr |
 
-Celery Worker 使用同一组配置，文件路径为 `<LOG_BASE_DIR>/celery/app.log`。
-日志配置统一写入 `configs/.env.{APP_ENV}`；`APP_ENV` 只在仓库根目录 `.env` 维护，密钥由不含 `APP_ENV` 的
-`.secrets` 提供。本文档的容器示例只通过 Compose `environment` 注入 `APP_ENV`，其他应用配置仍使用
-只读文件挂载。
+Celery Worker 使用同一组配置；开启文件输出时路径为 `<LOG_BASE_DIR>/celery/app.log`。日志格式、目录和输出
+目标统一写入 `configs/.env.{APP_ENV}`，Compose 只把根目录 `.env` 中的 `APP_ENV` 注入容器。相对
+`LOG_BASE_DIR` 统一基于项目根目录解析，绝对路径保持不变。密钥由不含 `APP_ENV` 的 `.secrets` 提供。
 
 > 开启 `LOG_WRITE_TO_FILE=true` 后，应用不会自动限制文件大小。长期运行环境必须配套外部轮转，
 > 否则 `app.log` 会持续增长。
+
+### 输出目标的选择原则
+
+`LOG_WRITE_TO_FILE` 和 `LOG_WRITE_TO_CONSOLE` 描述部署所需的输出目标。本项目选择在
+`configs/.env.{APP_ENV}` 中显式维护它们，不通过 Compose `environment` 覆盖。当前仓库中的环境配置约定如下：
+
+当前取值如下：
+
+| 环境配置及对应部署 | `LOG_WRITE_TO_FILE` | `LOG_WRITE_TO_CONSOLE` | `LOG_BASE_DIR` | 日志轮转或采集责任 |
+| --- | --- | --- | --- | --- |
+| `local`：本地开发 | `true` | `true` | `logs`，解析为项目根目录下的 `logs/` | 开发者按需清理；不适合长期运行 |
+| `dev` / `test`：开发、测试或临时进程 | `false` | `true` | 不配置 | CI / 终端收集标准错误流 |
+| `prod`：本仓库 Compose + logrotate Sidecar | `true` | `false` | `logs`，在 API 容器内解析为 `/app/logs` | 单副本 logrotate Sidecar |
+
+还应遵守以下约束：
+
+- 不要同时设置为 `false`，否则应用日志没有任何输出目标。
+- 同时设置为 `true` 主要用于本地调试。在线环境双写会重复占用 I/O 和磁盘，并可能被日志平台重复采集。
+- `LOG_WRITE_TO_FILE=true` 时，必须配置可写的 `LOG_BASE_DIR` 和独立于应用进程的轮转机制。
+- logrotate Sidecar 依赖固定文件输入，因此 `configs/.env.prod` 不能改为 console-only；没有 Sidecar 时则不应沿用
+  当前 `prod` 配置写入容器文件。
+- `LOG_FORMAT` 与输出目标相互独立；平台采集通常使用 `json`，本地阅读通常使用 `text`。
+
+同一个配置文件无法同时表达 Sidecar file-only 和 Kubernetes console-only 两种拓扑。如果生产环境改用普通
+Docker 或 Kubernetes，应在部署前调整对应 `configs/.env.{APP_ENV}`，或者新增独立的 `APP_ENV` 配置文件，
+不要再通过 Compose 或 manifest 临时覆盖这些变量。
 
 ## 日志格式
 
@@ -115,7 +140,7 @@ truncate -s 0 logs/celery/app.log
 按需应对容器重建、Pod 漂移或节点故障造成的日志丢失；明确应用、容器运行时、宿主机和日志平台之间的轮转与
 保留责任；同时保留统一的 JSON Lines 和 trace ID，便于检索、聚合和故障排查。
 
-不同方案解决的问题和适用边界如下：
+不同方案解决的问题和适用边界如下。两个输出开关的权威取值见前文“输出目标的选择原则”：
 
 | 部署方式 | 主要解决的问题或痛点 | 应用输出 | 轮转和保留责任 |
 | --- | --- | --- | --- |
@@ -130,17 +155,17 @@ Docker `local` logging driver 和 Linux `logrotate` 主要控制单机磁盘占�
 
 ## Docker 和 Docker Compose
 
-不要求宿主机固定文件路径时，应用只输出 stderr，由 Docker `local` logging driver 落盘、轮转和压缩。
-在用于部署的 `configs/.env.prod` 中配置：
+不要求宿主机固定文件路径时，应在所选 `configs/.env.{APP_ENV}` 中配置 console-only，由 Docker `local`
+logging driver 对 stderr 落盘、轮转和压缩：
 
 ```env
-LOG_FORMAT=json
-LOG_WRITE_TO_CONSOLE=true
 LOG_WRITE_TO_FILE=false
+LOG_WRITE_TO_CONSOLE=true
 ```
 
-根目录 `.env` 必须包含 `APP_ENV=prod`，`.secrets` 只保留应用启动所需的密钥。
-以下 Compose 片段假设容器内项目根目录为 `/app`：
+根目录 `.env` 的 `APP_ENV` 必须指向一个已经配置为 console-only 的环境文件；仓库当前的 `.env.prod` 专用于
+logrotate Sidecar，不能原样用于本节方案。`.secrets` 只保留应用启动所需的密钥。以下 Compose 片段假设
+容器内项目根目录为 `/app`：
 
 ```yaml
 services:
@@ -148,7 +173,7 @@ services:
     environment:
       APP_ENV: ${APP_ENV:?set APP_ENV in .env}
     volumes:
-      - ./configs/.env.prod:/app/configs/.env.prod:ro
+      - ./configs/.env.${APP_ENV}:/app/configs/.env.${APP_ENV}:ro
       - ./.secrets:/app/.secrets:ro
     logging:
       driver: local
@@ -161,7 +186,7 @@ services:
     environment:
       APP_ENV: ${APP_ENV:?set APP_ENV in .env}
     volumes:
-      - ./configs/.env.prod:/app/configs/.env.prod:ro
+      - ./configs/.env.${APP_ENV}:/app/configs/.env.${APP_ENV}:ro
       - ./.secrets:/app/.secrets:ro
     logging:
       driver: local
@@ -185,9 +210,9 @@ Docker 管理的内部日志文件不是运维契约，不应直接使用 `tail`
 ## Docker Compose logrotate sidecar
 
 当单台 Linux 主机必须在固定宿主机目录交付日志文件时，仓库提供 `compose.yaml` 和
-`deploy/logrotate/`。API 与 sidecar 共享同一个 bind mount：API 只追加
-`/var/log/agent-backend/app.log`，sidecar 保持单副本并负责轮转。sidecar 不挂载应用配置、密钥或 Docker
-socket，不使用网络，根文件系统只读；轮转 state 单独保存在 `logrotate-state` named volume。
+`deploy/logrotate/`。API 与 sidecar 共享同一个宿主机 bind source，但使用各自职责对应的容器路径：API 只追加
+`/app/logs/app.log`，sidecar 从 `/var/log/agent-backend/app.log` 轮转同一个文件。sidecar 不挂载应用配置、
+密钥或 Docker socket，不使用网络，根文件系统只读；轮转 state 单独保存在 `logrotate-state` named volume。
 
 该方案只适合允许 `copytruncate` 极小丢失窗口的普通业务日志。审计、计费、合规、多主机或 Kubernetes 场景应使用
 stdout/stderr、节点级单一采集器和集中日志后端。
@@ -213,15 +238,17 @@ Docker 内部日志上限。真实密码、token 和 API key 仍只放在 `.secr
 | `APP_SECRETS_FILE` | 不含 `APP_ENV` 的应用密钥文件，只读挂载到 API 容器 |
 | `DOCKER_LOG_MAX_SIZE` / `DOCKER_LOG_MAX_FILE` | API access/error log 与 sidecar stderr 的 Docker `local` driver 上限 |
 
-Compose 根据同一个 `APP_ENV` 挂载 `configs/.env.${APP_ENV}`，并把该值注入 API 进程。`configs/.env.prod`
-已将文件日志显式配置为：
+Compose 根据同一个 `APP_ENV` 挂载 `configs/.env.${APP_ENV}`，并只把该环境选择器注入 API 进程。
+当前 `configs/.env.prod` 为 Sidecar 拓扑配置：
 
 ```env
-LOG_FORMAT=json
-LOG_BASE_DIR=/var/log/agent-backend
+LOG_BASE_DIR=logs
 LOG_WRITE_TO_FILE=true
 LOG_WRITE_TO_CONSOLE=false
 ```
+
+`logs` 基于容器项目根目录 `/app` 解析为 `/app/logs`。Compose 将宿主机 `AGENT_BACKEND_LOG_DIR` 挂载到该
+路径；Sidecar 把同一个宿主机目录挂载到 `/var/log/agent-backend`。两个容器目标路径不同，但底层文件相同。
 
 如果目标网络访问 Alpine 官方 CDN 不稳定，可在 `.env` 中覆盖 repository，例如阿里云主机使用：
 
@@ -333,10 +360,9 @@ sidecar 同时管理同一个 `app.log`。
 
 ### 应用配置
 
-在 `configs/.env.prod` 中配置：
+在所选 `configs/.env.{APP_ENV}` 中配置：
 
 ```env
-LOG_FORMAT=json
 LOG_BASE_DIR=/var/log/agent-backend
 LOG_WRITE_TO_FILE=true
 LOG_WRITE_TO_CONSOLE=false
@@ -444,16 +470,18 @@ Linux 测试环境完成最终验证。
 
 ## Docker 和 Kubernetes 平台统一采集
 
-Kubernetes 部署不应让应用管理 Pod 内的日志文件。应用只输出 stdout/stderr：
-在 `configs/.env.prod` 中配置：
+Kubernetes 部署不应让应用管理 Pod 内的日志文件。在 Kubernetes 使用的
+`configs/.env.{APP_ENV}` 中显式配置：
 
 ```env
-LOG_FORMAT=json
-LOG_WRITE_TO_CONSOLE=true
 LOG_WRITE_TO_FILE=false
+LOG_WRITE_TO_CONSOLE=true
 ```
 
-使用 ConfigMap 和 Secret 将完整配置挂载为文件，而不是注入为环境变量。
+仓库当前的 `configs/.env.prod` 专用于 logrotate Sidecar，不能不加修改地用于 Kubernetes。若 Kubernetes
+仍选择 `APP_ENV=prod`，ConfigMap 中提供的 `.env.prod` 必须采用上述 console-only 配置。
+
+使用 ConfigMap 和 Secret 将完整配置挂载为文件，容器环境变量只保留 `APP_ENV`。
 以下 Deployment 片段假设容器内项目根目录为 `/app`：
 
 ```yaml

@@ -229,6 +229,76 @@ def test_log_output_config_values_are_loaded(tmp_path: Path) -> None:
     assert settings.LOG_WRITE_TO_CONSOLE is True
 
 
+def test_relative_log_base_dir_is_resolved_from_project_root(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    env_path = tmp_path / ".env.test"
+    secrets_path = tmp_path / ".secrets"
+    env_values = _base_env_values()
+    env_values.update(
+        {
+            "LOG_BASE_DIR": "logs",
+            "LOG_WRITE_TO_FILE": "true",
+        }
+    )
+    _write_env_file(env_path, env_values)
+    _write_env_file(secrets_path, _secret_values())
+    monkeypatch.setattr(config_module, "BASE_DIR", tmp_path)
+
+    settings = _new_settings(env_path, secrets_path)
+
+    assert settings.LOG_BASE_DIR == tmp_path / "logs"
+
+
+def test_log_output_defaults_to_console_only(tmp_path: Path) -> None:
+    env_path = tmp_path / ".env.test"
+    secrets_path = tmp_path / ".secrets"
+    _write_env_file(env_path, _base_env_values())
+    _write_env_file(secrets_path, _secret_values())
+
+    settings = _new_settings(env_path, secrets_path)
+
+    assert settings.LOG_BASE_DIR is None
+    assert settings.LOG_WRITE_TO_FILE is False
+    assert settings.LOG_WRITE_TO_CONSOLE is True
+
+
+def test_file_logging_requires_base_log_dir(tmp_path: Path) -> None:
+    env_path = tmp_path / ".env.test"
+    secrets_path = tmp_path / ".secrets"
+    env_values = _base_env_values()
+    env_values["LOG_WRITE_TO_FILE"] = "true"
+    _write_env_file(env_path, env_values)
+    _write_env_file(secrets_path, _secret_values())
+
+    with pytest.raises(
+        ValidationError,
+        match="LOG_BASE_DIR is required when LOG_WRITE_TO_FILE=true",
+    ):
+        _new_settings(env_path, secrets_path)
+
+
+def test_log_output_requires_at_least_one_target(tmp_path: Path) -> None:
+    env_path = tmp_path / ".env.test"
+    secrets_path = tmp_path / ".secrets"
+    env_values = _base_env_values()
+    env_values.update(
+        {
+            "LOG_WRITE_TO_FILE": "false",
+            "LOG_WRITE_TO_CONSOLE": "false",
+        }
+    )
+    _write_env_file(env_path, env_values)
+    _write_env_file(secrets_path, _secret_values())
+
+    with pytest.raises(
+        ValidationError,
+        match="LOG_WRITE_TO_FILE and LOG_WRITE_TO_CONSOLE cannot both be false",
+    ):
+        _new_settings(env_path, secrets_path)
+
+
 def test_tracing_requires_otlp_traces_endpoint(tmp_path: Path) -> None:
     env_path = tmp_path / ".env.test"
     secrets_path = tmp_path / ".secrets"

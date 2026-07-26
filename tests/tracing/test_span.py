@@ -63,7 +63,7 @@ def _configure_json_logger(tmp_path: Path) -> Path:
         base_log_dir=base_log_dir,
         log_format=LogFormat.JSON,
         enqueue=False,
-    ).setup(write_to_console=False)
+    ).setup(write_to_file=True, write_to_console=False)
     return base_log_dir
 
 

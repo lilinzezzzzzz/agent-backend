@@ -54,7 +54,11 @@ def _worker_startup():
     init_logger(
         level="INFO",
         log_format=settings.LOG_FORMAT,
-        base_log_dir=settings.LOG_BASE_DIR / "celery",
+        base_log_dir=(
+            settings.LOG_BASE_DIR / "celery"
+            if settings.LOG_BASE_DIR is not None
+            else None
+        ),
         write_to_file=settings.LOG_WRITE_TO_FILE,
         write_to_console=settings.LOG_WRITE_TO_CONSOLE,
     )

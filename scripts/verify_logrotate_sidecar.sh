@@ -137,7 +137,7 @@ wait_for_marker() {
 
 validate_json_lines() {
     compose exec -T api python -c \
-        'import json, pathlib; lines = [line for line in pathlib.Path("/var/log/agent-backend/app.log").read_text().splitlines() if line]; assert lines; [json.loads(line) for line in lines]'
+        'import json, pathlib; lines = [line for line in pathlib.Path("/app/logs/app.log").read_text().splitlines() if line]; assert lines; [json.loads(line) for line in lines]'
 }
 
 force_rotate() {

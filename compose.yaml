@@ -35,11 +35,8 @@ services:
     ports:
       - ${API_PORT:-8000}:8000
     environment:
-      # APP_ENV 的唯一维护点是根目录 .env；应用据此加载 /app/configs/.env.${APP_ENV}。
+      # Compose 只注入环境选择器；应用配置统一由 configs/.env.${APP_ENV} 管理。
       APP_ENV: ${APP_ENV:?set APP_ENV in .env}
-      # 保证任意 APP_ENV 下的 Compose 部署都把文件日志写入与 sidecar 共享的目录。
-      LOG_BASE_DIR: /var/log/agent-backend
-      LOG_WRITE_TO_FILE: "true"
     volumes:
       # 根据唯一的 APP_ENV 同时确定宿主机源文件和容器内目标文件，
       # 不再维护第二个环境变量。
@@ -57,11 +54,11 @@ services:
         read_only: true
         bind:
           create_host_path: false
-      # 持久化应用日志；宿主机目录必须预先存在，并允许 API 的 app 用户数字 UID/GID 写入。
-      # sidecar 会把同一目录挂载到相同容器路径，并作为唯一的日志轮转执行者。
+      # 持久化应用日志；应用将相对 LOG_BASE_DIR=logs 解析为 /app/logs。
+      # 宿主机目录必须预先存在，并允许 API 的 app 用户数字 UID/GID 写入。
       - type: bind
         source: ${AGENT_BACKEND_LOG_DIR:?set AGENT_BACKEND_LOG_DIR in .env}
-        target: /var/log/agent-backend
+        target: /app/logs
         bind:
           # 路径拼写错误或尚未初始化时直接失败，避免静默创建 root 所有的目录。
           create_host_path: false
@@ -94,8 +91,8 @@ services:
     # 轮转完全在本机文件系统内完成，不需要应用网络，也不需要访问 Docker socket。
     network_mode: none
     volumes:
-      # 共享日志 bind mount；logrotate 使用 copytruncate。
-      # 所有 API Worker 因此可以保持原文件描述符继续写入。
+      # 与 API 共享同一个宿主机目录；容器内路径可以不同。
+      # logrotate 使用 copytruncate，所有 API Worker 可以保持原文件描述符继续写入。
       - type: bind
         source: ${AGENT_BACKEND_LOG_DIR:?set AGENT_BACKEND_LOG_DIR in .env}
         target: /var/log/agent-backend

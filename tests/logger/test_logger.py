@@ -114,6 +114,24 @@ def test_file_logging_can_be_disabled_without_creating_directory(tmp_path):
     assert not base_log_dir.exists()
 
 
+def test_file_logging_requires_base_log_dir():
+    manager = LoggerHandler(enqueue=False)
+
+    with pytest.raises(
+        ValueError, match="base_log_dir is required when write_to_file=True"
+    ):
+        manager.setup(write_to_file=True, write_to_console=False)
+
+
+def test_default_setup_only_writes_to_console(tmp_path):
+    base_log_dir = tmp_path / "logs"
+    manager = LoggerHandler(base_log_dir=base_log_dir, enqueue=False)
+
+    manager.setup()
+
+    assert not base_log_dir.exists()
+
+
 def test_setup_disables_diagnose_for_all_sinks(tmp_path):
     manager = LoggerHandler(base_log_dir=tmp_path / "logs", enqueue=False)
 

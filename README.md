@@ -152,6 +152,9 @@ ENDPOINT_GUARD_FAIL_OPEN=true
 - 设置 `DB_READ_HOST` 后会初始化只读副本；未设置时读会话自动 fallback 到主库。
 - `CONFIG_ECHO_REVEAL_SECRETS=true` 会在启动配置回显中显示敏感值，只应临时用于本地诊断。
 - Logger 只负责控制台输出和向 `LOG_BASE_DIR/app.log` 追加日志，不在应用内执行轮转、保留或压缩。
+- Logger 默认只输出到控制台；各环境的日志输出目标统一在 `configs/.env.{APP_ENV}` 中显式配置。各部署
+  形态的 `LOG_WRITE_TO_FILE` / `LOG_WRITE_TO_CONSOLE` 取值见
+  [`docs/logging/log_rotation.md`](docs/logging/log_rotation.md#输出目标的选择原则)。
 - 启用 `LOG_WRITE_TO_FILE=true` 的长期运行环境必须同时配置外部日志轮转；部署方案见 `docs/logging/log_rotation.md`。
 - `LLM_*` 用于 Chat / Agent 推理模型；`EMBEDDING_*` 用于向量模型，两者不要共用配置。
 - `EMBEDDING_PROVIDER` 当前支持 `openai_compatible`，可接 OpenAI-compatible `/embeddings` 协议的 BGE、vLLM、Xinference、TEI 或自建向量服务。
@@ -394,6 +397,7 @@ docker run --rm -p 8000:8000 \
 `compose.yaml` 面向单台 Linux 主机，运行一个可配置多 Worker 的 API service 和一个单副本
 logrotate sidecar。两者共享宿主机日志目录，活动日志固定为 `app.log`；sidecar 每 5 分钟检查一次，负责
 `copytruncate`、压缩和保留 30 个归档。该方案不提供审计级零丢失保证，也不用于 Kubernetes。
+文件输出、日志目录和关闭业务控制台日志均由 `configs/.env.prod` 配置；Compose 只注入 `APP_ENV`。
 
 部署前需要 Docker Engine、Docker Compose v2、可访问的 PostgreSQL/Redis 等外部依赖，以及不含 `APP_ENV` 的
 真实 `.secrets`。Compose 部署参数和唯一的 `APP_ENV` 使用根目录 `.env`，应用配置和密钥仍通过只读文件

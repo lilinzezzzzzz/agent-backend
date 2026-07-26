@@ -8,7 +8,10 @@ pkg.logger - 统一的日志管理包
     from pkg.logger import init_logger, logger
 
     # 在应用启动时初始化
-    init_logger(level="DEBUG", base_log_dir=Path("/var/log/myapp"))
+    init_logger(level="DEBUG")  # 默认只输出到控制台
+
+    # 需要固定文件时由部署入口显式开启
+    init_logger(base_log_dir=Path("/var/log/myapp"), write_to_file=True)
 
     # 之后在任何地方使用
     logger.info("Application started")
@@ -53,7 +56,7 @@ def init_logger(
     timezone: TimezoneType = "UTC",
     enqueue: bool = True,
     log_format: LogFormat = LogFormat.TEXT,
-    write_to_file: bool = True,
+    write_to_file: bool = False,
     write_to_console: bool = True,
 ) -> "Logger":
     """

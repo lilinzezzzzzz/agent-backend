@@ -94,7 +94,7 @@ if not _skip_logger_mock:
         timezone: TimezoneType = "UTC",
         enqueue: bool = True,
         log_format: LogFormat = LogFormat.TEXT,
-        write_to_file: bool = True,
+        write_to_file: bool = False,
         write_to_console: bool = True,
     ):
         logger_manager = LoggerHandler(

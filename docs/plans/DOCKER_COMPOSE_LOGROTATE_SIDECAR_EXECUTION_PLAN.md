@@ -23,7 +23,8 @@ Uvicorn Worker，同时满足以下要求：
 
 - FastAPI 与 logrotate 分属两个 Compose service，共享同一个宿主机 bind mount。
 - logrotate service 固定为单副本；不得跟随 API Worker 数或未来 API 容器副本数扩容。
-- 活动日志始终为 `/var/log/agent-backend/app.log`，初版使用 `copytruncate`，避免要求所有 Worker
+- 活动日志在宿主机和 Sidecar 内为 `/var/log/agent-backend/app.log`，在 API 容器内为
+  `/app/logs/app.log`；三者指向同一个 bind mount 文件。初版使用 `copytruncate`，避免要求所有 Worker
   重新打开文件句柄。
 - `copytruncate` 只适用于允许极小丢失窗口的普通业务日志，不提供审计级严格无丢失保证。
 - sidecar 是 Compose 部署适配层，不进入应用镜像，也不作为 Kubernetes 目标架构。
@@ -38,7 +39,7 @@ Uvicorn Worker，同时满足以下要求：
 - `Dockerfile` 以非 root 的 `app` 用户运行 Uvicorn；`compose.yaml` 通过 `API_WORKERS` 显式配置 Worker 数量。
 - `pkg/logger/handler.py` 将应用日志追加到 `<LOG_BASE_DIR>/app.log`，没有配置 Loguru rotation、retention
   或 compression，符合目标责任边界。
-- `configs/.env.prod` 已显式配置 JSON、固定日志目录、文件输出开启和控制台业务日志关闭。
+- `configs/.env.prod` 显式配置 JSON、固定日志目录和输出目标；`compose.yaml` 只注入 `APP_ENV`。
 - `compose.yaml` 已定义 API 与单副本 sidecar；根目录 `.env` 负责 Compose 参数，模板为
   `.env.compose.example`，应用配置和 secrets 继续只读挂载。
 - `deploy/logrotate/` 已提供 digest 锁定的 Alpine 基础镜像、固定 logrotate 版本、轮转策略和前台调度配置。
@@ -92,7 +93,9 @@ Linux host
     │ └── Worker N           │     │     compress/retention  │
     │                        │     │                          │
     │ Loguru: append only    │     │ 不挂载应用密钥或         │
-    │ app.log                │     │ Docker socket            │
+    │ /app/logs/app.log      │     │ /var/log/agent-backend/  │
+    │                        │     │ app.log                  │
+    │                        │     │ Docker socket            │
     └────────────────────────┘     └──────────────────────────┘
                                              │
                                              ▼
@@ -113,14 +116,16 @@ Linux host
 
 ### 5.1 API 日志配置
 
-`configs/.env.prod` 计划显式增加：
+文件输出由应用环境配置统一管理。当前 Sidecar 部署使用 `configs/.env.prod`：
 
 ```dotenv
-LOG_FORMAT=json
-LOG_BASE_DIR=/var/log/agent-backend
+LOG_BASE_DIR=logs
 LOG_WRITE_TO_FILE=true
 LOG_WRITE_TO_CONSOLE=false
 ```
+
+相对目录在 API 容器内解析为 `/app/logs`。Compose 将宿主机 `AGENT_BACKEND_LOG_DIR` 挂载到 API 的
+`/app/logs`，并将同一宿主机目录挂载到 Sidecar 的 `/var/log/agent-backend`。
 
 配置文件和 `.secrets` 继续只读挂载到 API 容器。sidecar 不挂载 `configs/`、数据库密码、Redis
 密码、LLM API key 或其他应用密钥。
@@ -270,18 +275,18 @@ docs/plans/DOCKER_COMPOSE_LOGROTATE_SIDECAR_EXECUTION_PLAN.md
 执行项：
 
 - 新增 `compose.yaml`，API 使用当前项目镜像和显式 Uvicorn `--workers` 参数。
-- API 与 sidecar 将同一个 `${AGENT_BACKEND_LOG_DIR}` 挂载到容器内
+- API 与 sidecar 共享同一个 `${AGENT_BACKEND_LOG_DIR}`：API 挂载到 `/app/logs`，sidecar 挂载到
   `/var/log/agent-backend`。
 - sidecar 额外挂载 `logrotate-state` named volume。
 - 两个 service 均设置重启策略和 Docker logging driver 上限。
 - sidecar 不暴露端口、不加入不需要的网络、不挂载应用 secrets。
 - Compose 不声明 sidecar replicas，也不提供随 API 扩容的入口。
-- `configs/.env.prod` 显式写入文件日志配置，避免依赖 `Settings` 默认值。
+- `configs/.env.prod` 显式写入文件日志配置，Compose 只负责注入 `APP_ENV`。
 
 完成门槛：
 
 - `docker compose config` 成功且展开结果无明文密钥。
-- 展开结果中 API 和 sidecar 的容器内日志目录完全一致。
+- 展开结果中 API 和 sidecar 使用相同的宿主机 bind source，并分别挂载到预期容器路径。
 - 只有 API 挂载应用配置和 secrets。
 - API Worker 数可以通过非密钥部署参数调整，sidecar 始终为一个容器。
 
@@ -321,7 +326,7 @@ docs/plans/DOCKER_COMPOSE_LOGROTATE_SIDECAR_EXECUTION_PLAN.md
 - `docs/logging/log_rotation.md` 增加 sidecar 方案、权限初始化、强制轮转、state 检查和常见故障。
 - 文档明确区分应用 `app.log` 与 Docker stdout/stderr 内部日志。
 - 文档记录 sidecar 停止、磁盘接近阈值、压缩失败和权限错误的检查方法。
-- 记录 Kubernetes 迁移方式：删除 sidecar 和日志 bind mount，切换为
+- 记录 Kubernetes 迁移方式：删除 sidecar 和日志 bind mount，在 Kubernetes 使用的环境配置文件中切换为
   `LOG_WRITE_TO_FILE=false`、`LOG_WRITE_TO_CONSOLE=true`，交由节点 Agent 采集。
 
 完成门槛：
@@ -390,7 +395,8 @@ macOS Docker Desktop、本地单元测试或静态 Compose 解析不能替代 Li
 
 按以下顺序回滚，避免留下无人管理的固定文件：
 
-1. 将 API 切换为 `LOG_WRITE_TO_FILE=false`、`LOG_WRITE_TO_CONSOLE=true`，重新创建 API 容器。
+1. 在当前 `configs/.env.{APP_ENV}` 中将 API 切换为 `LOG_WRITE_TO_FILE=false`、
+   `LOG_WRITE_TO_CONSOLE=true`，重新创建 API 容器。
 2. 确认 Docker logging driver 正常接收并轮转应用日志。
 3. 停止并移除 logrotate sidecar，但保留宿主机日志目录和 state volume。
 4. 归档或删除历史日志属于破坏性数据操作，必须由运维人员另行确认，不纳入自动回滚。

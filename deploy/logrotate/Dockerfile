@@ -1,6 +1,9 @@
 FROM alpine:3.22.1@sha256:4bcff63911fcb4448bd4fdacec207030997caf25e9bea4045fa6c8c44de311d1
 
-RUN apk add --no-cache logrotate=3.21.0-r1
+ARG ALPINE_REPOSITORY=https://dl-cdn.alpinelinux.org/alpine/v3.22
+
+RUN sed -i "s|https://dl-cdn.alpinelinux.org/alpine/v3.22|${ALPINE_REPOSITORY}|g" /etc/apk/repositories \
+    && apk add --no-cache logrotate=3.21.0-r1
 
 COPY --chmod=0444 agent-backend.conf /etc/logrotate.d/agent-backend
 COPY --chmod=0600 crontab /etc/crontabs/root

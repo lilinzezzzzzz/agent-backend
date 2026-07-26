@@ -55,6 +55,8 @@ services:
     build:
       context: ./deploy/logrotate
       dockerfile: Dockerfile
+      args:
+        ALPINE_REPOSITORY: ${LOGROTATE_ALPINE_REPOSITORY:-https://dl-cdn.alpinelinux.org/alpine/v3.22}
     restart: unless-stopped
     read_only: true
     network_mode: none

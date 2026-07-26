@@ -204,6 +204,7 @@ cp .env.compose.example .env
 | `AGENT_BACKEND_LOG_DIR` | API 与 sidecar 共享的宿主机绝对目录 |
 | `API_WORKERS` | API 容器内 Uvicorn Worker 数量 |
 | `AGENT_BACKEND_IMAGE` / `LOGROTATE_IMAGE` | API 和 sidecar 镜像名 |
+| `LOGROTATE_ALPINE_REPOSITORY` | sidecar 构建使用的 Alpine repository 根地址；默认使用官方源 |
 | `APP_CONFIG_ENV` | 配置文件在容器内的环境后缀，生产环境为 `prod` |
 | `APP_ENV_FILE` / `APP_SECRETS_FILE` | 只读挂载的应用配置和密钥文件 |
 | `DOCKER_LOG_MAX_SIZE` / `DOCKER_LOG_MAX_FILE` | API access/error log 与 sidecar stderr 的 Docker `local` driver 上限 |
@@ -216,6 +217,14 @@ LOG_BASE_DIR=/var/log/agent-backend
 LOG_WRITE_TO_FILE=true
 LOG_WRITE_TO_CONSOLE=false
 ```
+
+如果目标网络访问 Alpine 官方 CDN 不稳定，可在 `.env` 中覆盖 repository，例如阿里云主机使用：
+
+```dotenv
+LOGROTATE_ALPINE_REPOSITORY=https://mirrors.aliyun.com/alpine/v3.22
+```
+
+该变量只影响镜像构建，不进入运行中容器；logrotate 版本仍固定为 `3.21.0-r1`。
 
 ### 目录权限和启动
 

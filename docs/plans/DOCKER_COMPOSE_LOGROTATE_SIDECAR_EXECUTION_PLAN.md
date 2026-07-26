@@ -38,6 +38,7 @@ Uvicorn Worker，同时满足以下要求：
 - `compose.prod.yaml` 已定义 API 与单副本 sidecar；根目录 `.env` 负责 Compose 参数，模板为
   `.env.compose.example`，应用配置和 secrets 继续只读挂载。
 - `deploy/logrotate/` 已提供 digest 锁定的 Alpine 基础镜像、固定 logrotate 版本、轮转策略和前台调度配置。
+- sidecar 构建默认使用 Alpine 官方 repository，并允许通过 Compose `.env` 覆盖 repository 根地址，以适配目标网络。
 - `scripts/verify_logrotate_sidecar.sh` 已覆盖隔离 Linux 多 Worker 验收流程，README 和日志文档已提供运行手册。
 
 以上只证明仓库实现与静态解析状态；目标 Linux 上的权限、inode、`copytruncate`、压缩、state 和故障隔离行为尚未验证。

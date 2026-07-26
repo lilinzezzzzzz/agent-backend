@@ -36,9 +36,9 @@
 - 进程入口由 `entrypoints/main.py` 导出 `internal.app.create_app()` 创建的 FastAPI app。
 - `internal/app.py` 负责路由、中间件和 lifespan；基础设施初始化发生在主应用 lifespan。
 - `/v1` 默认 token 认证，`/v1/public` 无认证，`/v1/internal` 签名认证。
-- 配置由 `internal/config.py` 管理，先读取 `configs/.secrets` 中的 `APP_ENV`，再加载
-  `configs/.env.{APP_ENV}`，最后由 `configs/.secrets` 覆盖同名配置。
-- `.secrets` 用于 `APP_ENV` 和敏感值，例如 `AES_SECRET`、`JWT_SECRET`、`DB_PASSWORD`、
+- 配置由 `internal/config.py` 管理，`APP_ENV` 只在仓库根目录 `.env` 维护；应用据此加载
+  `configs/.env.{APP_ENV}`，最后由 `.secrets` 覆盖同名配置。
+- `.secrets` 只用于敏感值，例如 `AES_SECRET`、`JWT_SECRET`、`DB_PASSWORD`、
   `REDIS_PASSWORD`、LLM provider API key；文档和日志不能泄露真实值。
 - 当前配置回显会按 `.secrets` 中的敏感 key 做掩码；`CONFIG_ECHO_REVEAL_SECRETS=true`
   只允许本地临时诊断。
@@ -144,8 +144,8 @@ AGENTSCOPE_WORKSPACE_TTL_SECONDS=3600
 
 `.secrets` 建议：
 
-- 保留现有 `APP_ENV`、`AES_SECRET`、`JWT_SECRET`、`DB_PASSWORD`、`REDIS_PASSWORD`、LLM provider
-  API key 设计。
+- 保留现有 `AES_SECRET`、`JWT_SECRET`、`DB_PASSWORD`、`REDIS_PASSWORD`、LLM provider API key 设计，
+  不写入 `APP_ENV`。
 - 不新增非敏感 AgentScope 开关到 `.secrets`。
 - 如果未来需要全局 AgentScope provider key，应使用明确命名的 secret key，并说明它是系统级凭证；
   多用户凭证优先走 AgentScope 官方 Credential API。

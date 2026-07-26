@@ -93,7 +93,7 @@ configs/.env.prod
 ```
 
 `internal/config.py` 只声明配置字段和类型并负责解析，不硬编码实际环境值。以下配置不是密钥，不写入
-`configs/.secrets`：
+`.secrets`：
 
 ```python
 class Settings(BaseSettings):

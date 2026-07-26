@@ -14,6 +14,7 @@ from openai.types.chat.chat_completion_chunk import (
 )
 from pydantic import AliasChoices, BaseModel, Field
 
+from internal.config import detect_app_env
 from pkg.llm import (
     OpenAIClient,
     ProviderCapabilities,
@@ -71,15 +72,17 @@ def _provider_key(provider: str, field: str) -> str:
 
 
 def _load_llm_provider_config() -> LLMProviderConfig:
-    configs_dir = _repo_root() / "configs"
-    secrets_path = configs_dir / ".secrets"
+    repo_root = _repo_root()
+    configs_dir = repo_root / "configs"
+    secrets_path = repo_root / ".secrets"
     if not secrets_path.exists():
-        pytest.skip("configs/.secrets not found")
+        pytest.skip(".secrets not found")
 
     secrets = dotenv_values(secrets_path)
-    app_env = secrets.get("APP_ENV")
-    if not app_env:
-        pytest.skip("APP_ENV not found in configs/.secrets")
+    try:
+        app_env = detect_app_env()
+    except ValueError as exc:
+        pytest.skip(str(exc))
 
     env_path = configs_dir / f".env.{app_env}"
     if not env_path.exists():
@@ -385,7 +388,7 @@ async def test_chat_completion_stream_skips_empty_choices(mock_client: OpenAICli
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_openai_compatible_chat_completion(llm_client: OpenAIClient):
-    """使用 configs/.secrets 和对应 .env 调用默认 OpenAI-compatible provider 非流式接口"""
+    """使用根目录 .secrets 和对应 .env 调用默认 OpenAI-compatible provider 非流式接口"""
     response = await llm_client.chat_completion(
         messages=[
             {"role": "system", "content": "你是大模型助手，请用简洁中文回答。"},
@@ -428,7 +431,7 @@ async def test_deepseek_chat_completion_with_thinking_control(
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_openai_compatible_chat_completion_stream(llm_client: OpenAIClient):
-    """使用 configs/.secrets 和对应 .env 调用默认 OpenAI-compatible provider 流式接口"""
+    """使用根目录 .secrets 和对应 .env 调用默认 OpenAI-compatible provider 流式接口"""
     chunks: list[str] = []
     async for chunk in llm_client.chat_completion_stream(
         messages=[

@@ -133,6 +133,8 @@ env.bak/
 venv.bak/
 
 # Secrets (AES keys, encryption keys, etc.)
+/.secrets
+# Legacy location kept ignored to prevent accidental commits during migration.
 configs/.secrets
 
 # Spyder project settings

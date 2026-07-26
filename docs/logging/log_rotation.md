@@ -30,9 +30,9 @@ Logger 不负责：
 | `LOG_WRITE_TO_CONSOLE` | `true` | 是否输出到 stderr |
 
 Celery Worker 使用同一组配置，文件路径为 `<LOG_BASE_DIR>/celery/app.log`。
-日志配置统一写入 `configs/.env.{APP_ENV}`；`APP_ENV` 和密钥仍由 `configs/.secrets` 提供。
-本文档的容器示例通过只读挂载这两个文件传入配置，不使用 Compose `environment`
-或 Kubernetes `env` 注入日志配置。
+日志配置统一写入 `configs/.env.{APP_ENV}`；`APP_ENV` 只在仓库根目录 `.env` 维护，密钥由不含 `APP_ENV` 的
+`.secrets` 提供。本文档的容器示例只通过 Compose `environment` 注入 `APP_ENV`，其他应用配置仍使用
+只读文件挂载。
 
 > 开启 `LOG_WRITE_TO_FILE=true` 后，应用不会自动限制文件大小。长期运行环境必须配套外部轮转，
 > 否则 `app.log` 会持续增长。
@@ -139,15 +139,17 @@ LOG_WRITE_TO_CONSOLE=true
 LOG_WRITE_TO_FILE=false
 ```
 
-`configs/.secrets` 必须包含 `APP_ENV=prod`，并保留应用启动所需的其他密钥。
+根目录 `.env` 必须包含 `APP_ENV=prod`，`.secrets` 只保留应用启动所需的密钥。
 以下 Compose 片段假设容器内项目根目录为 `/app`：
 
 ```yaml
 services:
   api:
+    environment:
+      APP_ENV: ${APP_ENV:?set APP_ENV in .env}
     volumes:
       - ./configs/.env.prod:/app/configs/.env.prod:ro
-      - ./configs/.secrets:/app/configs/.secrets:ro
+      - ./.secrets:/app/.secrets:ro
     logging:
       driver: local
       options:
@@ -156,9 +158,11 @@ services:
         compress: "true"
 
   celery-worker:
+    environment:
+      APP_ENV: ${APP_ENV:?set APP_ENV in .env}
     volumes:
       - ./configs/.env.prod:/app/configs/.env.prod:ro
-      - ./configs/.secrets:/app/configs/.secrets:ro
+      - ./.secrets:/app/.secrets:ro
     logging:
       driver: local
       options:
@@ -180,7 +184,7 @@ Docker 管理的内部日志文件不是运维契约，不应直接使用 `tail`
 
 ## Docker Compose logrotate sidecar
 
-当单台 Linux 主机必须在固定宿主机目录交付日志文件时，仓库提供 `compose.prod.yaml` 和
+当单台 Linux 主机必须在固定宿主机目录交付日志文件时，仓库提供 `compose.yaml` 和
 `deploy/logrotate/`。API 与 sidecar 共享同一个 bind mount：API 只追加
 `/var/log/agent-backend/app.log`，sidecar 保持单副本并负责轮转。sidecar 不挂载应用配置、密钥或 Docker
 socket，不使用网络，根文件系统只读；轮转 state 单独保存在 `logrotate-state` named volume。
@@ -196,20 +200,21 @@ stdout/stderr、节点级单一采集器和集中日志后端。
 cp .env.compose.example .env
 ```
 
-`.env` 只保存 Compose 部署参数：镜像名、宿主机日志目录、API Worker 数、端口、资源限制、Docker 内部日志上限，
-以及应用配置文件的挂载路径。真实密码、token 和 API key 仍只放在 `configs/.secrets`。关键参数如下：
+`.env` 保存唯一的 `APP_ENV` 和 Compose 部署参数：镜像名、宿主机日志目录、API Worker 数、端口、资源限制及
+Docker 内部日志上限。真实密码、token 和 API key 仍只放在 `.secrets`。关键参数如下：
 
 | 参数 | 作用 |
 | --- | --- |
+| `APP_ENV` | 唯一应用环境标识；可选值为 `local`、`dev`、`test`、`prod` |
 | `AGENT_BACKEND_LOG_DIR` | API 与 sidecar 共享的宿主机绝对目录 |
 | `API_WORKERS` | API 容器内 Uvicorn Worker 数量 |
 | `AGENT_BACKEND_IMAGE` / `LOGROTATE_IMAGE` | API 和 sidecar 镜像名 |
 | `LOGROTATE_ALPINE_REPOSITORY` | sidecar 构建使用的 Alpine repository 根地址；默认使用官方源 |
-| `APP_CONFIG_ENV` | 配置文件在容器内的环境后缀，生产环境为 `prod` |
-| `APP_ENV_FILE` / `APP_SECRETS_FILE` | 只读挂载的应用配置和密钥文件 |
+| `APP_SECRETS_FILE` | 不含 `APP_ENV` 的应用密钥文件，只读挂载到 API 容器 |
 | `DOCKER_LOG_MAX_SIZE` / `DOCKER_LOG_MAX_FILE` | API access/error log 与 sidecar stderr 的 Docker `local` driver 上限 |
 
-`APP_CONFIG_ENV` 必须与 `APP_SECRETS_FILE` 中的 `APP_ENV` 一致。`configs/.env.prod` 已将文件日志显式配置为：
+Compose 根据同一个 `APP_ENV` 挂载 `configs/.env.${APP_ENV}`，并把该值注入 API 进程。`configs/.env.prod`
+已将文件日志显式配置为：
 
 ```env
 LOG_FORMAT=json
@@ -232,15 +237,15 @@ LOGROTATE_ALPINE_REPOSITORY=https://mirrors.aliyun.com/alpine/v3.22
 日志路径；修改 `.env` 后应同步替换：
 
 ```bash
-docker compose -f compose.prod.yaml build api logrotate
+docker compose build api logrotate
 API_UID=$(docker run --rm --entrypoint id agent-backend:prod -u)
 API_GID=$(docker run --rm --entrypoint id agent-backend:prod -g)
-sudo chown "$API_UID:$API_GID" configs/.secrets
-sudo chmod 0400 configs/.secrets
+sudo chown "$API_UID:$API_GID" .secrets
+sudo chmod 0400 .secrets
 sudo install -d -m 0750 -o "$API_UID" -g "$API_GID" /var/log/agent-backend
-docker compose -f compose.prod.yaml config
-docker compose -f compose.prod.yaml up -d logrotate
-docker compose -f compose.prod.yaml up -d api
+docker compose config
+docker compose up -d logrotate
+docker compose up -d api
 ```
 
 API 以镜像内的非 root `app` 用户运行，因此宿主机密钥文件必须由对应数字 UID/GID 持有并保持仅所有者可读；只设置
@@ -286,14 +291,14 @@ app.2026-07-25_14-30-00.log.gz
 调试解析不会执行轮转：
 
 ```bash
-docker compose -f compose.prod.yaml exec logrotate \
+docker compose exec logrotate \
   logrotate --debug --state /var/lib/logrotate/status /etc/logrotate.d/agent-backend
 ```
 
 只在测试环境或受控维护窗口强制轮转：
 
 ```bash
-docker compose -f compose.prod.yaml exec logrotate \
+docker compose exec logrotate \
   logrotate --force --state /var/lib/logrotate/status /etc/logrotate.d/agent-backend
 ls -lh /var/log/agent-backend
 ```
@@ -301,9 +306,9 @@ ls -lh /var/log/agent-backend
 检查状态和错误：
 
 ```bash
-docker compose -f compose.prod.yaml ps logrotate
-docker compose -f compose.prod.yaml logs --tail=200 logrotate
-docker compose -f compose.prod.yaml exec logrotate test -s /var/lib/logrotate/status
+docker compose ps logrotate
+docker compose logs --tail=200 logrotate
+docker compose exec logrotate test -s /var/lib/logrotate/status
 ```
 
 sidecar 停止不会联动终止 API，但 `app.log` 会持续增长。此时应提高磁盘告警等级并恢复原 sidecar；不要临时启动
@@ -351,15 +356,19 @@ LOG_WRITE_TO_CONSOLE=false
 ```yaml
 services:
   api:
+    environment:
+      APP_ENV: ${APP_ENV:?set APP_ENV in .env}
     volumes:
       - ./configs/.env.prod:/app/configs/.env.prod:ro
-      - ./configs/.secrets:/app/configs/.secrets:ro
+      - ./.secrets:/app/.secrets:ro
       - /var/log/agent-backend:/var/log/agent-backend
 
   celery-worker:
+    environment:
+      APP_ENV: ${APP_ENV:?set APP_ENV in .env}
     volumes:
       - ./configs/.env.prod:/app/configs/.env.prod:ro
-      - ./configs/.secrets:/app/configs/.secrets:ro
+      - ./.secrets:/app/.secrets:ro
       - /var/log/agent-backend:/var/log/agent-backend
 ```
 
@@ -454,7 +463,7 @@ volumeMounts:
     subPath: .env.prod
     readOnly: true
   - name: app-secrets
-    mountPath: /app/configs/.secrets
+    mountPath: /app/.secrets
     subPath: .secrets
     readOnly: true
 

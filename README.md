@@ -21,7 +21,8 @@ README 只记录当前仓库可直接核对的能力；更细的设计约束和�
 ## 当前能力
 
 - 进程入口：`entrypoints/main.py` 导出 FastAPI `app`，`internal.infra.celery` 导出 Celery `celery_app`，`internal/app.py` 负责路由、中间件和 lifespan。
-- 配置加载：从 `configs/.secrets` 读取 `APP_ENV`，加载 `configs/.env.{APP_ENV}` 后再由 `.secrets` 覆盖。
+- 配置加载：`APP_ENV` 只在根目录 `.env` 维护；应用据此加载 `configs/.env.{APP_ENV}`，再由
+  `.secrets` 覆盖敏感配置。
 - 数据库：异步 SQLAlchemy 连接池，支持主库和可选只读副本；配置层支持 PostgreSQL、MySQL、Oracle DSN。
 - Redis：连接池、业务缓存封装、认证 token metadata、Agent action confirmation / idempotency 缓存。
 - 认证：Token 认证、内部签名认证、公共路由白名单、微信登录接入点。
@@ -60,27 +61,34 @@ uv sync --frozen
 
 ### 2. 准备配置
 
-复制密钥模板：
+复制部署参数和密钥模板：
 
 ```bash
-cp configs/.secrets.example configs/.secrets
+cp .env.compose.example .env
+cp .secrets.example .secrets
 ```
 
 启动时配置加载顺序如下：
 
-1. 从 `configs/.secrets` 读取 `APP_ENV`。
+1. Compose 把根目录 `.env` 中的 `APP_ENV` 注入容器；本地直接运行时应用会直接读取该文件。
 2. 加载 `configs/.env.{APP_ENV}`。
-3. 再加载 `configs/.secrets`，同名配置覆盖 `.env`。
-4. 外部 shell 环境变量只作为缺省兜底，不覆盖配置文件中已有 key。
+3. 再加载不含 `APP_ENV` 的 `.secrets`，同名配置覆盖环境配置文件。
+4. 除显式注入的 `APP_ENV` 外，shell 环境变量只作为缺省兜底，不覆盖配置文件中已有 key。
 
-缺少 `configs/.secrets`、缺少 `APP_ENV`，或缺少对应的 `configs/.env.{APP_ENV}`，应用会在启动阶段失败。
+缺少根目录 `.env` 中的 `APP_ENV`、缺少 `.secrets`、密钥文件残留 `APP_ENV`，或缺少对应的
+`configs/.env.{APP_ENV}`，应用都会在启动阶段失败。
 
 最小本地配置示例：
 
-`configs/.secrets`
+`.env`
 
 ```env
 APP_ENV=local
+```
+
+`.secrets`
+
+```env
 AES_SECRET=your_aes_secret_key
 JWT_SECRET=your_jwt_secret_key
 DB_PASSWORD=your_db_password
@@ -139,7 +147,7 @@ ENDPOINT_GUARD_FAIL_OPEN=true
 配置说明：
 
 - 仓库已提供 `configs/.env.local`、`configs/.env.dev`、`configs/.env.test`、`configs/.env.prod`。
-- `configs/.secrets` 被 `.gitignore` 忽略，不要提交真实密钥、数据库口令、token 或生产配置。
+- `.secrets` 被 `.gitignore` 忽略，不要提交真实密钥、数据库口令、token 或生产配置。
 - `DB_PASSWORD`、`DB_READ_PASSWORD`、`REDIS_PASSWORD` 支持 `ENC(...)`，运行时使用 `AES_SECRET` 解密。
 - 设置 `DB_READ_HOST` 后会初始化只读副本；未设置时读会话自动 fallback 到主库。
 - `CONFIG_ECHO_REVEAL_SECRETS=true` 会在启动配置回显中显示敏感值，只应临时用于本地诊断。
@@ -373,7 +381,8 @@ docker build -t agent-backend .
 
 ```bash
 docker run --rm -p 8000:8000 \
-  -v "$PWD/configs/.secrets:/app/configs/.secrets:ro" \
+  -e APP_ENV=local \
+  -v "$PWD/.secrets:/app/.secrets:ro" \
   -v "$PWD/configs/.env.local:/app/configs/.env.local:ro" \
   agent-backend
 ```
@@ -382,29 +391,29 @@ docker run --rm -p 8000:8000 \
 
 ### 生产 Compose 与 logrotate sidecar
 
-`compose.prod.yaml` 面向单台 Linux 主机，运行一个可配置多 Worker 的 API service 和一个单副本
+`compose.yaml` 面向单台 Linux 主机，运行一个可配置多 Worker 的 API service 和一个单副本
 logrotate sidecar。两者共享宿主机日志目录，活动日志固定为 `app.log`；sidecar 每 5 分钟检查一次，负责
 `copytruncate`、压缩和保留 30 个归档。该方案不提供审计级零丢失保证，也不用于 Kubernetes。
 
-部署前需要 Docker Engine、Docker Compose v2、可访问的 PostgreSQL/Redis 等外部依赖，以及包含
-`APP_ENV=prod` 和真实密钥的 `configs/.secrets`。Compose 部署参数使用根目录 `.env`，应用配置和密钥仍通过
-只读文件挂载加载：
+部署前需要 Docker Engine、Docker Compose v2、可访问的 PostgreSQL/Redis 等外部依赖，以及不含 `APP_ENV` 的
+真实 `.secrets`。Compose 部署参数和唯一的 `APP_ENV` 使用根目录 `.env`，应用配置和密钥仍通过只读文件
+挂载加载：
 
 ```bash
 cp .env.compose.example .env
 ```
 
-至少按目标主机调整 `.env` 中的 `AGENT_BACKEND_LOG_DIR`、`API_WORKERS`、镜像、端口和资源限制。
+至少按目标环境调整 `.env` 中的 `APP_ENV`、`AGENT_BACKEND_LOG_DIR`、`API_WORKERS`、镜像、端口和资源限制。
 `.env` 不应存放应用密钥，也不会提交到 Git。
 
 先构建镜像并查询 API 镜像内 `app` 用户的数字 UID/GID：
 
 ```bash
-docker compose -f compose.prod.yaml build api logrotate
+docker compose build api logrotate
 API_UID=$(docker run --rm --entrypoint id agent-backend:prod -u)
 API_GID=$(docker run --rm --entrypoint id agent-backend:prod -g)
-sudo chown "$API_UID:$API_GID" configs/.secrets
-sudo chmod 0400 configs/.secrets
+sudo chown "$API_UID:$API_GID" .secrets
+sudo chmod 0400 .secrets
 sudo install -d -m 0750 -o "$API_UID" -g "$API_GID" /var/log/agent-backend
 ```
 
@@ -414,20 +423,20 @@ sudo install -d -m 0750 -o "$API_UID" -g "$API_GID" /var/log/agent-backend
 确认配置展开结果只包含密钥文件路径、不包含密钥内容，然后依次启动 sidecar 和 API：
 
 ```bash
-docker compose -f compose.prod.yaml config
-docker compose -f compose.prod.yaml up -d logrotate
-docker compose -f compose.prod.yaml up -d api
-docker compose -f compose.prod.yaml ps
+docker compose config
+docker compose up -d logrotate
+docker compose up -d api
+docker compose ps
 ```
 
 常用检查和停止命令：
 
 ```bash
-docker compose -f compose.prod.yaml logs --tail=200 -f logrotate
-docker compose -f compose.prod.yaml logs --tail=200 -f api
-docker compose -f compose.prod.yaml exec logrotate \
+docker compose logs --tail=200 -f logrotate
+docker compose logs --tail=200 -f api
+docker compose exec logrotate \
   logrotate --debug --state /var/lib/logrotate/status /etc/logrotate.d/agent-backend
-docker compose -f compose.prod.yaml down
+docker compose down
 ```
 
 `down` 默认保留 `logrotate-state` named volume 和宿主机日志。不要使用 `down --volumes`，除非已经明确批准删除

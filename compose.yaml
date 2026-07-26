@@ -1,0 +1,134 @@
+# 面向单台 Linux 主机的通用部署编排：
+# - 先把 .env.compose.example 复制为仓库根目录的 .env，再在其中调整部署参数。
+# - APP_ENV 只在根目录 .env 维护；Compose 将它注入容器并据此挂载对应的应用配置文件。
+# - 应用凭据不放在根目录 .env，仍由下方的 .secrets 只读挂载提供。
+# - API 与唯一的 logrotate sidecar 共享同一个宿主机日志目录；禁止扩容 logrotate service。
+services:
+  # FastAPI 应用容器。Uvicorn 使用项目 Dockerfile 中声明的非 root `app` 用户运行。
+  api:
+    # `:?` 语法会在必填变量缺失时让 Compose 在变量展开阶段直接失败。
+    # 从源码部署时，`docker compose build` 也会使用此镜像名称和标签。
+    image: ${AGENT_BACKEND_IMAGE:?set AGENT_BACKEND_IMAGE in .env}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # 显式声明生产启动命令，避免 Worker 拓扑依赖 Dockerfile 的默认命令。
+    command:
+      - uvicorn
+      - entrypoints.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --loop
+      - uvloop
+      - --http
+      - httptools
+      - --access-log
+      - --workers
+      - ${API_WORKERS:?set API_WORKERS in .env}
+    # 异常退出或 Docker daemon/主机重启后自动恢复，但尊重运维人员的显式停止操作。
+    restart: unless-stopped
+    # 使用轻量 init 转发终止信号，并回收多 Worker Uvicorn 创建的子进程。
+    init: true
+    # API_PORT 是宿主机端口；Uvicorn 在容器内始终监听 8000。
+    ports:
+      - ${API_PORT:-8000}:8000
+    environment:
+      # APP_ENV 的唯一维护点是根目录 .env；应用据此加载 /app/configs/.env.${APP_ENV}。
+      APP_ENV: ${APP_ENV:?set APP_ENV in .env}
+      # 保证任意 APP_ENV 下的 Compose 部署都把文件日志写入与 sidecar 共享的目录。
+      LOG_BASE_DIR: /var/log/agent-backend
+      LOG_WRITE_TO_FILE: "true"
+    volumes:
+      # 根据唯一的 APP_ENV 同时确定宿主机源文件和容器内目标文件，
+      # 不再维护第二个环境变量。
+      - type: bind
+        source: ./configs/.env.${APP_ENV:?set APP_ENV in .env}
+        target: /app/configs/.env.${APP_ENV:?set APP_ENV in .env}
+        read_only: true
+        bind:
+          create_host_path: false
+      # 应用凭据；该文件不得包含 APP_ENV，也不得提交到 Git。
+      # 宿主机权限须允许镜像内 app 用户的数字 UID/GID 读取。
+      - type: bind
+        source: ${APP_SECRETS_FILE:-./.secrets}
+        target: /app/.secrets
+        read_only: true
+        bind:
+          create_host_path: false
+      # 持久化应用日志；宿主机目录必须预先存在，并允许 API 的 app 用户数字 UID/GID 写入。
+      # sidecar 会把同一目录挂载到相同容器路径，并作为唯一的日志轮转执行者。
+      - type: bind
+        source: ${AGENT_BACKEND_LOG_DIR:?set AGENT_BACKEND_LOG_DIR in .env}
+        target: /var/log/agent-backend
+        bind:
+          # 路径拼写错误或尚未初始化时直接失败，避免静默创建 root 所有的目录。
+          create_host_path: false
+    # 禁止通过 setuid 或文件 capability 在容器内获得额外权限。
+    security_opt:
+      - no-new-privileges:true
+    # Compose 级资源上限；应与 API_WORKERS 及数据库等下游连接上限一起调整。
+    cpus: ${API_CPUS:-2.0}
+    mem_limit: ${API_MEMORY_LIMIT:-1g}
+    # 限制 Uvicorn access/error 写入 Docker stdout/stderr 的大小；它与应用 app.log 相互独立。
+    logging:
+      driver: local
+      options:
+        max-size: ${DOCKER_LOG_MAX_SIZE:-10m}
+        max-file: ${DOCKER_LOG_MAX_FILE:-3}
+
+  # 必须只有一个 sidecar 管理 app.log；多实例会发生轮转竞争并可能破坏保留状态。
+  logrotate:
+    image: ${LOGROTATE_IMAGE:?set LOGROTATE_IMAGE in .env}
+    build:
+      context: ./deploy/logrotate
+      dockerfile: Dockerfile
+      args:
+        # 为无法稳定访问 Alpine 官方 CDN 的主机提供构建期镜像源覆盖。
+        # 该值不会注入运行中容器；软件包版本仍由 Dockerfile 固定。
+        ALPINE_REPOSITORY: ${LOGROTATE_ALPINE_REPOSITORY:-https://dl-cdn.alpinelinux.org/alpine/v3.22}
+    restart: unless-stopped
+    # 运行时根文件系统保持只读，只有显式声明的 volume 和 tmpfs 路径可写。
+    read_only: true
+    # 轮转完全在本机文件系统内完成，不需要应用网络，也不需要访问 Docker socket。
+    network_mode: none
+    volumes:
+      # 共享日志 bind mount；logrotate 使用 copytruncate。
+      # 所有 API Worker 因此可以保持原文件描述符继续写入。
+      - type: bind
+        source: ${AGENT_BACKEND_LOG_DIR:?set AGENT_BACKEND_LOG_DIR in .env}
+        target: /var/log/agent-backend
+        bind:
+          create_host_path: false
+      # 在 sidecar 重建和普通 `docker compose down` 后保留上次轮转时间。
+      # 除非明确需要删除轮转状态，否则不要执行 `docker compose down --volumes`。
+      - type: volume
+        source: logrotate-state
+        target: /var/lib/logrotate
+    # 为 crond/logrotate 提供必要的可写运行目录，同时保持根文件系统只读。
+    tmpfs:
+      - /run:size=1m,mode=0755
+      - /tmp:size=8m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    # 轮转服务保持轻量，其资源配置不跟随 API 容量设置扩张。
+    cpus: ${LOGROTATE_CPUS:-0.25}
+    mem_limit: ${LOGROTATE_MEMORY_LIMIT:-64m}
+    # 确认前台调度器仍存活；实际轮转错误通过容器日志输出。
+    healthcheck:
+      test: ["CMD", "pidof", "crond"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    # 限制 crond/logrotate 诊断信息写入 Docker stdout/stderr 的大小。
+    logging:
+      driver: local
+      options:
+        max-size: ${DOCKER_LOG_MAX_SIZE:-10m}
+        max-file: ${DOCKER_LOG_MAX_FILE:-3}
+
+volumes:
+  # 这里只保存 Docker 管理的轮转状态；日志文件本身位于宿主机 AGENT_BACKEND_LOG_DIR。
+  logrotate-state:

@@ -32,6 +32,8 @@ wheels/
 logs/
 *.log
 
+/.secrets
+# Legacy location kept excluded to prevent accidental secret leakage during migration.
 configs/.secrets
 /.env
 

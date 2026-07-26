@@ -51,8 +51,8 @@
 - 响应信封：Controller 响应约定和 `BaseResponse[T]` 见 `internal/controllers/AGENTS.md`。
 - 错误码：保持 `internal.core.errors` 的稳定语义。
 - 认证与签名：主要实现位于 `internal/middlewares/auth.py`、`internal/services/auth.py`、`internal/controllers/api/auth.py`。
-- 配置加载：由 `internal/config.py` 管理；启动必须依次读取 `configs/.secrets` 中的 `APP_ENV`、
-  `configs/.env.{APP_ENV}`，再由 `configs/.secrets` 覆盖同名配置。
+- 配置加载：由 `internal/config.py` 管理；`APP_ENV` 只在仓库根目录 `.env` 中维护，Compose 将其注入进程环境；
+  应用据此读取 `configs/.env.{APP_ENV}`，再由不含 `APP_ENV` 的根目录 `.secrets` 覆盖同名配置。
 - 密钥安全：不要提交真实密钥、真实数据库口令、真实 token 或生产配置；日志上下文不得泄露 secret、
   token、密码、数据库连接串明文。
 - 数据库：写操作通过 DAO 或已有 builder/helper 完成，不要在 controller 里直接操作 session。

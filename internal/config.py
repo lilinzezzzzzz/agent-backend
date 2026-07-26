@@ -3,10 +3,11 @@
 包含配置类定义、加载逻辑和全局配置实例
 """
 
+import os
 import sys
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from dotenv import dotenv_values
 from loguru import logger
@@ -40,6 +41,8 @@ from pkg.toolkit.string import mask_string
 DBType = Literal["mysql", "postgresql", "oracle"]
 EndpointGuardSource = Literal["settings", "redis", "settings+redis"]
 EmbeddingProvider = Literal["openai_compatible"]
+AppEnv = Literal["local", "dev", "test", "prod"]
+APP_ENV_VALUES = {"local", "dev", "test", "prod"}
 
 # 数据库驱动映射
 DB_DRIVER_MAP: dict[str, str] = {
@@ -69,7 +72,7 @@ class Settings(BaseSettings):
     """
 
     # --- 核心环境配置 ---
-    APP_ENV: Literal["local", "dev", "test", "prod"]
+    APP_ENV: AppEnv
     DEBUG: bool = False
 
     # --- 日志配置 ---
@@ -412,28 +415,38 @@ def _setup_startup_logger():
     return logger
 
 
-def detect_app_env() -> str:
+def detect_app_env() -> AppEnv:
     """
     检测应用环境
 
     规则：
-    - 只从 .secrets 文件读取 APP_ENV
-    - 如果文件不存在或 APP_ENV 未设置，则报错终止
+    - Compose/容器环境从进程环境变量读取 APP_ENV
+    - 本地直接运行时可从仓库根目录 .env 读取 APP_ENV
+    - 两处同时存在但值不一致，或值不受支持时，报错终止
     """
-    secrets_path = BASE_DIR / "configs" / ".secrets"
+    root_env_path = BASE_DIR / ".env"
+    root_env = (
+        dotenv_values(root_env_path).get("APP_ENV") if root_env_path.exists() else None
+    )
+    process_env = os.getenv("APP_ENV")
 
-    # 检查文件是否存在
-    if not secrets_path.exists():
-        raise FileNotFoundError(f"Configuration file not found: {secrets_path}")
+    if process_env and root_env and process_env != root_env:
+        raise ValueError(
+            f"APP_ENV conflict: process environment is '{process_env}' but {root_env_path} contains '{root_env}'"
+        )
 
-    # 从文件读取配置
-    secrets_dict = dotenv_values(secrets_path)
-    app_env = secrets_dict.get("APP_ENV")
-
+    app_env = process_env or root_env
     if not app_env:
-        raise ValueError(f"APP_ENV not found in {secrets_path}")
+        raise ValueError(
+            f"APP_ENV must be set in the process environment or {root_env_path}"
+        )
+    if app_env not in APP_ENV_VALUES:
+        supported = ", ".join(sorted(APP_ENV_VALUES))
+        raise ValueError(
+            f"Unsupported APP_ENV '{app_env}'; expected one of: {supported}"
+        )
 
-    return app_env
+    return cast(AppEnv, app_env)
 
 
 def _validate_secrets_file() -> tuple[Path, dict]:
@@ -445,9 +458,9 @@ def _validate_secrets_file() -> tuple[Path, dict]:
 
     Raises:
         FileNotFoundError: 文件不存在
-        ValueError: APP_ENV 未设置
+        ValueError: .secrets 中错误地包含 APP_ENV
     """
-    secrets_path = BASE_DIR / "configs" / ".secrets"
+    secrets_path = BASE_DIR / ".secrets"
 
     # 检查文件是否存在
     if not secrets_path.exists():
@@ -456,16 +469,16 @@ def _validate_secrets_file() -> tuple[Path, dict]:
     # 读取配置
     secrets_dict = dotenv_values(secrets_path)
 
-    # 验证必需的 APP_ENV
-    app_env = secrets_dict.get("APP_ENV")
-    if not app_env:
-        raise ValueError(f"APP_ENV not found in {secrets_path}")
+    if "APP_ENV" in secrets_dict:
+        raise ValueError(
+            f"APP_ENV must be removed from {secrets_path} and configured in the repository-root .env"
+        )
 
     return secrets_path, secrets_dict
 
 
 def _sensitive_secret_config_keys(secrets: Mapping[str, str | None]) -> set[str]:
-    """Return sensitive config keys declared in configs/.secrets."""
+    """Return sensitive config keys declared in the repository-root .secrets."""
     return {
         key
         for key, value in secrets.items()
@@ -531,36 +544,37 @@ def load_config() -> Settings:
     加载应用配置
 
     加载顺序：
-    1. 验证 .secrets 文件并获取应用环境
-    2. 检查对应环境配置文件是否存在
-    3. 加载配置文件 (.env.{env} 和 .secrets)
+    1. 从进程环境或仓库根目录 .env 获取 APP_ENV
+    2. 验证 .secrets 文件不再包含 APP_ENV
+    3. 检查对应环境配置文件是否存在
+    4. 加载配置文件 (.env.{env} 和 .secrets)，并显式注入 APP_ENV
     """
     _logger = _setup_startup_logger()
     _logger.info("Loading configuration...")
 
-    # 1. 验证 .secrets 文件并获取应用环境
+    # 1-2. 获取唯一 APP_ENV，并验证密钥文件
     try:
+        app_env = detect_app_env()
         secrets_path, secrets_dict = _validate_secrets_file()
-        app_env = secrets_dict["APP_ENV"]  # 已经验证过存在
         _logger.info(f"Detected Environment: {app_env}")
     except (FileNotFoundError, ValueError) as e:
         _logger.critical(f"Configuration validation failed: {e}")
         raise
 
-    # 2. 检查对应环境文件是否存在
+    # 3. 检查对应环境文件是否存在
     env_file_path = BASE_DIR / "configs" / f".env.{app_env}"
     if not env_file_path.exists():
         msg = f"CRITICAL: Config file missing for environment '{app_env}' at {env_file_path}"
         _logger.critical(msg)
         raise FileNotFoundError(msg)
 
-    # 4. 加载配置
+    # 4. 加载配置；显式 APP_ENV 的优先级高于配置文件和 shell 环境变量
     # load_files 顺序：[.env.dev, .secrets] -> 后者覆盖前者
     load_files = [env_file_path, secrets_path]
     _logger.info(f"Loading files: {[f.name for f in load_files]}")
 
     try:
-        _settings = Settings(_env_file=load_files)  # type: ignore
+        _settings = Settings(APP_ENV=app_env, _env_file=load_files)  # type: ignore
         _logger.success("Configuration loaded successfully.")
 
         _echo_loaded_config(_settings, secrets_dict)

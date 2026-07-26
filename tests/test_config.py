@@ -40,7 +40,6 @@ def _base_env_values() -> dict[str, str]:
 
 def _secret_values() -> dict[str, str]:
     return {
-        "APP_ENV": "test",
         "AES_SECRET": "test-aes-secret",
         "JWT_SECRET": "test-jwt-secret",
         "DB_PASSWORD": "dotenv-db-password",
@@ -49,7 +48,7 @@ def _secret_values() -> dict[str, str]:
 
 
 def _new_settings(*env_files: Path) -> Settings:
-    return Settings(_env_file=list(env_files))  # type: ignore[call-arg]
+    return Settings(APP_ENV="test", _env_file=list(env_files))  # type: ignore[call-arg]
 
 
 def test_startup_logger_uses_stderr_without_creating_log_file(
@@ -72,6 +71,90 @@ def test_startup_logger_uses_stderr_without_creating_log_file(
         diagnose=False,
     )
     assert not (tmp_path / "logs").exists()
+
+
+def test_detect_app_env_reads_repository_root_dotenv(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.delenv("APP_ENV", raising=False)
+    monkeypatch.setattr(config_module, "BASE_DIR", tmp_path)
+    _write_env_file(tmp_path / ".env", {"APP_ENV": "test"})
+
+    assert config_module.detect_app_env() == "test"
+
+
+def test_detect_app_env_reads_process_environment_without_root_dotenv(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("APP_ENV", "prod")
+    monkeypatch.setattr(config_module, "BASE_DIR", tmp_path)
+
+    assert config_module.detect_app_env() == "prod"
+
+
+def test_detect_app_env_rejects_conflicting_process_and_dotenv_values(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("APP_ENV", "dev")
+    monkeypatch.setattr(config_module, "BASE_DIR", tmp_path)
+    _write_env_file(tmp_path / ".env", {"APP_ENV": "prod"})
+
+    with pytest.raises(ValueError, match="APP_ENV conflict"):
+        config_module.detect_app_env()
+
+
+def test_detect_app_env_rejects_unsupported_value(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.delenv("APP_ENV", raising=False)
+    monkeypatch.setattr(config_module, "BASE_DIR", tmp_path)
+    _write_env_file(tmp_path / ".env", {"APP_ENV": "production"})
+
+    with pytest.raises(ValueError, match="Unsupported APP_ENV 'production'"):
+        config_module.detect_app_env()
+
+
+def test_load_config_uses_app_env_outside_secrets(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    configs_dir = tmp_path / "configs"
+    configs_dir.mkdir()
+    monkeypatch.delenv("APP_ENV", raising=False)
+    monkeypatch.setattr(config_module, "BASE_DIR", tmp_path)
+    monkeypatch.setattr(
+        config_module, "_setup_startup_logger", MagicMock(return_value=MagicMock())
+    )
+    _write_env_file(tmp_path / ".env", {"APP_ENV": "test"})
+    _write_env_file(configs_dir / ".env.test", _base_env_values())
+    _write_env_file(tmp_path / ".secrets", _secret_values())
+
+    settings = config_module.load_config()
+
+    assert settings.APP_ENV == "test"
+    assert "APP_ENV" not in _secret_values()
+
+
+def test_load_config_rejects_app_env_in_secrets(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    configs_dir = tmp_path / "configs"
+    configs_dir.mkdir()
+    monkeypatch.delenv("APP_ENV", raising=False)
+    monkeypatch.setattr(config_module, "BASE_DIR", tmp_path)
+    monkeypatch.setattr(
+        config_module, "_setup_startup_logger", MagicMock(return_value=MagicMock())
+    )
+    _write_env_file(tmp_path / ".env", {"APP_ENV": "test"})
+    _write_env_file(tmp_path / ".secrets", {**_secret_values(), "APP_ENV": "test"})
+
+    with pytest.raises(ValueError, match="APP_ENV must be removed"):
+        config_module.load_config()
 
 
 def test_dotenv_values_take_priority_over_shell_environment(
@@ -252,7 +335,6 @@ def test_celery_state_machine_removes_legacy_timing_settings() -> None:
 def test_sensitive_secret_config_keys_only_match_sensitive_names() -> None:
     assert _sensitive_secret_config_keys(
         {
-            "APP_ENV": "test",
             "CONFIG_ECHO_REVEAL_SECRETS": "false",
             "JWT_SECRET": "jwt-secret",
             "DB_PASSWORD": "db-password",

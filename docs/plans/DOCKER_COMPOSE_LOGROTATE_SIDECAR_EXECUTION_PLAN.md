@@ -3,6 +3,10 @@
 状态：开发与目标 Linux 验收已于 2026-07-26 完成。Compose、logrotate sidecar、生产日志配置、验收脚本和
 运行文档均已落地；生产上线仍需使用真实环境参数完成依赖连通性、磁盘告警和容量预算确认。
 
+后续配置收敛：原 `compose.prod.yaml` 已改为默认 `compose.yaml`，`APP_ENV` 也已从 `.secrets` 移到根目录
+`.env` 作为唯一来源。该重构已通过本地配置加载测试、Compose 解析和 Shell 静态检查；下方 Linux 验收记录对应
+重构前的 commit `c5eee56`，服务器再次部署前仍应运行当前验收脚本。
+
 ## 1. 目标与关键结论
 
 目标是在一台 Linux 服务器上使用 Docker Compose 运行单个 FastAPI 容器，并允许容器内启动多个
@@ -31,19 +35,20 @@ Uvicorn Worker，同时满足以下要求：
 
 当前代码和部署资产具有以下事实：
 
-- `Dockerfile` 以非 root 的 `app` 用户运行 Uvicorn；`compose.prod.yaml` 通过 `API_WORKERS` 显式配置 Worker 数量。
+- `Dockerfile` 以非 root 的 `app` 用户运行 Uvicorn；`compose.yaml` 通过 `API_WORKERS` 显式配置 Worker 数量。
 - `pkg/logger/handler.py` 将应用日志追加到 `<LOG_BASE_DIR>/app.log`，没有配置 Loguru rotation、retention
   或 compression，符合目标责任边界。
 - `configs/.env.prod` 已显式配置 JSON、固定日志目录、文件输出开启和控制台业务日志关闭。
-- `compose.prod.yaml` 已定义 API 与单副本 sidecar；根目录 `.env` 负责 Compose 参数，模板为
+- `compose.yaml` 已定义 API 与单副本 sidecar；根目录 `.env` 负责 Compose 参数，模板为
   `.env.compose.example`，应用配置和 secrets 继续只读挂载。
 - `deploy/logrotate/` 已提供 digest 锁定的 Alpine 基础镜像、固定 logrotate 版本、轮转策略和前台调度配置。
 - sidecar 构建默认使用 Alpine 官方 repository，并允许通过 Compose `.env` 覆盖 repository 根地址，以适配目标网络。
 - `scripts/verify_logrotate_sidecar.sh` 已覆盖隔离 Linux 多 Worker 验收流程，README 和日志文档已提供运行手册；
   脚本还会按 API 运行用户的数字 UID/GID 设置测试 secrets 和日志目录权限。
 
-目标 Linux 已验证权限、inode、`copytruncate`、压缩、state、API 重建和故障隔离行为。该验收使用测试配置，不能
-替代生产数据库、Redis、LLM provider、告警和容量确认。
+目标 Linux 已验证 sidecar 的权限、inode、`copytruncate`、压缩、state、API 重建和故障隔离行为。通用 Compose
+和单一 `APP_ENV` 重构目前完成本地验证，尚未重新执行 Linux 集成验收；两者都不能替代生产数据库、Redis、LLM
+provider、告警和容量确认。
 
 ## 3. 范围与非目标
 
@@ -117,7 +122,7 @@ LOG_WRITE_TO_FILE=true
 LOG_WRITE_TO_CONSOLE=false
 ```
 
-配置文件和 `configs/.secrets` 继续只读挂载到 API 容器。sidecar 不挂载 `configs/`、数据库密码、Redis
+配置文件和 `.secrets` 继续只读挂载到 API 容器。sidecar 不挂载 `configs/`、数据库密码、Redis
 密码、LLM API key 或其他应用密钥。
 
 Uvicorn access/error log 仍可能写入容器 stdout/stderr，因此 API 和 sidecar 都应配置 Docker `local`
@@ -176,7 +181,7 @@ root sidecar 对 bind mount 内文件具有修改能力，这是该方案的剩�
 
 ```text
 .env.compose.example
-compose.prod.yaml
+compose.yaml
 deploy/logrotate/Dockerfile
 deploy/logrotate/agent-backend.conf
 deploy/logrotate/crontab
@@ -196,7 +201,7 @@ docs/plans/DOCKER_COMPOSE_LOGROTATE_SIDECAR_EXECUTION_PLAN.md
 
 文件职责：
 
-- `compose.prod.yaml`：定义单个 API service、单个 logrotate service、共享 bind mount、状态 volume、
+- `compose.yaml`：定义单个 API service、单个 logrotate service、共享 bind mount、状态 volume、
   Worker 数、资源边界和 Docker logging driver。
 - `.env.compose.example`：Compose 非密钥部署参数模板，复制为 Git 忽略的根目录 `.env` 后使用。
 - `deploy/logrotate/Dockerfile`：构建最小 sidecar，安装固定版本的 logrotate，并以前台方式运行调度器。
@@ -264,7 +269,7 @@ docs/plans/DOCKER_COMPOSE_LOGROTATE_SIDECAR_EXECUTION_PLAN.md
 
 执行项：
 
-- 新增 `compose.prod.yaml`，API 使用当前项目镜像和显式 Uvicorn `--workers` 参数。
+- 新增 `compose.yaml`，API 使用当前项目镜像和显式 Uvicorn `--workers` 参数。
 - API 与 sidecar 将同一个 `${AGENT_BACKEND_LOG_DIR}` 挂载到容器内
   `/var/log/agent-backend`。
 - sidecar 额外挂载 `logrotate-state` named volume。
@@ -275,7 +280,7 @@ docs/plans/DOCKER_COMPOSE_LOGROTATE_SIDECAR_EXECUTION_PLAN.md
 
 完成门槛：
 
-- `docker compose -f compose.prod.yaml config` 成功且展开结果无明文密钥。
+- `docker compose config` 成功且展开结果无明文密钥。
 - 展开结果中 API 和 sidecar 的容器内日志目录完全一致。
 - 只有 API 挂载应用配置和 secrets。
 - API Worker 数可以通过非密钥部署参数调整，sidecar 始终为一个容器。
@@ -330,7 +335,7 @@ docs/plans/DOCKER_COMPOSE_LOGROTATE_SIDECAR_EXECUTION_PLAN.md
 | 层级 | 验证方式 | 通过信号 |
 | --- | --- | --- |
 | 文档 | 检查相对链接、路径、命令和当前/目标状态 | 无断链，已实现与待验证状态明确区分 |
-| Compose | `docker compose --env-file .env.compose.example -f compose.prod.yaml config` | 退出码为 0，挂载和参数符合预期 |
+| Compose | `docker compose --env-file .env.compose.example -f compose.yaml config` | 退出码为 0，挂载和参数符合预期 |
 | Sidecar 镜像 | 构建镜像并运行 `logrotate --debug` | 构建成功，配置解析成功且无写操作 |
 | 应用 logger | `uv run --group dev python -m pytest tests/logger/test_logger.py` | 固定文件追加和关闭文件输出测试通过 |
 | Python 静态检查 | `uv run ruff check` | 退出码为 0；如新增 Python 文件则必须执行 |
@@ -406,7 +411,7 @@ macOS Docker Desktop、本地单元测试或静态 Compose 解析不能替代 Li
 
 ## 12. Definition of Done
 
-- [x] `compose.prod.yaml` 能通过 Compose 解析，并且不包含真实密钥。
+- [x] `compose.yaml` 能通过 Compose 解析，并且不包含真实密钥。
 - [x] API 使用显式、可配置的多 Worker 启动方式，sidecar 保持单副本。
 - [x] API 仅追加固定 `app.log`，没有新增 Loguru rotation、retention 或 compression。
 - [x] sidecar 镜像可重复构建，基础镜像使用固定版本和 digest。

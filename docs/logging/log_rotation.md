@@ -111,13 +111,22 @@ truncate -s 0 logs/celery/app.log
 
 ## 选型
 
-| 部署方式 | 应用输出 | 轮转和保留责任 |
-| --- | --- | --- |
-| 本地开发 | stderr + 固定 `app.log` | 不定时轮转，按需手动清理 |
-| Docker / Docker Compose | stderr | Docker `local` logging driver |
-| Linux 直接部署 | 固定 `app.log` | Linux `logrotate` |
-| Docker Compose 且要求宿主机固定文件 | bind mount 后的固定 `app.log` | 宿主机 Linux `logrotate` |
-| Kubernetes | stdout/stderr | 节点采集 Agent 和集中日志平台 |
+这些方案根据不同部署形态解决以下痛点：避免日志文件无限增长耗尽磁盘；避免多个应用进程竞争轮转同一文件；
+按需应对容器重建、Pod 漂移或节点故障造成的日志丢失；明确应用、容器运行时、宿主机和日志平台之间的轮转与
+保留责任；同时保留统一的 JSON Lines 和 trace ID，便于检索、聚合和故障排查。
+
+不同方案解决的问题和适用边界如下：
+
+| 部署方式 | 主要解决的问题或痛点 | 应用输出 | 轮转和保留责任 |
+| --- | --- | --- | --- |
+| 本地开发 | 无需部署日志基础设施即可实时查看和回溯日志，降低本地调试成本；不解决长期运行时的磁盘增长问题 | stderr + 固定 `app.log` | 不定时轮转，按需手动清理 |
+| Docker / Docker Compose | 避免应用自行轮转和运维人员直接操作 Docker 内部日志文件；限制单机容器日志的磁盘占用 | stderr | Docker `local` logging driver |
+| Linux 直接部署 | 满足传统运维工具对固定日志路径、压缩归档和保留数量的要求，同时让应用继续写入固定文件 | 固定 `app.log` | Linux `logrotate` |
+| Docker Compose 且要求宿主机固定文件 | 兼顾容器化部署和宿主机固定路径需求，便于既有采集器、备份或审计工具读取日志 | bind mount 后的固定 `app.log` | 宿主机 Linux `logrotate` |
+| Kubernetes | 解决 Pod 日志易失、实例分散以及跨 Pod 检索困难的问题，并由平台统一补充工作负载元数据、集中存储和设置 retention | stdout/stderr | 节点采集 Agent 和集中日志平台 |
+
+Docker `local` logging driver 和 Linux `logrotate` 主要控制单机磁盘占用与历史文件数量，并不提供跨实例集中检索、
+跨节点持久化或严格无丢失保证。只有配置了节点采集 Agent、集中日志后端及其 retention 策略，才能覆盖这些平台级需求。
 
 ## Docker 和 Docker Compose
 

@@ -35,6 +35,7 @@
 尚未执行、待验证或待拆分的开发计划。
 
 - [AgentScope 2.0 Agent Service 接入执行计划](plans/AGENTSCOPE_KB_COPILOT_EXECUTION_PLAN.md)
+- [Docker Compose + logrotate Sidecar 实施计划](plans/DOCKER_COMPOSE_LOGROTATE_SIDECAR_EXECUTION_PLAN.md)
 
 ## `agent/`
 

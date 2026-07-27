@@ -9,6 +9,12 @@
 - [认证模块使用指南](auth/auth_module_guide.md)
 - [第三方登录集成指南](auth/third_party_login_guide.md)
 
+## `celery/`
+
+Celery 任务状态、幂等、取消和后台收敛机制相关文档。
+
+- [Celery PostgreSQL 状态机设计](celery/CELERY_IDEMPOTENCY_PG_DESIGN.md)
+
 ## `development/`
 
 开发工具、编码实践和文档写作规范。

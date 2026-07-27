@@ -83,6 +83,7 @@ async def _worker_shutdown():
     """
     logger.warning("Worker Process Stopping: Cleaning up basic resources...")
     shutdown_tracing()
+    await logger.complete()
 
 
 # =========================================================

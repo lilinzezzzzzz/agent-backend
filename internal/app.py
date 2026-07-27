@@ -129,3 +129,4 @@ async def lifespan(_app: FastAPI):
     await close_background_task_manager()
     logger.warning("Application is about to close.")
     shutdown_tracing()
+    await logger.complete()

@@ -15,7 +15,8 @@
 - FastAPI lifespan 和 Celery Worker hook 负责调用 `init_tracing()` / `shutdown_tracing()`。
 - 业务埋点统一使用 `async with span_context(...)`；是否创建真实 Span 由 tracing runtime 配置决定。
 - 调用点不得直接判断 tracing 开关，也不得用 `logger.bind(...)` 模拟 Span。
-- 模块不得依赖 `pkg.logger`；日志与 Span 的关联由 logger handler 读取当前 OTel context 完成。
+- 模块不得依赖 `pkg.logger`；logger handler 只从 `pkg.request_context` 读取日志 `trace_id`，Root Span 通过
+  `RequestContextIdGenerator` 复用同一 ID 完成关联。
 
 ## 兼容性要求
 

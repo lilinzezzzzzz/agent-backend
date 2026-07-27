@@ -7,7 +7,6 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import loguru
-from opentelemetry import trace
 
 from pkg import request_context as context
 from pkg.toolkit.json import orjson_dumps
@@ -126,7 +125,6 @@ class LoggerHandler:
         config_params: dict[str, Any] = {
             "extra": {
                 "json_content": None,
-                "trace_id": "-",
             },
         }
 
@@ -302,7 +300,7 @@ class LoggerHandler:
 
         def patcher(record: Any):
             record["time"] = record["time"].astimezone(target_tz)
-            record["extra"]["trace_id"] = self._get_current_trace_id()
+            record["extra"]["trace_id"] = self._safe_get_trace_id()
 
         return patcher
 
@@ -335,15 +333,6 @@ class LoggerHandler:
     def _populate_text_format_extra(self, record: Any) -> None:
         record["extra"]["_formatted_time"] = self._format_record_time(record)
         record["extra"]["_formatted_trace_id"] = record["extra"].get("trace_id") or "-"
-
-    @classmethod
-    def _get_current_trace_id(cls) -> str:
-        """优先读取当前 OTel Span；无有效 Span 时回退请求关联 ID。"""
-
-        span_context = trace.get_current_span().get_span_context()
-        if span_context.is_valid:
-            return f"{span_context.trace_id:032x}"
-        return cls._safe_get_trace_id()
 
     @classmethod
     def _safe_get_trace_id(cls) -> str:

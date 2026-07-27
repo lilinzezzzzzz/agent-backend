@@ -22,6 +22,7 @@ from pkg.tracing import (
 )
 
 _TRACE_ID = "019da8cd058b76ed8a4a52141c1c6b38"
+_LOG_TRACE_ID = "019da8cd058b76ed8a4a52141c1c6b39"
 
 
 @pytest.fixture
@@ -175,22 +176,27 @@ async def test_anyio_gather_and_task_group_children_keep_parent_context(
 
 
 @pytest.mark.asyncio
-async def test_json_logs_use_current_otel_trace_id_without_span_id(
+async def test_json_logs_use_request_context_trace_id_without_span_id(
     tmp_path: Path,
     tracing_runtime: InMemorySpanExporter,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     base_log_dir = _configure_json_logger(tmp_path)
 
     async with span_context("logged") as span:
-        expected_trace_id, _ = _span_context_ids(span)
+        span_trace_id, _ = _span_context_ids(span)
+        monkeypatch.setattr(
+            otel_runtime.request_context, "get_trace_id", lambda: _LOG_TRACE_ID
+        )
         loguru_logger.info("inside")
     loguru_logger.info("outside")
     loguru_logger.complete()
 
     records = {record["message"]: record for record in _read_records(base_log_dir)}
-    assert records["inside"]["trace_id"] == expected_trace_id
+    assert span_trace_id == _TRACE_ID
+    assert records["inside"]["trace_id"] == _LOG_TRACE_ID
     assert "span_id" not in records["inside"]
-    assert records["outside"]["trace_id"] == _TRACE_ID
+    assert records["outside"]["trace_id"] == _LOG_TRACE_ID
     assert "span_id" not in records["outside"]
     assert "span.start" not in records
     assert "span.end" not in records

@@ -73,6 +73,7 @@ if not _skip_logger_mock:
     mock_logger.success = MagicMock()
     mock_logger.debug = MagicMock()
     mock_logger.critical = MagicMock()
+    mock_logger.complete = AsyncMock()
 
     # Mock pkg.logger 模块
     mock_logger_module = types.ModuleType("pkg.logger")
@@ -136,6 +137,7 @@ else:
     mock_logger.success = MagicMock()
     mock_logger.debug = MagicMock()
     mock_logger.critical = MagicMock()
+    mock_logger.complete = AsyncMock()
 
 # Mock pkg.request_context 模块
 if not _skip_context_mock:

@@ -30,7 +30,7 @@ Uvicorn Worker，同时满足以下要求：
 - sidecar 是 Compose 部署适配层，不进入应用镜像，也不作为 Kubernetes 目标架构。
 
 日志格式、应用责任边界和其他部署形态以
-[日志输出与轮转部署方案](../logging/log_rotation.md)为准；本计划只负责 sidecar 的落地步骤和验收门槛。
+[日志输出与轮转部署方案](../../logging/log_rotation.md)为准；本计划只负责 sidecar 的落地步骤和验收门槛。
 
 ## 2. 当前状态
 
@@ -199,7 +199,7 @@ scripts/verify_logrotate_sidecar.sh
 configs/.env.prod
 README.md
 docs/logging/log_rotation.md
-docs/plans/DOCKER_COMPOSE_LOGROTATE_SIDECAR_EXECUTION_PLAN.md
+docs/plans/completed/DOCKER_COMPOSE_LOGROTATE_SIDECAR_EXECUTION_PLAN.md
 ```
 
 `docs/README.md` 和 `docs/plans/README.md` 已存在指向本计划的链接，经核对无需修改。

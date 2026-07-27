@@ -250,8 +250,7 @@ uv run celery -A internal.infra.celery:celery_app beat -l info
 - `internal/agents/payment/`：支付方式、付款失败、扣款异常、账单、分期和金额计算咨询。
 
 AgentScope 2.0 的推荐接入路线是嵌入官方 Agent Service，而不是自建 KB Copilot chat API。
-该路线尚未落地到代码，详细方案见 `docs/agent/agentscope_service_integration.md` 和
-`docs/plans/AGENTSCOPE_KB_COPILOT_EXECUTION_PLAN.md`。
+该路线尚未落地到代码，详细方案见 `docs/agent/agentscope_service_integration.md`。
 
 相关文档：
 

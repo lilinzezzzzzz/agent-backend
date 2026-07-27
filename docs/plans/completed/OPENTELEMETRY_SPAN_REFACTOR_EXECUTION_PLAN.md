@@ -2,11 +2,11 @@
 
 状态：历史实施记录，已于 2026-07-18 实施。本计划记录的是首阶段不接入 OTLP Exporter 的实施边界；
 后续代码已经接入 OTLP/HTTP Exporter，当前实现与持久化边界以
-[当前项目 OpenTelemetry 接入与可观测性数据持久化](../opentelemetry/project_integration_and_persistence.md)为准。
+[当前项目 OpenTelemetry 接入与可观测性数据持久化](../../opentelemetry/project_integration_and_persistence.md)为准。
 
 项目已使用 OpenTelemetry Span 替换 `pkg/tracing/span.py` 中的自研 Span 树，不保留
 `SpanFrame`、`span_seq`、`parent_span_seq`、`span_path` 或 `span.start` / `span.end` / `span.error`
-兼容协议。验证结果见第 13 节。
+兼容协议。验证结果见第 9.4 节。
 
 ## 1. 目标与关键结论
 
@@ -342,14 +342,26 @@ class SpanNodeSchema(BaseModel):
 
 ### Phase 0：基线与删除清单
 
+进度：已完成。受影响文件、旧字段消费者和删除边界均已确认。
+
+目标：明确重构基线和破坏性删除范围，避免新旧 Span 身份并存。
+
+执行项：
+
 - 记录当前 logger、middleware 和 logger-span demo 测试结果。
 - 全仓检索所有旧 SpanFrame 和展示字段消费者。
 - 确认当前 staged / unstaged 修改，实施时不覆盖无关用户改动。
 - 建立明确删除清单，避免遗留两套 Span 身份。
 
-完成标准：所有受影响文件和旧字段引用均已列出。
+完成门槛：所有受影响文件和旧字段引用均已列出。
 
 ### Phase 1：配置、依赖与 runtime
+
+进度：已完成。enabled / disabled runtime、IdGenerator 和应用生命周期接入均已落地。
+
+目标：建立由配置驱动、生命周期明确且不产生外部网络调用的 tracing runtime。
+
+执行项：
 
 - 修改四个 `configs/.env.*` 文件。
 - 在 `internal/config.py` 声明必填配置字段。
@@ -357,43 +369,78 @@ class SpanNodeSchema(BaseModel):
 - 新增 tracing runtime、IdGenerator、幂等初始化和关闭。
 - 接入 FastAPI lifespan 和 Celery Worker lifecycle。
 
-完成标准：enabled / disabled runtime 可独立测试，未产生外部网络调用。
+完成门槛：enabled / disabled runtime 可独立测试，未产生外部网络调用。
 
 ### Phase 2：重写 span 门面
+
+进度：已完成。`span_context` 已成为唯一公共埋点入口，自研 Span 树和兼容日志协议已删除。
+
+目标：以 OpenTelemetry Span 完整替代自研 Span 实现，同时保持业务异常和取消语义。
+
+执行项：
 
 - 删除自研 Span 树和 Loguru Span 事件。
 - 实现 enabled / disabled 两条 `span_context` 路径。
 - 实现 `SpanKind` 和 attributes 参数转发。
 - 保证异常和取消不被吞掉。
 
-完成标准：`span.py` 只负责 OTel 门面，不保存自研父子关系或计时信息。
+完成门槛：`span.py` 只负责 OTel 门面，不保存自研父子关系或计时信息。
 
 ### Phase 3：Logger 与 HTTP Root Span
+
+进度：已完成。Logger 与 HTTP 中间件已统一读取和传播真实 OTel SpanContext。
+
+目标：统一请求入口、日志和真实 Span 的 Trace ID，并正确记录请求异常状态。
+
+执行项：
 
 - Logger patcher 改为读取 OTel SpanContext。
 - recorder 严格处理 `X-Trace-ID` 并创建 SERVER Root Span。
 - 保证 response header、request context、Root Trace ID 和日志 Trace ID 一致。
 - 覆盖中间件捕获异常后的 Span ERROR 状态。
 
-完成标准：一次请求内所有真实 Span 共享同一 Trace ID，父子关系由 SDK 表达。
+完成门槛：一次请求内所有真实 Span 共享同一 Trace ID，父子关系由 SDK 表达。
 
 ### Phase 4：demo、schema 和前端
+
+进度：已完成。demo API、schema、collector 和前端建树逻辑已切换到真实 Span 身份。
+
+目标：移除 logger-span demo 对旧 seq/path 协议的依赖。
+
+执行项：
 
 - 破坏性更新 DTO / response schema。
 - 重写 demo collector。
 - 前端切换到 `span_id / parent_span_id`。
 - 删除 seq/path 相关 mock 和展示逻辑。
 
-完成标准：API 和前端中不存在旧 Span 身份字段。
+完成门槛：API 和前端中不存在旧 Span 身份字段。
 
 ### Phase 5：测试与文档收尾
+
+进度：已完成。定向测试、静态检查、前端语法检查和排除外部依赖后的 pytest 回归均已通过。
+
+目标：以自动化验证和文档同步收敛重构，记录外部集成测试的环境边界。
+
+执行项：
 
 - 删除旧兼容测试。
 - 增加配置开关、真实父子关系、异常、并发和生命周期测试。
 - 更新 OpenTelemetry 项目文档，说明当前 X-Trace-ID 入口和后续 W3C 扩展点。
 - 运行定向测试、全量测试、Ruff、格式检查、mypy 和最终 diff 审计。
 
-## 9. 测试计划
+完成门槛：目标检查全部通过；全量测试中的外部集成失败有明确归因和复现记录。
+
+## 9. 验证矩阵
+
+| 层级 | 验证方式 | 通过信号 |
+| --- | --- | --- |
+| tracing 关闭 | 使用 non-recording Span 执行业务与异常路径 | 不生成 SDK Span 或自定义 Span 日志，业务语义不变 |
+| tracing 开启 | 使用本地 `TracerProvider` 和内存 exporter 检查 Span | Trace ID、父子关系、Kind、状态和生命周期符合预期 |
+| HTTP 与 Logger | 覆盖合法、缺失和非法 `X-Trace-ID` 请求 | request context、Root Span、响应头和日志 Trace ID 一致 |
+| demo contract | 校验 API schema、collector 和前端建树 | 仅使用 `span_id / parent_span_id`，不存在 seq/path 字段 |
+| 并发与异常 | 覆盖 AnyIO、`asyncio.create_task()` 和异常路径 | 上下文不串线，异常只记录一次，退出后恢复父 Context |
+| 回归与静态检查 | 运行 pytest、Ruff、格式检查、mypy 和 diff 检查 | 目标检查通过，外部集成失败有明确环境归因 |
 
 ### 9.1 tracing 关闭
 
@@ -437,6 +484,23 @@ git diff --check
 git status --short
 ```
 
+### 9.4 2026-07-18 实施与验证记录
+
+Phase 0 至 Phase 5 均已落地。该阶段未配置 exporter，不会发起 OTLP 网络请求。
+
+已通过：
+
+- 排除需要真实 OpenAI、Redis/Celery 和 Milvus 的外部集成目录后，pytest 回归为
+  `463 passed, 1 skipped`。
+- 本次新增和修改文件通过 Ruff check 与 Ruff format check。
+- tracing runtime、Span 门面、中间件和 demo Service 的目标 mypy 检查通过。
+- logger-span 前端内嵌 JavaScript 通过 Node 语法检查。
+- `git diff --check` 通过。
+
+全量 `pytest -q` 的实际结果为 `488 passed, 2 skipped, 16 failed`。16 项失败均来自本地环境未满足的
+外部集成条件：OpenAI-compatible API Key 无效 5 项、Celery/Redis 服务不可用 9 项、Milvus 服务不可用
+2 项；本轮 OpenTelemetry 相关测试没有失败。
+
 ## 10. 本次不包含
 
 - 不解析或注入 `traceparent` / `tracestate`。
@@ -452,43 +516,34 @@ git status --short
 
 ## 11. 风险与回滚
 
-- 本次会破坏 logger-span demo 的 API 和前端字段，schema、service、controller、测试和前端必须原子更新。
-- OpenTelemetry 全局 Provider 不能被常规重置；初始化所有权和测试隔离必须在实现前确定。
-- AgentScope 已间接依赖 OTel，必须验证它没有提前安装全局 Provider。
-- 客户端可以重复提交同一个 `X-Trace-ID`；Trace ID 不能用于认证、授权、幂等或安全决策。
+### 11.1 主要风险
+
+| 风险 | 当前控制 | 需要重新评估的触发条件 |
+| --- | --- | --- |
+| logger-span demo API 和前端字段发生破坏性变化 | schema、service、controller、测试和前端原子更新 | 存在仓库外消费者或需要兼容旧 wire contract |
+| OpenTelemetry 全局 Provider 不能被常规重置 | 明确初始化所有权并隔离测试 Provider | 新组件或 AgentScope 提前安装全局 Provider |
+| 客户端可重复提交同一个 `X-Trace-ID` | Trace ID 不参与认证、授权、幂等或安全决策 | 接入跨服务 W3C Trace Context |
+| 新旧 Span 身份在中间版本并存 | 重构作为一个原子提交实施 | 需要拆分发布或跨版本灰度兼容 |
+
+### 11.2 回滚方式
+
 - `OTEL_TRACING_ENABLED=false` 是运行时回滚开关。关闭后停止创建新 Span，但保留请求日志和
   `X-Trace-ID` 关联能力。
-- 实施应作为一个原子提交完成，避免新旧 Span 身份并存的中间版本进入共享分支。
+- 如果初始化冲突或 Span 行为异常，先关闭 tracing，再定位 Provider 所有权、生命周期或第三方依赖冲突。
+- 回滚不得恢复 `SpanFrame`、seq/path 字段或 Loguru Span 事件，避免重新形成两套 Span 身份。
 
-## 12. 完成标准
+## 12. Definition of Done
 
-- `pkg/tracing/span.py` 中不存在自研 Span 树、Span 身份或手工计时。
-- `span_context` 是唯一公共埋点入口，全仓不存在 `with_span` 的定义、导出或调用。
-- 全仓不存在 `SpanFrame`、`span_seq`、`parent_span_seq`、`span_path` 的有效代码引用。
-- 全仓不存在 `span.start`、`span.end`、`span.error` 兼容日志依赖。
-- tracing 关闭时 `span_context` 严格 no-op；开启时创建真实 OTel Span。
-- 调用点不直接读取 `settings`，开关判断只在 tracing runtime / `span_context` 内完成。
-- `configs/.env.*` 是 OTel 运行配置的唯一维护位置。
-- `X-Trace-ID`、request context、SERVER Root Trace ID 和日志 Trace ID 一致。
-- demo 使用真实 `span_id / parent_span_id` 建树。
-- enabled / disabled、Root / child、异常、并发和生命周期均有自动化测试。
-- 没有 OTLP 网络请求。
-- 定向测试、Ruff、格式检查、目标 mypy 和 `git diff --check` 均有实际通过记录；全量测试中的外部
+- [x] `pkg/tracing/span.py` 中不存在自研 Span 树、Span 身份或手工计时。
+- [x] `span_context` 是唯一公共埋点入口，全仓不存在 `with_span` 的定义、导出或调用。
+- [x] 全仓不存在 `SpanFrame`、`span_seq`、`parent_span_seq`、`span_path` 的有效代码引用。
+- [x] 全仓不存在 `span.start`、`span.end`、`span.error` 兼容日志依赖。
+- [x] tracing 关闭时 `span_context` 严格 no-op；开启时创建真实 OTel Span。
+- [x] 调用点不直接读取 `settings`，开关判断只在 tracing runtime / `span_context` 内完成。
+- [x] `configs/.env.*` 是 OTel 运行配置的唯一维护位置。
+- [x] `X-Trace-ID`、request context、SERVER Root Trace ID 和日志 Trace ID 一致。
+- [x] demo 使用真实 `span_id / parent_span_id` 建树。
+- [x] enabled / disabled、Root / child、异常、并发和生命周期均有自动化测试。
+- [x] 首阶段没有 OTLP 网络请求。
+- [x] 定向测试、Ruff、格式检查、目标 mypy 和 `git diff --check` 均有实际通过记录；全量测试中的外部
   集成失败有明确归因和复现记录。
-
-## 13. 实施与验证记录
-
-实施于 2026-07-18，Phase 0 至 Phase 5 均已落地。当前实现未配置 exporter，不会发起 OTLP 网络请求。
-
-已通过：
-
-- 排除需要真实 OpenAI、Redis/Celery 和 Milvus 的外部集成目录后，pytest 回归为
-  `463 passed, 1 skipped`。
-- 本次新增和修改文件通过 Ruff check 与 Ruff format check。
-- tracing runtime、Span 门面、中间件和 demo Service 的目标 mypy 检查通过。
-- logger-span 前端内嵌 JavaScript 通过 Node 语法检查。
-- `git diff --check` 通过。
-
-全量 `pytest -q` 的实际结果为 `488 passed, 2 skipped, 16 failed`。16 项失败均来自本地环境未满足的
-外部集成条件：OpenAI-compatible API Key 无效 5 项、Celery/Redis 服务不可用 9 项、Milvus 服务不可用
-2 项；本轮 OpenTelemetry 相关测试没有失败。

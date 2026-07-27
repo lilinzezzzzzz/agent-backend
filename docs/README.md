@@ -38,10 +38,10 @@ Celery 任务状态、幂等、取消和后台收敛机制相关文档。
 
 ## `plans/`
 
-尚未执行、待验证或待拆分的开发计划。
+按实施状态归档的开发计划，完整索引见 [开发计划索引](plans/README.md)。
 
-- [AgentScope 2.0 Agent Service 接入执行计划](plans/AGENTSCOPE_KB_COPILOT_EXECUTION_PLAN.md)
-- [Docker Compose + logrotate Sidecar 实施计划](plans/DOCKER_COMPOSE_LOGROTATE_SIDECAR_EXECUTION_PLAN.md)
+- [未完成计划](plans/pending/README.md)
+- [已完成计划](plans/completed/README.md)
 
 ## `agent/`
 
@@ -61,8 +61,8 @@ RAG 工程架构、技术选型和 Agentic RAG 方案。
 - [知识库 / 文档 / Chunk ORM 管理后台技术方案](rag/kb_orm_admin_design.md)
 - [PDF 文档解析与入库技术方案](rag/pdf_ingestion_design.md)
 
-## 根目录
+## `ai-platform/`
 
 AI 平台和算力调度相关架构方案。
 
-- [AI 中台数字人算力动态调度](AI中台数字人动态算力调度.md)
+- [AI 中台数字人算力动态调度](ai-platform/AI中台数字人动态算力调度.md)

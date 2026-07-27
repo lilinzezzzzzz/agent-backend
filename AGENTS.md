@@ -13,14 +13,17 @@
 
 ## 关键目录索引
 
-- `entrypoints/`：API、Celery Worker / Beat 等进程入口。
-- `internal/`：业务应用代码；Controller、Service、DAO、Model、Schema、Cache、Task、Agent 等细则见对应子目录
-  `AGENTS.md`。
+- `entrypoints/`：API、Celery Worker / Beat 等进程入口；见 `entrypoints/AGENTS.md`。
+- `internal/`：应用装配与业务代码；依赖方向、生命周期和配置规则见 `internal/AGENTS.md`，分层细则见对应
+  子目录 `AGENTS.md`。
 - `pkg/`：可复用基础包，不应绑定具体业务；数据库、日志、向量、Agent、OSS、第三方登录等细则见
   对应子目录
   `AGENTS.md` 或 `README.md`。
-- `configs/`：环境配置与密钥模板。
-- `ddl/`、`dml/`：数据库 SQL。
+- `configs/`：非敏感环境配置；见 `configs/AGENTS.md`。
+- `ddl/`、`dml/`：数据库 schema 与数据脚本；分别见 `ddl/AGENTS.md`、`dml/AGENTS.md`。
+- `deploy/`、`scripts/`：部署资产与安全验证脚本；分别见 `deploy/AGENTS.md`、`scripts/AGENTS.md`。
+- `examples/`、`frontend/`：可运行示例与 demo 前端；分别见 `examples/AGENTS.md`、`frontend/AGENTS.md`。
+- `docs/`：主题文档和计划归档；见 `docs/AGENTS.md`。
 - `tests/`：pytest 测试；测试约束见 `tests/AGENTS.md`。
 
 ## 分层命名规则
@@ -61,24 +64,34 @@
   并说明迁移、回滚、锁表和部署顺序风险。
 - 缓存：保持 Redis 缓存 key 格式、TTL 策略和业务域封装；细则见 `internal/cache/AGENTS.md`。
 - Celery：保持 task name、队列和 Beat 调度兼容；细则见 `internal/tasks/AGENTS.md`。
-- 向量检索：保持 `pkg/vectors/` contract；细则见 `pkg/vectors/AGENTS.md` 和 `pkg/vectors/backends/milvus/README.md`。
+- 向量检索：保持 `pkg/vectors/` contract；细则见 `pkg/vectors/AGENTS.md`、
+  `pkg/vectors/backends/milvus/AGENTS.md` 和对应 README。
+- 容器部署：根目录 `Dockerfile`、`compose.yaml`、`.env.compose.example` 与 `deploy/`、日志文档共同构成部署
+  contract；保持 API 非 root、应用配置/密钥只读挂载、logrotate 单副本和最小权限边界。
 
 ## 子目录细则
 
 进入以下区域前读取对应文件，按最近的 `AGENTS.md` 优先：
 
+- 应用装配 / 配置：`internal/AGENTS.md`、`configs/AGENTS.md`
 - Controller / response envelope：`internal/controllers/AGENTS.md`
 - Service 和依赖注入：`internal/services/AGENTS.md`
+- Agent Service / 会话 / 确认 / 审计：`internal/services/agents/AGENTS.md`
 - Schema：`internal/schemas/AGENTS.md`
 - Middleware / auth / request context：`internal/middlewares/AGENTS.md`
 - Infra provider / lifecycle：`internal/infra/AGENTS.md`
 - Model / DAO / Cache：`internal/models/AGENTS.md`、`internal/dao/AGENTS.md`、`internal/cache/AGENTS.md`
+- RAG 业务 repository：`internal/rag/AGENTS.md`
+- 业务 Agent：`internal/agents/AGENTS.md` 及领域目录内更具体的 `AGENTS.md`
 - Celery task / schedule：`internal/tasks/AGENTS.md`
+- 进程入口：`entrypoints/AGENTS.md`
 - Database base / query builder：`pkg/database/AGENTS.md`
 - Logger：`pkg/logger/AGENTS.md`
 - OpenTelemetry tracing：`pkg/tracing/AGENTS.md`
 - LLM client abstraction：`pkg/llm/AGENTS.md`
 - Vector abstraction：`pkg/vectors/AGENTS.md`
+- 部署 / 脚本 / SQL：`deploy/AGENTS.md`、`scripts/AGENTS.md`、`ddl/AGENTS.md`、`dml/AGENTS.md`
+- 文档 / 计划：`docs/AGENTS.md`、`docs/plans/AGENTS.md`
 - Tests：`tests/AGENTS.md`
 
 ## Python 与验证

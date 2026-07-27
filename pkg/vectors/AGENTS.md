@@ -4,7 +4,8 @@
 
 ## 层职责
 
-本目录提供向量检索抽象、检索后处理、上下文组装、repository 和后端实现。它面向 RAG、混合检索和向量存储适配。
+本目录提供向量检索抽象、检索后处理、上下文组装、repository 和后端实现。它面向 RAG、混合检索和
+向量存储适配。
 
 ## 编码约定
 
@@ -12,7 +13,7 @@
 - backend 实现必须遵守统一 contract，不把 Milvus 特有字段泄漏到通用层，除非通过明确扩展类型表达。
 - 阻塞 SDK 调用应使用现有 anyio/thread 封装，避免阻塞 async 热路径。
 - 搜索参数、score、filters、metadata、ids 的语义要保持跨 backend 一致。
-- 修改 Milvus 行为前先读对应 backend 的 `README.md`。
+- 修改 Milvus 行为前先读对应 backend 的 `AGENTS.md` 和 `README.md`。
 
 ## 兼容性要求
 

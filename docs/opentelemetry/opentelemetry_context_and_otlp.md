@@ -1,8 +1,16 @@
 # OpenTelemetry 上下文传播与 OTLP 上报机制
 
-本文说明 OpenTelemetry 如何把跨端调用关联为同一条 Trace，以及 OTLP 在可观测性数据上报链路中的职责边界。
-当前项目的接入方式、实现边界和持久化方案见
+本文面向需要理解或设计可观测性链路的开发者，说明 OpenTelemetry 如何把跨端调用关联为同一条 Trace，
+以及 OTLP 在数据上报和持久化链路中的职责边界。本文只介绍通用机制，不描述当前项目已经实现的能力；
+项目现状、代码依据和目标方案见
 [当前项目 OpenTelemetry 接入与可观测性数据持久化](project_integration_and_persistence.md)。
+
+阅读本文时先记住以下结论：
+
+- W3C Trace Context 传播调用上下文，OTLP 上报已经生成的可观测性数据，两者不是同一条链路。
+- Baggage 是可选的横切上下文，不是业务参数、安全凭证或 Trace 关联的必要条件。
+- Exporter 执行上报；Collector 是可选的接收和转发组件，不是长期存储后端。
+- OTLP 成功只表示相邻接收端接受了数据，不等于数据已经持久化或可以查询。
 
 ## 1. 什么是 OpenTelemetry
 
@@ -50,7 +58,7 @@ OpenTelemetry 统一的是这些数据从应用产生到发送给后端之前的
 OpenTelemetry 本身不是可观测性后端，通常不负责可观测性数据的长期存储、查询、仪表盘、告警和最终展示。
 这些能力由 Jaeger、Prometheus、Grafana 生态或商业可观测性平台提供。
 
-## 2. 先区分两条数据路径
+## 2. 核心概念：两条独立的数据路径
 
 理解 OpenTelemetry 的关键，是区分“业务请求中的上下文传播”和“可观测性数据上报”。
 它们可以共享同一个 `trace-id`，但目的、载体和执行组件不同。
@@ -72,7 +80,7 @@ flowchart LR
 | 上下文传播 | 让下游创建属于同一 Trace 的子 Span | HTTP Header、gRPC metadata、消息属性 | Propagator / Instrumentation | W3C Trace Context 等 |
 | 可观测性数据上报 | 把已生成的 Span、Metric、Log 发送给接收端 | 独立的 HTTP 或 gRPC 请求 | Processor / Reader、Exporter、Receiver | OTLP 等 |
 
-> W3C Trace Context 负责把调用链串起来，OTLP 负责把已经采集的可观测性数据报上去。
+> W3C Trace Context 负责串联调用链，OTLP 负责上报已经采集的可观测性数据。
 
 ## 3. W3C Trace Context 如何串联多端
 
@@ -107,8 +115,9 @@ tracestate: vendor_specific_value
 | `trace-flags` | 固定两个十六进制字符的 8-bit 标志字段 |
 
 这四个字段在 `version=00` 的 `traceparent` 中都不能省略。
-`trace-flags` 字段必填，但 sampled 标志不要求必须开启：常见的 `01` 表示 sampled 位为 1，`00` 表示 sampled 位为 0。
-它是 bit field，W3C Trace Context Level 2 还定义了值为 `02` 的 random-trace-id 位，因此解析 sampled 状态时应检查最低位，而不是比较整个值是否等于 `01`。
+`trace-flags` 字段必填，但 sampled 标志不要求必须开启：常见的 `01` 表示 sampled 位为 1，`00` 表示
+sampled 位为 0。它是 bit field，W3C Trace Context Level 2 还定义了值为 `02` 的 random-trace-id 位，
+因此解析 sampled 状态时应检查最低位，而不是比较整个值是否等于 `01`。
 这些标志是上游给出的追踪建议，不能作为可信的安全指令。
 
 同一条 Trace 通常保持相同的 `trace-id`；每个参与追踪的服务创建新的 `span-id`，并将收到的 `parent-id` 作为父级。
@@ -117,7 +126,7 @@ tracestate: vendor_specific_value
 `tracestate` 不是 `traceparent` 的组成字段，而是独立、可选的 Header，用于传播追踪厂商的扩展状态。
 接收方解析失败的 `traceparent` 时，不应继续使用关联的 `tracestate`。
 
-### 3.2 Baggage 完全可选
+### 3.2 Baggage 是可选的横切上下文
 
 Baggage 不是实现分布式追踪的必要组件。
 不使用 Baggage，仍然可以通过 W3C Trace Context 完整传播 `trace-id` 和父 Span 信息。
@@ -138,7 +147,7 @@ Baggage 不会自动成为 Span 属性或通过 OTLP 上报；如需在后端检
 
 ## 4. OTLP 具体规定什么
 
-OTLP（OpenTelemetry Protocol）是可观测性数据的 wire protocol，规定数据如何编码、传输和交付。
+OTLP（OpenTelemetry Protocol）是可观测性数据的 wire protocol，规定数据的编码、传输和交付语义。
 它是协议规范，不是可运行程序，因此不会自行执行上报。
 
 ### 4.1 数据模型
@@ -162,9 +171,9 @@ OTLP 负责承载这些属性，不负责定义其业务语义。
 
 OTLP 定义了 gRPC 和 HTTP 两种主要传输方式：
 
-| 方式 | 编码 | 默认端口 | 默认路径 |
+| 方式 | 编码 | 默认端口 | 服务或默认路径 |
 | --- | --- | --- | --- |
-| OTLP/gRPC | Protobuf 二进制 | `4317` | gRPC `Export` 方法 |
+| OTLP/gRPC | Protobuf 二进制 | `4317` | 对应信号服务的 gRPC `Export` 方法 |
 | OTLP/HTTP | Protobuf 二进制或 Protobuf JSON 映射 | `4318` | 按信号区分 |
 
 OTLP/HTTP 默认使用以下路径：
@@ -213,7 +222,8 @@ Collector 不是使用 OTLP 的必要条件。
 ### 4.4 交付语义与边界
 
 OTLP 还定义请求与响应、压缩、完全成功、部分成功和可重试错误等行为。
-OTLP/HTTP 的完全成功和部分成功都返回 `200 OK`，部分成功通过响应中的 `partial_success` 表达；客户端不应重试已返回的部分成功请求。
+OTLP/HTTP 的完全成功和部分成功都返回 `200 OK`，部分成功通过响应中的 `partial_success` 表达；
+客户端不应重试已返回的部分成功请求。
 
 OTLP 只关注相邻客户端和服务端之间的交付，不提供应用到最终存储端的端到端持久化保证。
 Exporter、Collector 和后端仍需根据部署方式配置队列、超时、重试和持久化策略。
@@ -268,7 +278,23 @@ OTLP 是传输协议，不是数据库存储格式。后端通常会把 OTLP 数
 后端选型和数据模型需要匹配主要查询方式。能够接收 OTLP 只说明后端具备协议入口，不自动代表它已经提供合适的
 索引、查询 API、仪表盘、告警、数据迁移和容量治理能力。
 
-### 5.3 从“已生成”到“可查询”
+### 5.3 最终日志存储后端示例
+
+最终日志存储后端负责长期保存、索引、查询、保留策略、仪表盘和告警。Collector 的内存或磁盘队列只临时保存
+尚未成功导出的数据，不能替代最终日志存储。Collector 可以通过原生 exporter、后端提供的 OTLP 接口或适配层
+发送 Log，具体链路取决于后端能力和部署方案。
+
+以下对比只说明两类常见方案的职责差异，不代表项目已经完成选型：
+
+| 方案 | 主要优势 | 团队需要重点负责 |
+| --- | --- | --- |
+| OpenSearch | 面向搜索和分析，提供字段查询、全文检索、聚合及 OpenSearch Dashboards | 索引设计、分片与容量、保留策略、访问控制和集群运维 |
+| ClickHouse | 适合查询模式明确、高吞吐和大规模聚合分析的场景 | 日志表 schema、写入适配、分区与排序键、TTL、查询接口和版本迁移 |
+
+两种方案都需要确认 Collector 到后端的 exporter 或适配链路、`trace_id` 字段映射、保留周期、访问控制、
+备份恢复和容量成本。使用 Grafana 等可视化工具也不改变后端对数据建模、存储和查询的责任。
+
+### 5.4 从“已生成”到“可查询”
 
 一条数据通常依次经历以下状态：
 
@@ -292,7 +318,7 @@ SDK 已生成
 普通业务请求通常不应同步等待最终持久化，否则可观测性后端会成为业务可用性的强依赖。
 需要通过 Collector 与后端指标、队列状态、导出错误和端到端探针监控数据缺口。
 
-### 5.4 持久化设计需要明确什么
+### 5.5 持久化设计需要明确什么
 
 - **查询路径**：按 Trace ID、时间范围、服务、操作、错误状态、日志字段或 Metric 维度查询。
 - **索引与基数**：限制动态 Span 名称和高基数属性，评估索引、内存和存储成本。
@@ -306,20 +332,28 @@ SDK 已生成
 具体项目应在独立文档中记录当前实现、目标后端、部署拓扑和验收状态；本项目见
 [当前项目 OpenTelemetry 接入与可观测性数据持久化](project_integration_and_persistence.md)。
 
-## 6. 工程落地检查表
+## 6. 工程落地检查清单
 
-- 所有需要串联的入口和下游客户端都已启用 Instrumentation。
+### 6.1 上下文传播
+
+- 所有需要串联的入口和下游客户端都启用了 Instrumentation。
 - HTTP、gRPC 和消息队列分别在正确载体中注入、提取 Trace Context。
-- 浏览器跨域请求已允许所需的 `traceparent`、`tracestate` 和 `baggage` Header。
-- 不信任外部传入的 Trace Context，不在 Baggage、Span 属性或日志中记录凭证和敏感个人数据。
-- SDK 已配置对应信号的 Processor / Reader、OTLP Exporter 和可访问的接收端。
+- 浏览器跨域请求允许所需的 `traceparent`、`tracestate` 和 `baggage` Header。
+- 外部传入的 Trace Context 不参与安全决策；Baggage、Span 属性和日志不记录凭证或敏感个人数据。
+
+### 6.2 数据采集与上报
+
+- SDK 为对应信号配置了 Processor / Reader、OTLP Exporter 和可访问的接收端。
 - OTLP endpoint、传输方式、端口、TLS、认证及信号路径相互匹配。
-- 若使用 Collector，OTLP Receiver 和各信号 pipeline 均已配置；若直连后端，后端明确支持所选 OTLP 方式。
-- 批处理、超时、队列、重试和进程关闭时的 flush 行为符合可靠性要求。
+- 使用 Collector 时，OTLP Receiver 和各信号 pipeline 已配置；直连后端时，后端明确支持所选 OTLP 方式。
 - 采样策略可解释，并能区分“上下文已传播”和“Span 实际已记录并上报”。
-- 使用同一 `trace-id` 验证上下游 Span 是否在后端正确关联。
+
+### 6.3 可靠性与持久化
+
+- 批处理、超时、有界队列、重试和进程关闭时的 flush 行为符合可靠性要求。
+- 使用同一 `trace-id` 验证上下游 Span 在后端正确关联。
 - 后端的索引、保留周期、TTL、容量、查询权限和敏感字段治理已经明确。
-- 已区分“Receiver 接受”“后端写入”和“查询可见”，并对持久化延迟、失败和数据丢弃建立监控。
+- 已区分“Receiver 接受”“后端写入”和“查询可见”，并监控持久化延迟、失败和数据丢弃。
 
 ## 7. 参考资料
 

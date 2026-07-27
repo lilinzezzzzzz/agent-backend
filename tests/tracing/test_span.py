@@ -1,4 +1,3 @@
-import asyncio
 import json
 from pathlib import Path
 from typing import Any
@@ -13,6 +12,7 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 from opentelemetry.trace import SpanKind, StatusCode
 
 import pkg.tracing.otel as otel_runtime
+from pkg.concurrency import anyio_gather
 from pkg.logger import LogFormat, LoggerHandler
 from pkg.tracing import (
     RequestContextIdGenerator,
@@ -149,7 +149,7 @@ async def test_exception_records_error_and_restores_parent(
 
 
 @pytest.mark.asyncio
-async def test_asyncio_and_anyio_children_keep_parent_context(
+async def test_anyio_gather_and_task_group_children_keep_parent_context(
     tracing_runtime: InMemorySpanExporter,
 ) -> None:
     child_ids: set[int] = set()
@@ -161,7 +161,7 @@ async def test_asyncio_and_anyio_children_keep_parent_context(
 
     async with span_context("root") as root:
         root_span_id = root.get_span_context().span_id
-        await asyncio.gather(worker("asyncio.left"), worker("asyncio.right"))
+        await anyio_gather(worker("gather.left"), worker("gather.right"))
         async with anyio.create_task_group() as task_group:
             task_group.start_soon(worker, "anyio.left")
             task_group.start_soon(worker, "anyio.right")

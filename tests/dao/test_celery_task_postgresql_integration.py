@@ -1,4 +1,3 @@
-import asyncio
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -10,6 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from internal.dao.celery_task import CeleryTaskDao
+from pkg.concurrency import anyio_gather
 
 
 def _integration_database_url() -> str:
@@ -87,7 +87,7 @@ async def test_postgresql_ddl_and_concurrent_claim() -> None:
             await session.commit()
 
         dao = CeleryTaskDao(session_provider=session_provider)
-        claims = await asyncio.gather(
+        claims = await anyio_gather(
             dao.claim_execution(
                 record_id=123,
                 task_name="task.name",

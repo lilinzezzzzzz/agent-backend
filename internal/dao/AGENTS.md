@@ -12,8 +12,9 @@ Redis / 缓存访问不放在本层，见 `internal/cache/AGENTS.md`。
 
 - ORM DAO 优先继承 `pkg.database.dao.BaseDao`。
 - 模型类型通过 `_model_cls` 声明。
-- 读操作优先使用 `querier`、`querier_unsorted`、`col_querier` 等已有 builder。
-- 写后读一致性需要时使用 `write_querier` 或写库 session provider。
+- 读操作优先从 `select_stmt()` 或 `count_stmt()` 获取已应用基础策略的 statement，再使用原生 SQLAlchemy
+  API 追加业务条件、排序和分页。
+- 写后读一致性需要时显式使用写库 `session_provider`。
 - DAO 方法返回 ORM model、基础值或明确类型，不返回含义不清的临时 dict。
 - 通用分层命名规则见根目录 `AGENTS.md`，DAO 层不重复定义。
 
@@ -31,12 +32,20 @@ class UserDao(BaseDao[User]):
     _model_cls: type[User] = User
 
     async def get_by_id(self, user_id: int) -> User | None:
-        return await self.querier.eq_(self.model_cls.id, user_id).first()
+        async with self.read_session_provider() as session:
+            result = await session.execute(
+                self.select_stmt().where(self.model_cls.id == user_id)
+            )
+            return result.scalars().first()
 
     async def get_by_ids(self, user_ids: list[int]) -> list[User]:
         if not user_ids:
             return []
-        return await self.querier.in_(self.model_cls.id, user_ids).all()
+        async with self.read_session_provider() as session:
+            result = await session.execute(
+                self.select_stmt().where(self.model_cls.id.in_(user_ids))
+            )
+            return list(result.scalars().all())
 
 
 # 全局单例（懒加载）
@@ -59,6 +68,8 @@ def new_user_dao() -> UserDao:
 - 查询字段通过 `self.model_cls` 引用，减少继承和测试替换风险。
 - 单条查询返回 `Model | None`，批量查询返回 `list[Model]`。
 - 批量接口接收集合参数，一次查询完成，不让调用方循环查库。
+- DAO statement factory 只构造 statement；普通查询和单语句写入直接使用 session，跨语句原子写入才使用
+  显式事务 session。
 - factory 按现有 `_xxx_dao` 懒加载单例模式实现，并绑定已有 session provider。
 - 不在 DAO 内创建 engine/session。
 

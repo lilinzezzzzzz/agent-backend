@@ -38,7 +38,9 @@ sys.modules["pkg.toolkit.json"] = mock_json
 # 1.2 Mock pkg.toolkit.timer
 mock_timer = types.ModuleType("pkg.toolkit.timer")
 mock_timer.utc_now_naive = lambda: datetime.now(UTC).replace(tzinfo=None)
-mock_timer.format_iso_datetime = lambda val, *, use_z=True, timespec="milliseconds": val.isoformat()
+mock_timer.format_iso_datetime = lambda val, *, use_z=True, timespec="milliseconds": (
+    val.isoformat()
+)
 sys.modules["pkg.toolkit.timer"] = mock_timer
 
 # 1.3 Mock pkg.request_context
@@ -77,7 +79,14 @@ try:
     from pkg.database.dao import BaseDao
 except ImportError as e:
     try:
-        from pkg.database import Base, BaseDao, JSONType, ModelMixin, base as database_base, new_async_session_maker
+        from pkg.database import (
+            Base,
+            BaseDao,
+            JSONType,
+            ModelMixin,
+            base as database_base,
+            new_async_session_maker,
+        )
     except ImportError:
         print(f"CRITICAL: Cannot import from pkg.database. path={sys.path}")
         raise e
@@ -157,7 +166,7 @@ async def test_create_and_insert_strictness(user_dao, db_session):
     assert db_user.info == {"role": "admin"}
 
     with pytest.raises(RuntimeError) as exc:
-        db_user.build_insert_stmt()
+        db_user.prepare_insert_values()
     assert "strictly for INSERT" in str(exc.value)
 
 
@@ -187,14 +196,16 @@ async def test_update_strictness(user_dao, db_session):
     # 3. Strict Update 检查（新对象不能调用 update）
     new_user = User.create(username="charlie")
     with pytest.raises(RuntimeError) as exc:
-        new_user.build_update_stmt(username="fail")
-    assert "strictly for UPDATE" in str(exc.value)
+        new_user.prepare_update(username="fail")
+    assert "requires a persisted" in str(exc.value)
+
 
 @pytest.mark.asyncio
 async def test_batch_insert_instances(user_dao, db_session):
     users = [User.create(username=f"user_{i}") for i in range(5)]
     await user_dao.insert_instances(items=users)
-    count = await user_dao.counter.count()
+    async with user_dao.session_provider() as session:
+        count = (await session.execute(user_dao.count_stmt())).scalar()
     assert count == 5
 
 
@@ -202,22 +213,29 @@ async def test_batch_insert_instances(user_dao, db_session):
 async def test_batch_insert_rows(user_dao, db_session):
     rows = [{"username": "dict_1"}, {"username": "dict_2"}]
     await user_dao.insert_rows(rows=rows)
-    count = await user_dao.counter.count()
+    async with user_dao.session_provider() as session:
+        count = (await session.execute(user_dao.count_stmt())).scalar()
     assert count == 2
 
 
 @pytest.mark.asyncio
-async def test_query_builder(user_dao, db_session):
+async def test_select_statement_composes_with_sqlalchemy(user_dao, db_session):
     await user_dao.insert_rows(rows=[{"username": f"u{i}"} for i in range(1, 6)])
 
-    res = await user_dao.querier.in_(User.username, ["u1", "u2"]).all()
+    async with user_dao.read_session_provider() as session:
+        result = await session.execute(
+            user_dao.select_stmt().where(User.username.in_(["u1", "u2"]))
+        )
+        res = list(result.scalars().all())
     assert len(res) == 2
 
-    with pytest.raises(ValueError) as exc:
-        await user_dao.querier.in_(User.username, []).all()
-    assert "empty" in str(exc.value) or "Empty" in str(exc.value)
+    assert await user_dao.query_by_ids([]) == []
 
-    page_res = await user_dao.querier_unsorted.asc_(User.id).paginate(page=1, limit=2).all()
+    async with user_dao.read_session_provider() as session:
+        result = await session.execute(
+            user_dao.select_stmt().order_by(User.id.asc()).offset(0).limit(2)
+        )
+        page_res = list(result.scalars().all())
     assert len(page_res) == 2
     assert page_res[0].username == "u1"
 
@@ -226,16 +244,31 @@ async def test_query_builder(user_dao, db_session):
 async def test_soft_delete(user_dao, db_session):
     user = User.create(username="del_me")
     await user_dao.insert(user)
-    await user_dao.ins_updater(user).soft_delete().execute()
-    assert await user_dao.querier.eq_(User.id, user.id).first() is None
-    assert await user_dao.querier_inc_deleted.eq_(User.id, user.id).first() is not None
+    await user_dao.soft_delete(user)
+    async with user_dao.read_session_provider() as session:
+        active = (
+            (await session.execute(user_dao.select_stmt().where(User.id == user.id)))
+            .scalars()
+            .first()
+        )
+        deleted = (
+            (
+                await session.execute(
+                    user_dao.select_stmt(include_deleted=True).where(User.id == user.id)
+                )
+            )
+            .scalars()
+            .first()
+        )
+    assert active is None
+    assert deleted is not None
 
 
 @pytest.mark.asyncio
-async def test_updater_builder_logic(user_dao, db_session):
+async def test_instance_update_logic(user_dao, db_session):
     user = User.create(username="old_name")
     await user_dao.insert(user)
-    await user_dao.ins_updater(user).update({User.username: "new_name"}).execute()
+    await user_dao.update(user, {User.username: "new_name"})
     reloaded = await user_dao.query_by_primary_id(user.id)
     assert reloaded.username == "new_name"
 

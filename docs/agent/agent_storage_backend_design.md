@@ -270,7 +270,8 @@ database backend 规则：
 ## 7. 数据模型
 
 以下字段是落地 ORM / DDL 的建议形态。命名需结合现有 `ModelMixin`：
-`id`、`creator_id`、`created_at`、`updater_id`、`updated_at`、`deleted_at`
+`id`、`creator_id`、`creator_type`、`created_at`、`updater_id`、`updater_type`、
+`updated_at`、`deleted_at`
 由项目基类承载。
 
 ### 7.1 agent_session
@@ -289,9 +290,11 @@ agent_session
 - message_count int not null default 0
 - last_message_at datetime null
 - expires_at datetime null
-- creator_id bigint not null
+- creator_id bigint null
+- creator_type varchar(32) not null
 - created_at datetime not null
 - updater_id bigint null
+- updater_type varchar(32) null
 - updated_at datetime null
 - deleted_at datetime null
 ```
@@ -325,9 +328,11 @@ agent_message
 - content_summary text null
 - token_count int not null default 0
 - metadata json null
-- creator_id bigint not null
+- creator_id bigint null
+- creator_type varchar(32) not null
 - created_at datetime not null
 - updater_id bigint null
+- updater_type varchar(32) null
 - updated_at datetime null
 - deleted_at datetime null
 ```
@@ -376,9 +381,11 @@ agent_run
 - error_code varchar(64) null
 - error_message text null
 - metadata json null
-- creator_id bigint not null
+- creator_id bigint null
+- creator_type varchar(32) not null
 - created_at datetime not null
 - updater_id bigint null
+- updater_type varchar(32) null
 - updated_at datetime null
 - deleted_at datetime null
 ```
@@ -426,9 +433,11 @@ agent_run_step
 - artifact_id varchar(64) null
 - error text null
 - elapsed_ms double not null default 0
-- creator_id bigint not null
+- creator_id bigint null
+- creator_type varchar(32) not null
 - created_at datetime not null
 - updater_id bigint null
+- updater_type varchar(32) null
 - updated_at datetime null
 - deleted_at datetime null
 ```
@@ -476,9 +485,11 @@ agent_tool_artifact
 - status varchar(32) not null
 - error_code varchar(64) null
 - metadata json null
-- creator_id bigint not null
+- creator_id bigint null
+- creator_type varchar(32) not null
 - created_at datetime not null
 - updater_id bigint null
+- updater_type varchar(32) null
 - updated_at datetime null
 - deleted_at datetime null
 ```

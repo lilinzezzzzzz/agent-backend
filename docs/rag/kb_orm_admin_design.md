@@ -103,7 +103,9 @@ created_at
 updated_at
 deleted_at
 creator_id
+creator_type
 updater_id
+updater_type
 ```
 
 建议约束：
@@ -148,7 +150,9 @@ created_at
 updated_at
 deleted_at
 creator_id
+creator_type
 updater_id
+updater_type
 ```
 
 状态建议：
@@ -223,7 +227,9 @@ created_at
 updated_at
 deleted_at
 creator_id
+creator_type
 updater_id
+updater_type
 ```
 
 状态建议：

@@ -12,6 +12,7 @@ from internal.core import AppException
 from internal.dao.scoped_operation_lock import ScopedOperationLockDao
 from internal.models.scoped_operation_lock import ScopedOperationLock
 from internal.services.scoped_operation_lock import LockMode, ScopedOperationLockService
+from pkg.database.base import AuditActor, AuditActorType
 
 
 class FakeDbapiError(Exception):
@@ -84,6 +85,7 @@ class TestScopedOperationLockModel:
         assert ScopedOperationLock.operation_scope.property.columns[0].type.length == 64
         assert ScopedOperationLock.resource_key.property.columns[0].type.length == 128
         assert ScopedOperationLock.creator_id.property.columns[0].nullable is True
+        assert ScopedOperationLock.creator_type.property.columns[0].nullable is False
 
     def test_model_has_unique_lock_identity(self):
         constraints = {
@@ -102,10 +104,8 @@ class TestScopedOperationLockModel:
         lock = ScopedOperationLock(operation_scope="scope", resource_key="key")
 
         assert ScopedOperationLock.has_deleted_at_column() is False
-        with pytest.raises(NotImplementedError, match="does not support soft delete"):
-            lock.build_soft_delete_stmt()
-        with pytest.raises(NotImplementedError, match="does not support restore"):
-            lock.build_restore_stmt()
+        assert lock.prepare_soft_delete() is None
+        assert lock.prepare_restore() is None
 
 
 class TestScopedOperationLockDao:
@@ -121,7 +121,7 @@ class TestScopedOperationLockDao:
             operation_scope="scope",
             resource_key="key",
             wait=True,
-            creator_id=123,
+            audit_actor=AuditActor.user(123),
         )
 
         insert_stmt, insert_params = session.executions[0]
@@ -134,6 +134,7 @@ class TestScopedOperationLockDao:
         assert insert_params["operation_scope"] == "scope"
         assert insert_params["resource_key"] == "key"
         assert insert_params["creator_id"] == 123
+        assert insert_params["creator_type"] == AuditActorType.USER.value
         assert "FOR UPDATE" in compiled_select
         assert "NOWAIT" not in compiled_select
         assert select_params is None
@@ -149,8 +150,12 @@ class TestScopedOperationLockDao:
             operation_scope="scope",
             resource_key="key",
             wait=False,
-            creator_id=None,
         )
+
+        insert_params = session.executions[0][1]
+        assert insert_params is not None
+        assert insert_params["creator_id"] is None
+        assert insert_params["creator_type"] == AuditActorType.SYSTEM.value
 
         select_stmt = session.executions[1][0]
         compiled_select = str(select_stmt.compile(dialect=mysql.dialect()))
@@ -288,7 +293,7 @@ class TestScopedOperationLockService:
             operation_scope="scope",
             resource_key="key",
             mode=mode,
-            creator_id=123,
+            audit_actor=AuditActor.user(123),
         )
 
         select_stmt = session.executions[1][0]

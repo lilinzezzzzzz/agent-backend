@@ -1,9 +1,12 @@
 from __future__ import annotations
 
-from sqlalchemy import select
-
 from internal.infra.database import get_read_session, get_session
-from internal.models.agent_conversation import AgentMessage, AgentRun, AgentRunStep, AgentSession
+from internal.models.agent_conversation import (
+    AgentMessage,
+    AgentRun,
+    AgentRunStep,
+    AgentSession,
+)
 from pkg.database.dao import BaseDao
 
 
@@ -12,13 +15,18 @@ class AgentSessionDao(BaseDao[AgentSession]):
 
     _model_cls: type[AgentSession] = AgentSession
 
-    async def get_by_session_id_for_user(self, *, session_id: str, user_id: int) -> AgentSession | None:
+    async def get_by_session_id_for_user(
+        self, *, session_id: str, user_id: int
+    ) -> AgentSession | None:
         """按 session_id 和 user_id 查询未删除会话。"""
-        return (
-            await self.querier_unsorted.eq_(self.model_cls.session_id, session_id)
-            .eq_(self.model_cls.user_id, user_id)
-            .first()
-        )
+        async with self.read_session_provider() as session:
+            result = await session.execute(
+                self.select_stmt().where(
+                    self.model_cls.session_id == session_id,
+                    self.model_cls.user_id == user_id,
+                )
+            )
+            return result.scalars().first()
 
 
 class AgentMessageDao(BaseDao[AgentMessage]):
@@ -37,11 +45,10 @@ class AgentMessageDao(BaseDao[AgentMessage]):
     ) -> list[AgentMessage]:
         """读取最近消息，按创建时间正序返回。"""
         stmt = (
-            select(self.model_cls)
+            self.select_stmt()
             .where(
                 self.model_cls.user_id == user_id,
                 self.model_cls.session_id == session_id,
-                self.model_cls.deleted_at.is_(None),
             )
             .order_by(self.model_cls.created_at.desc(), self.model_cls.id.desc())
             .limit(limit)
@@ -49,10 +56,9 @@ class AgentMessageDao(BaseDao[AgentMessage]):
         if exclude_run_id is not None:
             stmt = stmt.where(self.model_cls.run_id != exclude_run_id)
 
-        async with self.read_session_provider() as sess:
-            result = await sess.execute(stmt)
+        async with self.read_session_provider() as session:
+            result = await session.execute(stmt)
             rows = list(result.scalars().all())
-            await sess.commit()
 
         messages: list[AgentMessage] = []
         current_chars = 0
@@ -70,9 +76,18 @@ class AgentRunDao(BaseDao[AgentRun]):
 
     _model_cls: type[AgentRun] = AgentRun
 
-    async def get_by_run_id_for_user(self, *, run_id: str, user_id: int) -> AgentRun | None:
+    async def get_by_run_id_for_user(
+        self, *, run_id: str, user_id: int
+    ) -> AgentRun | None:
         """按 run_id 和 user_id 查询未删除运行记录。"""
-        return await self.querier_unsorted.eq_(self.model_cls.run_id, run_id).eq_(self.model_cls.user_id, user_id).first()
+        async with self.read_session_provider() as session:
+            result = await session.execute(
+                self.select_stmt().where(
+                    self.model_cls.run_id == run_id,
+                    self.model_cls.user_id == user_id,
+                )
+            )
+            return result.scalars().first()
 
 
 class AgentRunStepDao(BaseDao[AgentRunStep]):
@@ -91,7 +106,9 @@ def new_agent_session_dao() -> AgentSessionDao:
     """依赖注入：获取 AgentSessionDao 单例。"""
     global _agent_session_dao
     if _agent_session_dao is None:
-        _agent_session_dao = AgentSessionDao(session_provider=get_session, read_session_provider=get_read_session)
+        _agent_session_dao = AgentSessionDao(
+            session_provider=get_session, read_session_provider=get_read_session
+        )
     return _agent_session_dao
 
 
@@ -99,7 +116,9 @@ def new_agent_message_dao() -> AgentMessageDao:
     """依赖注入：获取 AgentMessageDao 单例。"""
     global _agent_message_dao
     if _agent_message_dao is None:
-        _agent_message_dao = AgentMessageDao(session_provider=get_session, read_session_provider=get_read_session)
+        _agent_message_dao = AgentMessageDao(
+            session_provider=get_session, read_session_provider=get_read_session
+        )
     return _agent_message_dao
 
 
@@ -107,7 +126,9 @@ def new_agent_run_dao() -> AgentRunDao:
     """依赖注入：获取 AgentRunDao 单例。"""
     global _agent_run_dao
     if _agent_run_dao is None:
-        _agent_run_dao = AgentRunDao(session_provider=get_session, read_session_provider=get_read_session)
+        _agent_run_dao = AgentRunDao(
+            session_provider=get_session, read_session_provider=get_read_session
+        )
     return _agent_run_dao
 
 
@@ -115,5 +136,7 @@ def new_agent_run_step_dao() -> AgentRunStepDao:
     """依赖注入：获取 AgentRunStepDao 单例。"""
     global _agent_run_step_dao
     if _agent_run_step_dao is None:
-        _agent_run_step_dao = AgentRunStepDao(session_provider=get_session, read_session_provider=get_read_session)
+        _agent_run_step_dao = AgentRunStepDao(
+            session_provider=get_session, read_session_provider=get_read_session
+        )
     return _agent_run_step_dao

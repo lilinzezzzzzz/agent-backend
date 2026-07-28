@@ -36,7 +36,7 @@
 - `pkg/config_loader/AGENTS.md`：多格式配置文件加载与配置合并工具。
 - `pkg/concurrency/AGENTS.md`：进程内后台任务、同步函数 offload、取消、超时和并发限制。
 - `pkg/crypter/AGENTS.md`：加密算法抽象和密文兼容性。
-- `pkg/database/AGENTS.md`：ORM 基类、builder、session provider。
+- `pkg/database/AGENTS.md`：ORM 基类、DAO statement factory、session provider。
 - `pkg/decorators/AGENTS.md`：通用装饰器，零业务依赖。
 - `pkg/embeddings/AGENTS.md`：Embedding contract、provider registry 和维度校验。
 - `pkg/files/AGENTS.md`：异步文件读写工具。

@@ -2,16 +2,15 @@ from collections.abc import Callable, Mapping
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from enum import StrEnum
 from typing import Any, Self
 
 from sqlalchemy import (
     BigInteger,
     DateTime,
-    Executable,
-    Insert,
+    String,
     Update,
     func,
-    insert,
     inspect,
     select,
     update,
@@ -70,10 +69,65 @@ class Base(DeclarativeBase):
     pass
 
 
+class AuditActorType(StrEnum):
+    """持久化审计主体类型。"""
+
+    USER = "user"
+    SYSTEM = "system"
+    SERVICE = "service"
+    TASK = "task"
+
+
+@dataclass(frozen=True, slots=True)
+class AuditActor:
+    """一次写操作的审计主体。"""
+
+    actor_type: AuditActorType
+    actor_id: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.actor_type is AuditActorType.USER and self.actor_id is None:
+            raise ValueError("User audit actor requires actor_id")
+
+    @classmethod
+    def user(cls, user_id: int) -> Self:
+        return cls(actor_type=AuditActorType.USER, actor_id=user_id)
+
+    @classmethod
+    def system(cls) -> Self:
+        return cls(actor_type=AuditActorType.SYSTEM)
+
+    @classmethod
+    def service(cls, service_id: int | None = None) -> Self:
+        return cls(actor_type=AuditActorType.SERVICE, actor_id=service_id)
+
+    @classmethod
+    def task(cls, task_id: int | None = None) -> Self:
+        return cls(actor_type=AuditActorType.TASK, actor_id=task_id)
+
+    def creator_values(self) -> dict[str, Any]:
+        return {
+            "creator_id": self.actor_id,
+            "creator_type": self.actor_type.value,
+        }
+
+    def updater_values(self) -> dict[str, Any]:
+        return {
+            "updater_id": self.actor_id,
+            "updater_type": self.actor_type.value,
+        }
+
+
 @dataclass(frozen=True, slots=True)
 class ContextDefaults:
     now: datetime
-    user_id: int | None
+    audit_actor: AuditActor
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedModelUpdate:
+    statement: Update
+    values: Mapping[str, Any]
 
 
 class ModelMixin(Base):
@@ -85,8 +139,14 @@ class ModelMixin(Base):
 
     # --- 字段定义 ---
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    creator_id: Mapped[int] = mapped_column(BigInteger)
-    updater_id: Mapped[int | None] = mapped_column(BigInteger, default=None)
+    creator_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    creator_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    updater_id: Mapped[int | None] = mapped_column(
+        BigInteger, nullable=True, default=None
+    )
+    updater_type: Mapped[str | None] = mapped_column(
+        String(32), nullable=True, default=None
+    )
     updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=False), default=None
     )
@@ -113,37 +173,51 @@ class ModelMixin(Base):
     # ==========================================================================
 
     @classmethod
-    def create(cls, **kwargs) -> Self:
+    def create(
+        cls,
+        *,
+        audit_actor: AuditActor | None = None,
+        **kwargs: Any,
+    ) -> Self:
         """
         创建一个新的、填充好默认值的实例（Transient 状态）。
         """
         valid_cols = set(cls.get_column_names())
-        clean_kwargs = {k: v for k, v in kwargs.items() if k in valid_cols}
+        unknown_columns = sorted(set(kwargs) - valid_cols)
+        if unknown_columns:
+            names = ", ".join(unknown_columns)
+            raise ValueError(f"Unknown {cls.__name__} create column(s): {names}")
 
-        ins = cls(**clean_kwargs)
-        ins.fill_ins_insert_fields()
+        managed_columns = cls.audit_column_names() & set(kwargs)
+        if managed_columns:
+            names = ", ".join(sorted(managed_columns))
+            raise ValueError(
+                f"Audit column(s) {names} are managed; pass audit_actor instead"
+            )
+
+        ins = cls(**kwargs)
+        ins.fill_ins_insert_fields(audit_actor=audit_actor)
         return ins
 
     # ==========================================================================
-    # 单例写操作（仅构造语句，不直接执行）
+    # 实例写入数据准备（不执行 SQL、不提前同步更新值）
     # ==========================================================================
 
-    def build_insert_stmt(self) -> Insert:
-        """[Strict Insert] 构造新对象的 INSERT 语句。"""
+    def prepare_insert_values(
+        self,
+        *,
+        audit_actor: AuditActor | None = None,
+    ) -> dict[str, Any]:
+        """补全实例插入字段并返回 INSERT values。"""
         state = inspect(self)
-
         if not state.transient:
             raise RuntimeError(
-                f"build_insert_stmt() is strictly for INSERT operations. "
+                f"prepare_insert_values() is strictly for INSERT operations. "
                 f"Object {self.__class__.__name__}(id={self.id}) is already persistent/detached. "
-                f"Please use build_update_stmt() instead."
+                f"Please prepare an update instead."
             )
 
-        return insert(self.__class__).values(self.prepare_insert_values())
-
-    def prepare_insert_values(self) -> dict[str, Any]:
-        """补全实例插入字段并返回可用于 INSERT 的列值。"""
-        self.fill_ins_insert_fields()
+        self.fill_ins_insert_fields(audit_actor=audit_actor)
         return self.extract_db_values()
 
     @staticmethod
@@ -152,68 +226,126 @@ class ModelMixin(Base):
             return column.key
         return column
 
-    def apply_updates(
+    def prepare_update(
         self,
         updates: Mapping[ColumnKey, Any] | None = None,
+        *,
+        audit_actor: AuditActor | None = None,
         **kwargs: Any,
-    ) -> dict[str, Any]:
-        """更新实例字段并返回可用于 UPDATE 的列值。"""
+    ) -> PreparedModelUpdate:
+        """准备实例 UPDATE；提交前不修改内存实例。"""
         state = inspect(self)
-
         if state.transient:
             raise RuntimeError(
-                f"build_update_stmt() is strictly for UPDATE operations on existing records. "
-                f"Object {self.__class__.__name__} is new (transient). "
-                f"Please use build_insert_stmt() first."
+                f"prepare_update() requires a persisted {self.__class__.__name__} instance"
             )
+        if self.id is None:
+            raise RuntimeError("Instance update requires a primary key")
 
         data: dict[str, Any] = {}
         raw_updates: dict[ColumnKey, Any] = dict(updates or {})
         for kwarg_name, kwarg_value in kwargs.items():
             raw_updates[kwarg_name] = kwarg_value
 
+        normalized_updates: list[tuple[str, Any]] = []
+        invalid_columns: list[str] = []
+        protected_columns = self.audit_column_names() | {
+            "id",
+            "created_at",
+            self.updated_at_column_name(),
+        }
         for key, value in raw_updates.items():
             column_name = self.normalize_update_column_name(key)
-            if self.has_column(column_name):
-                setattr(self, column_name, value)
-                data[column_name] = value
+            if not self.has_column(column_name) or column_name in protected_columns:
+                invalid_columns.append(column_name)
+                continue
+            normalized_updates.append((column_name, value))
 
-        self.fill_ins_update_fields(data)
-        return data
+        if invalid_columns:
+            names = ", ".join(sorted(invalid_columns))
+            raise ValueError(
+                f"Unknown or managed {self.__class__.__name__} update column(s): {names}"
+            )
 
-    def build_update_stmt(
+        for column_name, value in normalized_updates:
+            if isinstance(value, datetime) and value.tzinfo is not None:
+                value = value.replace(tzinfo=None)
+            data[column_name] = value
+
+        defaults = self.get_context_defaults(audit_actor=audit_actor)
+        if self.has_updated_at_column():
+            deleted_column = self.deleted_at_column_name()
+            deleted_at = data.get(deleted_column)
+            data[self.updated_at_column_name()] = deleted_at or defaults.now
+        if self.has_updater_id_column():
+            data.update(defaults.audit_actor.updater_values())
+
+        statement = (
+            update(self.__class__).where(self.__class__.id == self.id).values(data)
+        )
+        return PreparedModelUpdate(statement=statement, values=data)
+
+    def prepare_soft_delete(
         self,
-        updates: Mapping[ColumnKey, Any] | None = None,
-        **kwargs: Any,
-    ) -> Update:
-        """[Strict Update] 构造已存在对象的 UPDATE 语句，并同步实例字段。"""
-        data = self.apply_updates(updates=updates, **kwargs)
-        return update(self.__class__).where(self.__class__.id == self.id).values(data)
-
-    def build_soft_delete_stmt(self) -> Update | None:
+        *,
+        audit_actor: AuditActor | None = None,
+    ) -> PreparedModelUpdate | None:
         if not self.has_deleted_at_column():
             return None
-        return self.build_update_stmt(
-            updates={self.deleted_at_column_name(): utc_now_naive()}
+        return self.prepare_update(
+            updates={self.deleted_at_column_name(): utc_now_naive()},
+            audit_actor=audit_actor,
         )
 
-    def build_restore_stmt(self) -> Update | None:
-        """[Soft Delete] 构造恢复已删除对象的 UPDATE 语句。"""
+    def prepare_restore(
+        self,
+        *,
+        audit_actor: AuditActor | None = None,
+    ) -> PreparedModelUpdate | None:
         if not self.has_deleted_at_column():
             return None
-        return self.build_update_stmt(updates={self.deleted_at_column_name(): None})
+        return self.prepare_update(
+            updates={self.deleted_at_column_name(): None},
+            audit_actor=audit_actor,
+        )
+
+    def apply_persisted_values(self, values: Mapping[str, Any]) -> None:
+        """仅在事务提交成功后同步内存实例。"""
+        for column_name, value in values.items():
+            setattr(self, column_name, value)
 
     # ==========================================================================
     # 字段补全辅助方法
     # ==========================================================================
 
     @staticmethod
-    def get_context_defaults() -> ContextDefaults:
-        return ContextDefaults(now=utc_now_naive(), user_id=context.get_user_id())
+    def resolve_audit_actor(audit_actor: AuditActor | None = None) -> AuditActor:
+        """优先使用显式 actor；无请求登录态时使用 system actor。"""
+        if audit_actor is not None:
+            return audit_actor
+        try:
+            return AuditActor.user(context.get_user_id())
+        except LookupError:
+            return AuditActor.system()
 
-    def fill_ins_insert_fields(self):
+    @classmethod
+    def get_context_defaults(
+        cls,
+        *,
+        audit_actor: AuditActor | None = None,
+    ) -> ContextDefaults:
+        return ContextDefaults(
+            now=utc_now_naive(),
+            audit_actor=cls.resolve_audit_actor(audit_actor),
+        )
+
+    def fill_ins_insert_fields(
+        self,
+        *,
+        audit_actor: AuditActor | None = None,
+    ) -> None:
         """[Instance Insert] 补全实例插入所需的字段"""
-        defaults = self.get_context_defaults()
+        defaults = self.get_context_defaults(audit_actor=audit_actor)
 
         if not self.id:
             self.id = snowflake_id_generator.generate()
@@ -223,23 +355,15 @@ class ModelMixin(Base):
         if not self.updated_at:
             self.updated_at = defaults.now
 
-        if self.has_creator_id_column() and not self.creator_id and defaults.user_id:
-            self.creator_id = defaults.user_id
-
-        if self.has_updater_id_column() and not self.updater_id:
-            self.updater_id = None
-
-    def fill_ins_update_fields(self, data: dict[str, Any]) -> None:
-        """[Instance Update] 补全实例更新所需的字段"""
-        defaults = self.get_context_defaults()
-
-        if self.has_updated_at_column():
-            setattr(self, self.updated_at_column_name(), defaults.now)
-            data[self.updated_at_column_name()] = defaults.now
+        if self.has_creator_id_column() and (
+            audit_actor is not None or not getattr(self, "creator_type", None)
+        ):
+            for column_name, value in defaults.audit_actor.creator_values().items():
+                setattr(self, column_name, value)
 
         if self.has_updater_id_column():
-            setattr(self, self.updater_id_column_name(), defaults.user_id)
-            data[self.updater_id_column_name()] = defaults.user_id
+            self.updater_id = None
+            self.updater_type = None
 
     @classmethod
     def fill_dict_insert_fields(
@@ -247,6 +371,16 @@ class ModelMixin(Base):
     ) -> dict[str, Any]:
         """[Dict Insert] 补全字典插入所需的字段"""
         data = raw_data.copy()
+        valid_cols = set(cls.get_column_names())
+        unknown_columns = sorted(set(data) - valid_cols)
+        if unknown_columns:
+            names = ", ".join(unknown_columns)
+            raise ValueError(f"Unknown {cls.__name__} insert column(s): {names}")
+
+        managed_columns = cls.audit_column_names() & set(data)
+        if managed_columns:
+            names = ", ".join(sorted(managed_columns))
+            raise ValueError(f"Managed audit column(s) in insert row: {names}")
 
         data.setdefault("created_at", defaults.now)
         data.setdefault("updated_at", defaults.now)
@@ -254,18 +388,14 @@ class ModelMixin(Base):
         if "id" not in data:
             data["id"] = snowflake_id_generator.generate()
 
-        if (
-            cls.has_creator_id_column()
-            and "creator_id" not in data
-            and defaults.user_id
-        ):
-            data["creator_id"] = defaults.user_id
+        if cls.has_creator_id_column():
+            data.update(defaults.audit_actor.creator_values())
 
-        if cls.has_updater_id_column() and "updater_id" not in data:
+        if cls.has_updater_id_column():
             data["updater_id"] = None
+            data["updater_type"] = None
 
-        valid_cols = set(cls.get_column_names())
-        return {k: v for k, v in data.items() if k in valid_cols}
+        return data
 
     def extract_db_values(self) -> dict[str, Any]:
         """[Instance -> Dict]"""
@@ -275,19 +405,6 @@ class ModelMixin(Base):
             if hasattr(self, col_name):
                 values[col_name] = getattr(self, col_name)
         return values
-
-    @staticmethod
-    async def execute_stmt(
-        stmt: Executable, session_provider: SessionProvider, error_context: str
-    ) -> None:
-        """
-        统一执行 SQL 语句。
-        """
-        try:
-            async with session_provider() as sess, sess.begin():
-                await sess.execute(stmt)
-        except Exception as e:
-            raise RuntimeError(f"{error_context} failed: {e}") from e
 
     def to_dict(self, *, exclude_column: list[str] | None = None) -> dict[str, Any]:
         return {
@@ -305,8 +422,16 @@ class ModelMixin(Base):
         return "updater_id"
 
     @staticmethod
+    def updater_type_column_name() -> str:
+        return "updater_type"
+
+    @staticmethod
     def creator_id_column_name() -> str:
         return "creator_id"
+
+    @staticmethod
+    def creator_type_column_name() -> str:
+        return "creator_type"
 
     @staticmethod
     def updated_at_column_name() -> str:
@@ -331,6 +456,15 @@ class ModelMixin(Base):
     @classmethod
     def has_updater_id_column(cls) -> bool:
         return cls.has_column(cls.updater_id_column_name())
+
+    @classmethod
+    def audit_column_names(cls) -> set[str]:
+        return {
+            cls.creator_id_column_name(),
+            cls.creator_type_column_name(),
+            cls.updater_id_column_name(),
+            cls.updater_type_column_name(),
+        }
 
     @classmethod
     def has_column(cls, column_name: str) -> bool:

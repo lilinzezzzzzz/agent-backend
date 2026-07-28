@@ -7,18 +7,23 @@ class UserDao(BaseDao[User]):
     _model_cls: type[User] = User
 
     async def get_by_phone(self, phone: str) -> User | None:
-        # 建议方法名更加简洁，因为已经在 UserDao 里了，不用写 get_user_by_phone
-        # 使用你构建的 querier
-        return await self.querier.eq_(self.model_cls.phone, phone).first()
+        async with self.read_session_provider() as session:
+            result = await session.execute(
+                self.select_stmt().where(self.model_cls.phone == phone)
+            )
+            return result.scalars().first()
 
     async def get_by_username(self, username: str) -> User | None:
         """根据用户名查询用户"""
-        return await self.querier.eq_(self.model_cls.username, username).first()
+        async with self.read_session_provider() as session:
+            result = await session.execute(
+                self.select_stmt().where(self.model_cls.username == username)
+            )
+            return result.scalars().first()
 
     async def is_phone_exist(self, phone: str) -> bool:
         # 利用 first() 查询，找到一条就返回，比 count() 更高效
-        user = await self.querier.eq_(self.model_cls.phone, phone).first()
-        return user is not None
+        return await self.get_by_phone(phone) is not None
 
 
 # 全局单例（懒加载）

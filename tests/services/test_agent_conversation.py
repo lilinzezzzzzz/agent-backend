@@ -87,20 +87,53 @@ async def test_agent_conversation_service_creates_and_completes_run(db_session) 
     message_dao = AgentMessageDao(session_provider=db_session)
     run_dao = AgentRunDao(session_provider=db_session)
     step_dao = AgentRunStepDao(session_provider=db_session)
-    session = await session_dao.querier_unsorted.eq_(
-        AgentSession.session_id, started.session_id
-    ).first()
-    messages = await message_dao.querier_unsorted.eq_(
-        AgentMessage.session_id, started.session_id
-    ).all()
-    run = await run_dao.querier_unsorted.eq_(AgentRun.run_id, started.run_id).first()
-    steps = await step_dao.querier_unsorted.eq_(
-        AgentRunStep.run_id, started.run_id
-    ).all()
+    async with db_session() as db:
+        session = (
+            (
+                await db.execute(
+                    session_dao.select_stmt().where(
+                        AgentSession.session_id == started.session_id
+                    )
+                )
+            )
+            .scalars()
+            .first()
+        )
+        messages = list(
+            (
+                await db.execute(
+                    message_dao.select_stmt().where(
+                        AgentMessage.session_id == started.session_id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        run = (
+            (
+                await db.execute(
+                    run_dao.select_stmt().where(AgentRun.run_id == started.run_id)
+                )
+            )
+            .scalars()
+            .first()
+        )
+        steps = list(
+            (
+                await db.execute(
+                    step_dao.select_stmt().where(AgentRunStep.run_id == started.run_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
 
     assert context.recent_messages == ()
     assert session is not None
     assert session.user_id == 999
+    assert session.creator_type == "user"
+    assert session.updater_type == "user"
     assert session.message_count == 2
     assert run is not None
     assert run.status == "completed"

@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from internal.services.user import UserService
+from pkg.database.base import AuditActor
 
 
 @pytest.mark.asyncio
@@ -26,10 +27,10 @@ async def test_create_user_persists_constructed_model(monkeypatch) -> None:
 
     assert result is user
     user_dao.create.assert_called_once_with(
+        audit_actor=AuditActor.system(),
         username="new-user",
         account="13800138000",
         phone="13800138000",
         password_hash="hashed",
-        creator_id=0,
     )
     user_dao.insert.assert_awaited_once_with(user)

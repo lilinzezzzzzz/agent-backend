@@ -1,7 +1,6 @@
 from datetime import datetime
 
 from sqlalchemy import (
-    BigInteger,
     Boolean,
     CheckConstraint,
     DateTime,
@@ -52,8 +51,6 @@ class CeleryTaskRecord(ModelMixin):
     )
     error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     error_summary: Mapped[str | None] = mapped_column(String(512), nullable=True)
-    creator_id: Mapped[int] = mapped_column(BigInteger, nullable=True, default=None)
-
     __table_args__ = (
         UniqueConstraint(
             "scope",

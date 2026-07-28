@@ -14,6 +14,7 @@ from internal.models.agent_audit import AgentAudit
 from internal.schemas.agent import JsonValue
 from internal.schemas.agent import AgentRunResultDTO
 from internal.utils.background_tasks import background_task_manager
+from pkg.database.base import AuditActor
 from pkg.logger import logger
 from pkg import request_context as context
 from pkg.toolkit.string import mask_string
@@ -119,6 +120,7 @@ class AgentAuditService:
         """持久化一条 Agent 运行审计记录，失败时不影响业务响应。"""
         try:
             audit = AgentAudit.create(
+                audit_actor=AuditActor.user(user_id),
                 run_id=result.run_id,
                 agent_name=agent_name,
                 user_id=user_id,
@@ -137,7 +139,6 @@ class AgentAuditService:
                 steps=[_step_to_audit_payload(step) for step in result.steps],
                 llm_calls=[to_json_object(redact_value(call)) for call in llm_calls],
                 audit_metadata=to_json_object(redact_value(metadata or {})),
-                creator_id=user_id,
             )
             await self._audit_dao.insert(audit)
             return True

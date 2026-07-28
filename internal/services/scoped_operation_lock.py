@@ -11,6 +11,7 @@ from internal.dao.scoped_operation_lock import (
     ScopedOperationLockDao,
     new_scoped_operation_lock_dao,
 )
+from pkg.database.base import AuditActor
 
 
 class LockMode(StrEnum):
@@ -33,7 +34,7 @@ class ScopedOperationLockService:
         operation_scope: str,
         resource_key: str,
         mode: LockMode = LockMode.WAIT,
-        creator_id: int | None = None,
+        audit_actor: AuditActor | None = None,
     ) -> bool:
         """在当前事务内获取锁。
 
@@ -46,7 +47,7 @@ class ScopedOperationLockService:
             operation_scope: 锁作用域，如 ``order_confirm``。
             resource_key: scope 内资源键，如 ``order:123``。
             mode: WAIT 等待获取；TRY 立即返回是否获取成功。
-            creator_id: 首次创建锁身份行时写入的创建人 ID，可为空。
+            audit_actor: 首次创建锁身份行时写入的审计主体；默认 system。
 
         Returns:
             是否成功获取锁。WAIT 模式正常返回时恒为 True。
@@ -64,7 +65,7 @@ class ScopedOperationLockService:
             operation_scope=operation_scope,
             resource_key=resource_key,
             wait=mode is LockMode.WAIT,
-            creator_id=creator_id,
+            audit_actor=audit_actor,
         )
 
     @staticmethod

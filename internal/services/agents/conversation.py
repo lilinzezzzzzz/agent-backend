@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from sqlalchemy import select, update
+from collections.abc import Awaitable, Callable
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from internal.core import AppException, errors
 from internal.dao.agent_conversation import (
@@ -22,7 +25,8 @@ from internal.schemas.agent import (
     to_json_object,
     to_json_value,
 )
-from pkg.database.dao import execute_transaction
+from pkg.database.base import AuditActor
+from pkg.database.dao import BaseDao
 from pkg.ids import uuid6_unique_str_id
 from pkg.toolkit.timer import utc_now_naive
 
@@ -82,8 +86,9 @@ class DatabaseAgentStorageBackend:
         resolved_session_id = session_id or uuid6_unique_str_id()
         run_id = uuid6_unique_str_id()
         user_message_id = uuid6_unique_str_id()
+        actor = AuditActor.user(user_id)
 
-        async def _tx(sess) -> None:
+        async def _tx(sess: AsyncSession) -> None:
             session = await _get_session_for_update(
                 sess=sess,
                 session_id=resolved_session_id,
@@ -94,6 +99,7 @@ class DatabaseAgentStorageBackend:
 
             if session is None:
                 session = AgentSession.create(
+                    audit_actor=actor,
                     session_id=resolved_session_id,
                     user_id=user_id,
                     entrypoint=entrypoint,
@@ -105,25 +111,25 @@ class DatabaseAgentStorageBackend:
                     message_count=1,
                     last_message_at=now,
                     expires_at=None,
-                    creator_id=user_id,
                     created_at=now,
                     updated_at=now,
                 )
                 sess.add(session)
             else:
                 await sess.execute(
-                    update(AgentSession)
-                    .where(AgentSession.id == session.id)
-                    .values(
-                        message_count=AgentSession.message_count + 1,
-                        last_message_at=now,
-                        updater_id=user_id,
-                        updated_at=now,
+                    self._session_dao.update_stmt(
+                        AgentSession.id == session.id,
+                        values={
+                            "message_count": AgentSession.message_count + 1,
+                            "last_message_at": now,
+                        },
+                        audit_actor=actor,
                     )
                 )
 
             sess.add(
                 AgentMessage.create(
+                    audit_actor=actor,
                     message_id=user_message_id,
                     session_id=resolved_session_id,
                     run_id=run_id,
@@ -133,13 +139,13 @@ class DatabaseAgentStorageBackend:
                     content_summary=None,
                     token_count=0,
                     message_metadata=None,
-                    creator_id=user_id,
                     created_at=now,
                     updated_at=now,
                 )
             )
             sess.add(
                 AgentRun.create(
+                    audit_actor=actor,
                     run_id=run_id,
                     session_id=resolved_session_id,
                     user_id=user_id,
@@ -155,13 +161,12 @@ class DatabaseAgentStorageBackend:
                     error_code=None,
                     error_message=None,
                     run_metadata=None,
-                    creator_id=user_id,
                     created_at=now,
                     updated_at=now,
                 )
             )
 
-        await _execute_storage_transaction(self._session_dao.session_provider, _tx)
+        await _execute_storage_transaction(self._session_dao, _tx)
         return AgentRunStartDTO(
             session_id=resolved_session_id,
             run_id=run_id,
@@ -214,8 +219,9 @@ class DatabaseAgentStorageBackend:
     ) -> None:
         """写入 assistant 消息、steps，并把 run 标记为终态。"""
         now = utc_now_naive()
+        actor = AuditActor.user(user_id)
 
-        async def _tx(sess) -> None:
+        async def _tx(sess: AsyncSession) -> None:
             run = await _get_run_for_update(
                 sess=sess,
                 run_id=run_id,
@@ -227,6 +233,7 @@ class DatabaseAgentStorageBackend:
 
             sess.add(
                 AgentMessage.create(
+                    audit_actor=actor,
                     message_id=uuid6_unique_str_id(),
                     session_id=session_id,
                     run_id=run_id,
@@ -236,7 +243,6 @@ class DatabaseAgentStorageBackend:
                     content_summary=None,
                     token_count=0,
                     message_metadata=None,
-                    creator_id=user_id,
                     created_at=now,
                     updated_at=now,
                 )
@@ -256,45 +262,44 @@ class DatabaseAgentStorageBackend:
                     "artifact_id": None,
                     "error": step.error,
                     "elapsed_ms": step.elapsed_ms,
-                    "creator_id": user_id,
                     "created_at": now,
                     "updated_at": now,
                 }
                 for step in result.steps
             ]
             if step_rows:
-                stmt = self._run_step_dao.build_insert_rows_stmt(rows=step_rows)
-                if stmt is not None:
-                    await sess.execute(stmt)
+                statement = self._run_step_dao.build_insert_rows_stmt(
+                    rows=step_rows,
+                    audit_actor=actor,
+                )
+                if statement is not None:
+                    await sess.execute(statement)
 
             await sess.execute(
-                update(AgentRun)
-                .where(AgentRun.id == run.id)
-                .values(
-                    route=route,
-                    status=result.status,
-                    ended_at=now,
-                    elapsed_ms=_elapsed_ms(run.started_at, now),
-                    updater_id=user_id,
-                    updated_at=now,
+                self._run_dao.update_stmt(
+                    AgentRun.id == run.id,
+                    values={
+                        "route": route,
+                        "status": result.status,
+                        "ended_at": now,
+                        "elapsed_ms": _elapsed_ms(run.started_at, now),
+                    },
+                    audit_actor=actor,
                 )
             )
             await sess.execute(
-                update(AgentSession)
-                .where(
+                self._session_dao.update_stmt(
                     AgentSession.session_id == session_id,
                     AgentSession.user_id == user_id,
-                    AgentSession.deleted_at.is_(None),
-                )
-                .values(
-                    message_count=AgentSession.message_count + 1,
-                    last_message_at=now,
-                    updater_id=user_id,
-                    updated_at=now,
+                    values={
+                        "message_count": AgentSession.message_count + 1,
+                        "last_message_at": now,
+                    },
+                    audit_actor=actor,
                 )
             )
 
-        await _execute_storage_transaction(self._run_dao.session_provider, _tx)
+        await _execute_storage_transaction(self._run_dao, _tx)
 
     async def fail_run(
         self,
@@ -307,8 +312,9 @@ class DatabaseAgentStorageBackend:
     ) -> None:
         """把 running run 标记为 failed。"""
         now = utc_now_naive()
+        actor = AuditActor.user(user_id)
 
-        async def _tx(sess) -> None:
+        async def _tx(sess: AsyncSession) -> None:
             run = await _get_run_for_update(
                 sess=sess,
                 run_id=run_id,
@@ -318,20 +324,20 @@ class DatabaseAgentStorageBackend:
             if run is None:
                 return
             await sess.execute(
-                update(AgentRun)
-                .where(AgentRun.id == run.id)
-                .values(
-                    status="failed",
-                    ended_at=now,
-                    elapsed_ms=_elapsed_ms(run.started_at, now),
-                    error_code=error_code,
-                    error_message=error_message[:2000],
-                    updater_id=user_id,
-                    updated_at=now,
+                self._run_dao.update_stmt(
+                    AgentRun.id == run.id,
+                    values={
+                        "status": "failed",
+                        "ended_at": now,
+                        "elapsed_ms": _elapsed_ms(run.started_at, now),
+                        "error_code": error_code,
+                        "error_message": error_message[:2000],
+                    },
+                    audit_actor=actor,
                 )
             )
 
-        await _execute_storage_transaction(self._run_dao.session_provider, _tx)
+        await _execute_storage_transaction(self._run_dao, _tx)
 
 
 _agent_conversation_service: AgentConversationService | None = None
@@ -352,13 +358,12 @@ def new_agent_conversation_service() -> AgentConversationService:
     return _agent_conversation_service
 
 
-async def _execute_storage_transaction(session_provider, callback) -> None:
-    try:
-        await execute_transaction(session_provider, callback)
-    except RuntimeError as exc:
-        if isinstance(exc.__cause__, AppException):
-            raise exc.__cause__ from exc
-        raise
+async def _execute_storage_transaction(
+    dao: BaseDao,
+    callback: Callable[[AsyncSession], Awaitable[None]],
+) -> None:
+    async with dao.transaction() as session:
+        await callback(session)
 
 
 async def _get_session_for_update(

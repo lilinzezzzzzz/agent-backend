@@ -7,7 +7,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from internal.infra.database import get_session
 from internal.models.celery_task import CeleryTaskRecord
 from internal.schemas.celery_task import CeleryTaskErrorCode, CeleryTaskStatus
-from pkg.database.base import SessionProvider
+from pkg.database.base import AuditActor, SessionProvider
+
+
+_TASK_AUDIT_ACTOR = AuditActor.task()
 
 
 _FAIL_STALE_SUBMITTING_SQL = text(
@@ -26,6 +29,8 @@ _FAIL_STALE_SUBMITTING_SQL = text(
         error_code = 'PUBLISH_CONFIRMATION_TIMEOUT',
         error_summary = 'task publish was not confirmed before the deadline',
         finished_at = :now,
+        updater_id = NULL,
+        updater_type = 'task',
         updated_at = :now
     FROM candidates AS c
     WHERE r.id = c.id
@@ -51,6 +56,8 @@ _FAIL_EXPIRED_QUEUED_SQL = text(
         error_code = 'QUEUE_START_TIMEOUT',
         error_summary = 'queued task was not claimed before the start deadline',
         finished_at = :now,
+        updater_id = NULL,
+        updater_type = 'task',
         updated_at = :now
     FROM candidates AS c
     WHERE r.id = c.id
@@ -82,6 +89,8 @@ _RECONCILE_EXPIRED_EXECUTION_SQL = text(
             ELSE 'running task exceeded the execution deadline'
         END,
         fence_expires_at = :fence_expires_at,
+        updater_id = NULL,
+        updater_type = 'task',
         updated_at = :now
     FROM candidates AS c
     WHERE r.id = c.id
@@ -133,6 +142,9 @@ class CeleryTaskDao:
                 payload_hash=payload_hash,
                 status=CeleryTaskStatus.SUBMITTING.value,
                 attempt_count=0,
+                **_TASK_AUDIT_ACTOR.creator_values(),
+                updater_id=None,
+                updater_type=None,
                 created_at=now,
                 updated_at=now,
             )
@@ -186,6 +198,7 @@ class CeleryTaskDao:
                     status=CeleryTaskStatus.QUEUED.value,
                     queued_deadline_at=now
                     + timedelta(seconds=queue_start_timeout_seconds),
+                    **_TASK_AUDIT_ACTOR.updater_values(),
                     updated_at=now,
                 )
                 .returning(CeleryTaskRecord)
@@ -216,6 +229,7 @@ class CeleryTaskDao:
                     error_code=CeleryTaskErrorCode.BROKER_PUBLISH_FAILED.value,
                     error_summary="broker publish failed; automatic retry is disabled",
                     finished_at=now,
+                    **_TASK_AUDIT_ACTOR.updater_values(),
                     updated_at=now,
                 )
                 .returning(CeleryTaskRecord)
@@ -265,6 +279,7 @@ class CeleryTaskDao:
                     hard_deadline_at=now + timedelta(seconds=hard_deadline_seconds),
                     error_code=None,
                     error_summary=None,
+                    **_TASK_AUDIT_ACTOR.updater_values(),
                     updated_at=now,
                 )
                 .returning(CeleryTaskRecord)
@@ -298,6 +313,7 @@ class CeleryTaskDao:
                     error_code=error_code.value if error_code else None,
                     error_summary=error_summary[:512] if error_summary else None,
                     finished_at=now,
+                    **_TASK_AUDIT_ACTOR.updater_values(),
                     updated_at=now,
                 )
                 .returning(CeleryTaskRecord.id)
@@ -321,6 +337,7 @@ class CeleryTaskDao:
                 .values(
                     status=CeleryTaskStatus.CANCELLED.value,
                     finished_at=now,
+                    **_TASK_AUDIT_ACTOR.updater_values(),
                     updated_at=now,
                 )
                 .returning(CeleryTaskRecord.id)
@@ -364,6 +381,8 @@ class CeleryTaskDao:
                 record.finished_at = now
             elif status is CeleryTaskStatus.RUNNING:
                 record.status = CeleryTaskStatus.CANCELLING.value
+            record.updater_id = _TASK_AUDIT_ACTOR.actor_id
+            record.updater_type = _TASK_AUDIT_ACTOR.actor_type.value
             record.updated_at = now
             return record
 
@@ -382,7 +401,11 @@ class CeleryTaskDao:
                     CeleryTaskRecord.execution_token == execution_token,
                     CeleryTaskRecord.cancel_allowed.is_(True),
                 )
-                .values(cancel_allowed=False, updated_at=now)
+                .values(
+                    cancel_allowed=False,
+                    **_TASK_AUDIT_ACTOR.updater_values(),
+                    updated_at=now,
+                )
                 .returning(CeleryTaskRecord.id)
             )
             return (await session.execute(stmt)).scalar_one_or_none() is not None
@@ -450,6 +473,7 @@ class CeleryTaskDao:
             values = {
                 "status": status.value,
                 "finished_at": now,
+                **_TASK_AUDIT_ACTOR.updater_values(),
                 "updated_at": now,
             }
             if error_code is not None:

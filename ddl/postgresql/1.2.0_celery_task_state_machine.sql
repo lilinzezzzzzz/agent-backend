@@ -18,7 +18,9 @@ CREATE TABLE celery_task_record (
     error_code              VARCHAR(64),
     error_summary           VARCHAR(512),
     creator_id              BIGINT,
+    creator_type            VARCHAR(32) NOT NULL,
     updater_id              BIGINT,
+    updater_type            VARCHAR(32),
     created_at              TIMESTAMP WITHOUT TIME ZONE NOT NULL,
     updated_at              TIMESTAMP WITHOUT TIME ZONE,
     deleted_at              TIMESTAMP WITHOUT TIME ZONE,
@@ -29,6 +31,13 @@ CREATE TABLE celery_task_record (
             'SUBMITTING', 'QUEUED', 'RUNNING', 'CANCELLING',
             'ORPHANED', 'SUCCEEDED', 'FAILED', 'CANCELLED'
         )),
+    CONSTRAINT ck_celery_task_record_creator_type
+        CHECK (creator_type IN ('user', 'system', 'service', 'task')),
+    CONSTRAINT ck_celery_task_record_updater_type
+        CHECK (
+            updater_type IS NULL
+            OR updater_type IN ('user', 'system', 'service', 'task')
+        ),
     CONSTRAINT ck_celery_task_record_attempt_count CHECK (attempt_count >= 0)
 );
 

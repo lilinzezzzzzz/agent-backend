@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from internal.infra.database import get_read_session, get_session
 from internal.models.scoped_operation_lock import ScopedOperationLock
+from pkg.database.base import AuditActor
 from pkg.database.dao import BaseDao
 from pkg.ids import snowflake_id_generator
 from pkg.toolkit.timer import utc_now_naive
@@ -22,9 +23,11 @@ _MYSQL_LOCK_UNAVAILABLE_ERROR_CODES = {
 _INSERT_IGNORE_LOCK_ROW_STMT = text(
     """
     INSERT IGNORE INTO scoped_operation_locks
-        (id, operation_scope, resource_key, creator_id, created_at, updater_id, updated_at, deleted_at)
+        (id, operation_scope, resource_key, creator_id, creator_type,
+         created_at, updater_id, updater_type, updated_at, deleted_at)
     VALUES
-        (:id, :operation_scope, :resource_key, :creator_id, :created_at, NULL, :updated_at, NULL)
+        (:id, :operation_scope, :resource_key, :creator_id, :creator_type,
+         :created_at, NULL, NULL, :updated_at, NULL)
     """
 )
 
@@ -41,7 +44,7 @@ class ScopedOperationLockDao(BaseDao[ScopedOperationLock]):
         operation_scope: str,
         resource_key: str,
         wait: bool,
-        creator_id: int | None = None,
+        audit_actor: AuditActor | None = None,
     ) -> bool:
         """在当前显式事务内获取锁。
 
@@ -55,7 +58,7 @@ class ScopedOperationLockDao(BaseDao[ScopedOperationLock]):
             operation_scope: 锁作用域。
             resource_key: scope 内资源键。
             wait: True 时等待锁；False 时使用 NOWAIT 尝试获取锁。
-            creator_id: 创建人 ID，可为空。
+            audit_actor: 首次创建锁身份行时写入的审计主体；默认 system。
 
         Returns:
             是否成功获取锁。等待模式正常返回时恒为 True。
@@ -69,7 +72,7 @@ class ScopedOperationLockDao(BaseDao[ScopedOperationLock]):
             session=session,
             operation_scope=operation_scope,
             resource_key=resource_key,
-            creator_id=creator_id,
+            audit_actor=audit_actor,
         )
 
         try:
@@ -101,17 +104,18 @@ class ScopedOperationLockDao(BaseDao[ScopedOperationLock]):
         session: AsyncSession,
         operation_scope: str,
         resource_key: str,
-        creator_id: int | None,
+        audit_actor: AuditActor | None,
     ) -> None:
         """确保锁身份行存在；重复身份不修改既有行。"""
         now = utc_now_naive()
+        actor = audit_actor or AuditActor.system()
         await session.execute(
             _INSERT_IGNORE_LOCK_ROW_STMT,
             {
                 "id": snowflake_id_generator.generate(),
                 "operation_scope": operation_scope,
                 "resource_key": resource_key,
-                "creator_id": creator_id,
+                **actor.creator_values(),
                 "created_at": now,
                 "updated_at": now,
             },

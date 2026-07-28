@@ -299,3 +299,18 @@ def test_fresh_postgresql_ddl_matches_state_machine_contract() -> None:
         "error_message",
     ):
         assert removed_column not in ddl
+
+
+def test_audit_actor_type_baseline_matches_model_contract() -> None:
+    ddl = Path("ddl/postgresql/1.2.0_celery_task_state_machine.sql").read_text(
+        encoding="utf-8"
+    )
+
+    assert "creator_type            VARCHAR(32) NOT NULL" in ddl
+    assert "updater_type            VARCHAR(32)" in ddl
+    assert "ck_celery_task_record_creator_type" in ddl
+    assert "ck_celery_task_record_updater_type" in ddl
+    assert "'user', 'system', 'service', 'task'" in ddl
+    assert CeleryTaskRecord.creator_id.property.columns[0].nullable is True
+    assert CeleryTaskRecord.creator_type.property.columns[0].nullable is False
+    assert CeleryTaskRecord.updater_type.property.columns[0].nullable is True

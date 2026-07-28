@@ -13,12 +13,13 @@ from unittest.mock import MagicMock
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import String
+from sqlalchemy import JSON as SA_JSON, String, text
 from sqlalchemy.dialects import mysql, oracle, postgresql, sqlite
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.orm import Mapped, mapped_column
 
-from pkg.database import Base, JSONType, ModelMixin, new_async_session_maker
+from pkg.database import Base, BaseDao, JSONType, ModelMixin, new_async_session_maker
+from pkg.toolkit.json import orjson_loads
 
 
 # ==========================================
@@ -31,14 +32,17 @@ class JsonModel(ModelMixin):
     config: Mapped[dict] = mapped_column(JSONType(), default=dict)
     tags: Mapped[list] = mapped_column(JSONType(), default=list)
     extra: Mapped[dict | None] = mapped_column(JSONType(), nullable=True)
+    extra_sql_null: Mapped[dict | None] = mapped_column(
+        JSONType(none_as_null=True), nullable=True
+    )
+
+
+class JsonModelDao(BaseDao[JsonModel]):
+    _model_cls = JsonModel
 
 
 async def persist_json_model(db_session, model: JsonModel) -> None:
-    await JsonModel.execute_stmt(
-        model.build_insert_stmt(),
-        db_session,
-        error_context=f"{JsonModel.__name__} insert",
-    )
+    await JsonModelDao(session_provider=db_session).insert(model)
 
 
 # ==========================================
@@ -70,6 +74,15 @@ class TestDialectImpl:
         dialect = mysql.dialect()
         impl = json_type.load_dialect_impl(dialect)
         assert "JSON" in str(impl)
+
+    @pytest.mark.parametrize("none_as_null", [False, True])
+    def test_native_json_propagates_none_as_null(self, none_as_null):
+        """原生 JSON 类型应接收 none_as_null 设置。"""
+        dialects = (postgresql.dialect(), mysql.dialect(), sqlite.dialect())
+
+        for dialect in dialects:
+            impl = JSONType(none_as_null=none_as_null).load_dialect_impl(dialect)
+            assert impl.none_as_null is none_as_null
 
     def test_sqlite_uses_json(self):
         """SQLite 应使用 JSON"""
@@ -106,6 +119,11 @@ class TestDialectImpl:
         # 检查返回的是 Text 类型描述符
         assert impl is not None
 
+    def test_should_evaluate_none_matches_sqlalchemy_json(self):
+        """ORM 应根据 none_as_null 决定是否显式绑定 None。"""
+        assert JSONType().should_evaluate_none is True
+        assert JSONType(none_as_null=True).should_evaluate_none is False
+
 
 # ==========================================
 # 4. process_bind_param 序列化测试
@@ -114,10 +132,10 @@ class TestBindParam:
     """测试写入数据库时的序列化行为"""
 
     def test_none_value(self):
-        """None 值应直接返回 None"""
-        json_type = JSONType()
-        result = json_type.process_bind_param(None, make_dialect("postgresql"))
-        assert result is None
+        """CLOB/TEXT 按 none_as_null 区分 JSON null 和 SQL NULL。"""
+        dialect = make_dialect("unknown_db")
+        assert JSONType().process_bind_param(None, dialect) == "null"
+        assert JSONType(none_as_null=True).process_bind_param(None, dialect) is None
 
     def test_native_json_passthrough(self):
         """PostgreSQL/Oracle 原生 JSON 应直接传递对象。"""
@@ -129,16 +147,67 @@ class TestBindParam:
             result = json_type.process_bind_param(data, dialect)
             assert result == data, f"{dialect_name} should passthrough"
 
-    def test_mysql_sqlite_serialize(self):
-        """MySQL/SQLite 在当前实现下会先序列化为 JSON 字符串。"""
+    def test_native_json_passthrough_avoids_double_serialization(self):
+        """MySQL/SQLite 原生 JSON 应由底层类型执行一次序列化。"""
         json_type = JSONType()
         data = {"key": "value", "nested": {"a": 1}}
 
         for dialect_name in ("mysql", "sqlite"):
             dialect = make_dialect(dialect_name)
             result = json_type.process_bind_param(data, dialect)
-            assert isinstance(result, str)
-            assert '"key"' in result
+            assert result is data
+
+    @pytest.mark.parametrize("dialect", [mysql.dialect(), sqlite.dialect()])
+    def test_native_json_final_bind_processor_serializes_once(self, dialect):
+        """最终 bind processor 不应把 JSON object 存为 JSON string。"""
+        data = {"key": "value", "nested": {"a": 1}}
+        json_type = JSONType()
+        adapted_type = json_type.dialect_impl(dialect)
+        processor = adapted_type.bind_processor(dialect)
+
+        assert processor is not None
+        bound_value = processor(data)
+        assert orjson_loads(bound_value) == data
+
+    @pytest.mark.parametrize(
+        "dialect", [postgresql.dialect(), mysql.dialect(), sqlite.dialect()]
+    )
+    def test_native_json_final_bind_processor_distinguishes_nulls(self, dialect):
+        """none_as_null 应在最终 bind processor 中区分 JSON null 和 SQL NULL。"""
+        json_null_type = JSONType()
+        json_null_processor = json_null_type.dialect_impl(dialect).bind_processor(
+            dialect
+        )
+        sql_null_type = JSONType(none_as_null=True)
+        sql_null_processor = sql_null_type.dialect_impl(dialect).bind_processor(dialect)
+
+        assert json_null_processor is not None
+        assert sql_null_processor is not None
+        assert json_null_processor(None) == "null"
+        assert sql_null_processor(None) is None
+
+    def test_text_json_null_sentinel(self):
+        """JSON.NULL 在 CLOB/TEXT 分支中始终存为 JSON null。"""
+        result = JSONType(none_as_null=True).process_bind_param(
+            SA_JSON.NULL, make_dialect("unknown_db")
+        )
+        assert result == "null"
+
+    @pytest.mark.parametrize(
+        ("none_as_null", "expected"), [(False, "null"), (True, None)]
+    )
+    def test_oracle_clob_final_bind_processor_distinguishes_nulls(
+        self, none_as_null, expected
+    ):
+        """Oracle CLOB 的最终 bind processor 应保持统一空值语义。"""
+        dialect = oracle.dialect()
+        json_type = JSONType(
+            oracle_native_json=False, none_as_null=none_as_null
+        ).dialect_impl(dialect)
+        processor = json_type.bind_processor(dialect)
+
+        assert processor is not None
+        assert processor(None) == expected
 
     def test_oracle_native_passthrough(self):
         """Oracle 21c+ 原生模式应直接传递对象"""
@@ -244,6 +313,11 @@ class TestResultValue:
         result = json_type.process_result_value(invalid_json, dialect)
         assert result == invalid_json
 
+    def test_native_json_scalar_passthrough(self):
+        """驱动已解析的 JSON scalar 应直接返回。"""
+        json_type = JSONType()
+        assert json_type.process_result_value(1, make_dialect("mysql")) == 1
+
 
 # ==========================================
 # 6. 集成测试 - SQLite 内存数据库
@@ -305,7 +379,7 @@ async def test_json_mutable_tracking(db_session):
 
 @pytest.mark.asyncio
 async def test_json_nullable_field(db_session):
-    """测试可空 JSON 字段"""
+    """测试 JSON null 和 SQL NULL 的存储语义。"""
     # 测试 None 值
     model1 = JsonModel.create(name="nullable_none", extra=None)
     await persist_json_model(db_session, model1)
@@ -313,6 +387,19 @@ async def test_json_nullable_field(db_session):
     async with db_session() as session:
         result = await session.get(JsonModel, model1.id)
         assert result.extra is None
+        assert result.extra_sql_null is None
+
+        storage_types = (
+            await session.execute(
+                text(
+                    "SELECT typeof(extra), json_type(extra), "
+                    "typeof(extra_sql_null), json_type(extra_sql_null) "
+                    "FROM json_test WHERE id = :id"
+                ),
+                {"id": model1.id},
+            )
+        ).one()
+        assert storage_types == ("text", "null", "null", None)
 
     # 测试有值
     model2 = JsonModel.create(name="nullable_with_value", extra={"meta": "data"})

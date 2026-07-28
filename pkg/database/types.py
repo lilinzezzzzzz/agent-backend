@@ -41,24 +41,31 @@ class JSONType(TypeDecorator):
             )
 
             # 可空 JSON 字段
-            extra: Mapped[dict | None] = mapped_column(JSONType(), nullable=True)
+            extra: Mapped[dict | None] = mapped_column(
+                JSONType(none_as_null=True), nullable=True
+            )
 
     Args:
         oracle_native_json: Oracle 是否使用原生 JSON 类型
             - True（默认）: 使用原生 JSON，仅支持 Oracle 21c+，性能更好
             - False: 使用 CLOB 存储，兼容 Oracle 12c+
+        none_as_null: Python None 是否存储为 SQL NULL
+            - False（默认）: 存储为 JSON null
+            - True: 存储为 SQL NULL
 
     注意事项:
         1. Oracle 版本兼容性:
            - 21c+ 使用默认的原生 JSON 模式即可
            - 12c-20c 必须设置 oracle_native_json=False 使用 CLOB 模式
         2. 序列化行为:
-           - PostgreSQL/Oracle原生: 驱动自动处理
-           - MySQL/SQLite/Oracle CLOB/其他数据库: 使用 orjson 序列化
+           - PostgreSQL/MySQL/SQLite/Oracle 原生 JSON: SQLAlchemy 和驱动处理
+           - Oracle CLOB/其他数据库: 使用 orjson 序列化
         3. 空值处理:
-           - None 值正常存储和读取
+           - 默认将 Python None 存为 JSON null
+           - 需要 SQL NULL 语义时显式使用 JSONType(none_as_null=True)
            - 空字符串 "" 读取时返回 None
         4. 容错机制:
+           - MySQL/SQLite 会兼容读取历史双重序列化数据
            - 读取非 JSON 格式数据时不会抛异常，返回原始值
            - Oracle LOB 对象会自动调用 read() 获取内容
     """
@@ -67,9 +74,20 @@ class JSONType(TypeDecorator):
     impl = Text
     cache_ok = True
 
-    def __init__(self, oracle_native_json: bool = True) -> None:
+    def __init__(
+        self,
+        oracle_native_json: bool = True,
+        *,
+        none_as_null: bool = False,
+    ) -> None:
         super().__init__()
         self.oracle_native_json = oracle_native_json
+        self.none_as_null = none_as_null
+
+    @property
+    def should_evaluate_none(self) -> bool:
+        """保持 ORM 对 None 的省略行为与 SQLAlchemy JSON 类型一致。"""
+        return not self.none_as_null
 
     @property
     def python_type(self):
@@ -81,40 +99,45 @@ class JSONType(TypeDecorator):
 
     def load_dialect_impl(self, dialect: Dialect):
         if dialect.name == "postgresql":
-            return dialect.type_descriptor(postgresql.JSONB())
+            return dialect.type_descriptor(
+                postgresql.JSONB(none_as_null=self.none_as_null)
+            )
         elif dialect.name == "mysql":
-            return dialect.type_descriptor(SA_JSON())
+            return dialect.type_descriptor(SA_JSON(none_as_null=self.none_as_null))
         elif dialect.name == "sqlite":
             # SQLite 使用方言特定的 JSON 类型，以便 SA 能够识别
-            return dialect.type_descriptor(sqlite.JSON())
+            return dialect.type_descriptor(sqlite.JSON(none_as_null=self.none_as_null))
         elif dialect.name == "oracle":
             if self.oracle_native_json:
                 # 使用 getattr 避免旧版 SA 报错
                 oracle_json_type = getattr(oracle, "JSON", SA_JSON)
-                return dialect.type_descriptor(oracle_json_type())
+                return dialect.type_descriptor(
+                    oracle_json_type(none_as_null=self.none_as_null)
+                )
             else:
                 return dialect.type_descriptor(oracle.CLOB())
         else:
             return dialect.type_descriptor(Text())
 
     def process_bind_param(self, value: Any, dialect: Dialect) -> Any:
-        if value is None:
+        # 原生 JSON 类型负责序列化和 none_as_null 语义，避免双重序列化。
+        if dialect.name in {"postgresql", "mysql", "sqlite"} or (
+            dialect.name == "oracle" and self.oracle_native_json
+        ):
+            return value
+
+        # CLOB/TEXT 没有 JSON 类型处理器，需要在此统一空值语义。
+        if value is None and self.none_as_null:
             return None
+
+        if value is SA_JSON.NULL:
+            return "null"
 
         # 避免双重序列化：如果已经是字符串，则不再次 dumps
         if isinstance(value, (str, bytes)):
             return value
 
-        # PostgreSQL JSONB 原生支持 dict，无需序列化
-        if dialect.name == "postgresql":
-            return value
-
-        # Oracle 原生 JSON 模式（21c+）
-        if dialect.name == "oracle" and self.oracle_native_json:
-            return value
-
-        # MySQL/SQLite/Oracle CLOB/其他：手动序列化
-        # 注意：aiomysql 驱动不支持直接传递 dict，必须序列化
+        # Oracle CLOB/其他 TEXT：手动序列化。
         return orjson_dumps(value)
 
     def process_result_value(self, value: Any, dialect: Dialect) -> Any:
@@ -144,7 +167,7 @@ class JSONType(TypeDecorator):
         # 6. 反序列化（MySQL/SQLite/Oracle CLOB/其他）
         try:
             return orjson_loads(value)
-        except ValueError:
+        except (TypeError, ValueError):
             # 容错：如果数据库里存了非 JSON 的纯文本，避免整个查询崩溃
             return value
 

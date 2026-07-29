@@ -18,5 +18,5 @@
 
 ## 验证重点
 
-- 运行 `tests/test_anyio_file.py`。
+- 运行 `tests/files/test_anyio_file.py`。
 - 覆盖文本/二进制、分块、逐行、追加、父目录、flush、缺文件、非法 mode/data 和取消路径。

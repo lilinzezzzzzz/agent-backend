@@ -8,18 +8,17 @@ from pkg.llm import OpenAIClient
 # --- 测试配置 ---
 BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 MODEL = "qwen-turbo-latest"
-# 注意：这个 API Key (sk-e425e1e7e6ae44f299eb5388ca04adae) 只是一个示例，
-# 实际运行时请确保它是一个有效且有权限的阿里云/通义千问 API Key。
 API_KEY = os.environ.get("ALIYUN_API_KEY", "")
 
-
-# ------------------
+pytestmark = pytest.mark.integration
 
 
 # 使用 pytest.fixture 来创建 client 实例，供所有测试用例使用
 @pytest.fixture(scope="module")
 def client() -> OpenAIClient:
     """提供一个 OpenAIClient 实例"""
+    if not API_KEY:
+        pytest.skip("未配置 ALIYUN_API_KEY")
     return OpenAIClient(base_url=BASE_URL, model=MODEL, api_key=API_KEY)
 
 

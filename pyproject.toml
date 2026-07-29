@@ -109,7 +109,7 @@ python-downloads = false
 
 [tool.pytest.ini_options]
 markers = [
-    "integration: 集成测试，需要完整的 Celery Worker 和 Redis 环境",
+    "integration: 集成测试，需要外部服务或完整基础设施",
 ]
 
 [tool.fastapi]

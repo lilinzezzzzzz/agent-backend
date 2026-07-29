@@ -18,5 +18,5 @@
 
 ## 验证重点
 
-- 运行 `tests/test_scheduler.py`。
+- 运行 `tests/scheduler/test_scheduler.py`。
 - 覆盖启动前注册、重复 start/shutdown、trigger 参数、replace、misfire/coalesce 和 callable 异常。

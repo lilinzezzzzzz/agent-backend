@@ -19,5 +19,5 @@
 
 ## 验证重点
 
-- 优先运行 `uv run pytest tests/test_config.py -q`。
+- 优先运行 `uv run pytest tests/config/test_config.py -q`。
 - 同步检查所有环境文件的必填 key、secret/non-secret 分离和 `APP_ENV` 唯一来源。

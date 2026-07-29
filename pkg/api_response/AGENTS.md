@@ -20,5 +20,5 @@
 
 ## 验证重点
 
-- 运行 `tests/test_json_response.py`、schema 与 API 错误响应测试。
+- 运行 `tests/api/test_response.py`、schema 与 API 错误响应测试。
 - 覆盖 Pydantic/list 展开、非法成功数据、分页、语言回退和 SSE 格式。

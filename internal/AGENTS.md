@@ -26,6 +26,6 @@ Controller → Service / Agent Service → DAO / Cache / Infra adapter → `pkg`
 
 ## 验证重点
 
-- 配置变化优先运行 `uv run pytest tests/test_config.py -q`。
+- 配置变化优先运行 `uv run pytest tests/config/test_config.py -q`。
 - 生命周期或 app 装配变化至少覆盖 FastAPI startup / shutdown、middleware 顺序和 provider 清理路径。
 - 修改子目录前继续读取最近的 `AGENTS.md`。

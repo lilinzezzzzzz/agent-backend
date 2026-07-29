@@ -19,5 +19,5 @@
 
 ## 验证重点
 
-- 运行 `tests/test_http_cli.py` 和第三方认证 client 测试。
+- 运行 `tests/http_client/test_http_client.py` 和第三方认证 client 测试。
 - 覆盖 2xx/4xx/5xx、timeout、连接错误、取消、流式关闭、下载进度和 client close。

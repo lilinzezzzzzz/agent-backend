@@ -35,5 +35,5 @@
 
 ## 验证重点
 
-- 运行 ORM 和数据库类型相关测试，例如 `tests/orm/`、`tests/test_json_type.py`。
+- 运行 ORM 和数据库类型相关测试，例如 `tests/orm/`、`tests/orm/test_json_type.py`。
 - DAO 基类变更还要运行依赖 `BaseDao` 的业务 DAO 测试。

@@ -278,7 +278,7 @@ def test_unknown_configuration_key_is_rejected(tmp_path: Path) -> None:
 
 
 def test_repository_environment_files_define_every_required_config_key() -> None:
-    repository_root = Path(__file__).parent.parent
+    repository_root = Path(__file__).resolve().parents[2]
     required_keys = _required_config_keys()
     secrets_template = repository_root / ".secrets.example"
 
@@ -292,7 +292,7 @@ def test_repository_environment_files_define_every_required_config_key() -> None
 
 
 def test_secret_template_defines_every_required_secret_key() -> None:
-    repository_root = Path(__file__).parent.parent
+    repository_root = Path(__file__).resolve().parents[2]
     values = dotenv_values(repository_root / ".secrets.example")
 
     assert _required_secret_keys() <= set(values)

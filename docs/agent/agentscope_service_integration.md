@@ -424,8 +424,8 @@ AgentScope 子应用使用官方响应结构，不包 `BaseResponse[T]`。但外
 建议命令：
 
 ```bash
-uv run pytest tests/api/test_agentscope_service_mount.py tests/test_config.py -q
-uv run ruff check internal/infra/agentscope_service.py internal/app.py internal/config.py tests/api/test_agentscope_service_mount.py tests/test_config.py
+uv run pytest tests/api/test_agentscope_service_mount.py tests/config/test_config.py -q
+uv run ruff check internal/infra/agentscope_service.py internal/app.py internal/config.py tests/api/test_agentscope_service_mount.py tests/config/test_config.py
 ```
 
 真实聊天流程额外要求：

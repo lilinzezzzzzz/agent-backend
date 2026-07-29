@@ -18,5 +18,5 @@
 
 ## 验证重点
 
-- 运行 `tests/test_celery_client.py` 和相关 Celery task 测试。
+- 运行 `tests/celery/test_client.py` 和相关 Celery task 测试。
 - 覆盖 queue/header 合并、显式 task_id、无效 trace_id、同步 API offload、startup/shutdown hook 和异常传播。

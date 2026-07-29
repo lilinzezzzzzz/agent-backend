@@ -6,6 +6,7 @@ from typing import cast
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from internal.dao import celery_task as celery_task_dao_module
 from internal.dao.celery_task import (
     _FAIL_EXPIRED_QUEUED_SQL,
     _FAIL_STALE_SUBMITTING_SQL,
@@ -111,7 +112,7 @@ def _provider(session: _Session):
         (CeleryTaskStatus.RUNNING, CeleryTaskStatus.CANCELLING, False),
     ],
 )
-async def test_request_cancellation_transitions_with_one_database_time(
+async def test_request_cancellation_transitions_with_one_utc_time(
     monkeypatch: pytest.MonkeyPatch,
     initial: CeleryTaskStatus,
     expected: CeleryTaskStatus,
@@ -120,12 +121,12 @@ async def test_request_cancellation_transitions_with_one_database_time(
     now = datetime(2026, 7, 7, 9, 0, 0)
     clock_calls = 0
 
-    async def database_now(_session: AsyncSession) -> datetime:
+    def utc_now() -> datetime:
         nonlocal clock_calls
         clock_calls += 1
         return now
 
-    monkeypatch.setattr(CeleryTaskRecord, "get_database_now", database_now)
+    monkeypatch.setattr(celery_task_dao_module, "utc_now_naive", utc_now)
     record = _record(initial)
     session = _Session(record=record)
     dao = CeleryTaskDao(session_provider=_provider(session))  # type: ignore[arg-type]
@@ -154,13 +155,13 @@ async def test_request_cancellation_does_not_retime_idempotent_or_terminal_state
     monkeypatch: pytest.MonkeyPatch,
     status: CeleryTaskStatus,
 ) -> None:
-    async def unexpected_database_now(_session: AsyncSession) -> datetime:
-        raise AssertionError("unchanged cancellation state must not read database time")
+    def unexpected_utc_now() -> datetime:
+        raise AssertionError("unchanged cancellation state must not read current time")
 
     monkeypatch.setattr(
-        CeleryTaskRecord,
-        "get_database_now",
-        unexpected_database_now,
+        celery_task_dao_module,
+        "utc_now_naive",
+        unexpected_utc_now,
     )
     record = _record(status)
     session = _Session(record=record)
@@ -176,13 +177,13 @@ async def test_request_cancellation_does_not_retime_idempotent_or_terminal_state
 async def test_request_cancellation_rejects_running_when_cancel_disallowed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def unexpected_database_now(_session: AsyncSession) -> datetime:
-        raise AssertionError("disallowed cancellation must not read database time")
+    def unexpected_utc_now() -> datetime:
+        raise AssertionError("disallowed cancellation must not read current time")
 
     monkeypatch.setattr(
-        CeleryTaskRecord,
-        "get_database_now",
-        unexpected_database_now,
+        celery_task_dao_module,
+        "utc_now_naive",
+        unexpected_utc_now,
     )
     record = _record(CeleryTaskStatus.RUNNING)
     record.cancel_allowed = False
@@ -196,18 +197,18 @@ async def test_request_cancellation_rejects_running_when_cancel_disallowed(
 
 
 @pytest.mark.asyncio
-async def test_reconciler_reuses_database_now_for_cutoff_and_batch(
+async def test_reconciler_reuses_utc_now_for_cutoff_and_batch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     now = datetime(2026, 7, 7, 9, 0, 0)
     clock_calls = 0
 
-    async def database_now(_session: AsyncSession) -> datetime:
+    def utc_now() -> datetime:
         nonlocal clock_calls
         clock_calls += 1
         return now
 
-    monkeypatch.setattr(CeleryTaskRecord, "get_database_now", database_now)
+    monkeypatch.setattr(celery_task_dao_module, "utc_now_naive", utc_now)
     session = _Session(ids=[1, 2])
     dao = CeleryTaskDao(session_provider=_provider(session))  # type: ignore[arg-type]
 
@@ -226,15 +227,15 @@ async def test_reconciler_reuses_database_now_for_cutoff_and_batch(
 
 
 @pytest.mark.asyncio
-async def test_execution_reconciler_sets_orphan_fence_from_database_time(
+async def test_execution_reconciler_sets_orphan_fence_from_utc_now(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     now = datetime(2026, 7, 7, 9, 0, 0)
 
-    async def database_now(_session: AsyncSession) -> datetime:
+    def utc_now() -> datetime:
         return now
 
-    monkeypatch.setattr(CeleryTaskRecord, "get_database_now", database_now)
+    monkeypatch.setattr(celery_task_dao_module, "utc_now_naive", utc_now)
     session = _Session(ids=[1])
     dao = CeleryTaskDao(session_provider=_provider(session))  # type: ignore[arg-type]
 

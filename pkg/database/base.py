@@ -7,14 +7,10 @@ from sqlalchemy import (
     BigInteger,
     DateTime,
     String,
-    Update,
-    func,
     inspect,
-    select,
-    update,
 )
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import DeclarativeBase, InstrumentedAttribute, Mapped, mapped_column
+from sqlalchemy.orm.attributes import set_committed_value
 
 from pkg import request_context as context
 from pkg.database.audit import AuditActor
@@ -36,14 +32,6 @@ class WriteDefaults:
 
     now: datetime
     audit_actor: AuditActor
-
-
-@dataclass(frozen=True, slots=True)
-class PreparedModelUpdate:
-    """实例更新 SQL，以及提交成功后需要同步回实例的字段值。"""
-
-    statement: Update
-    values: Mapping[str, Any]
 
 
 class ModelMixin(Base):
@@ -71,14 +59,6 @@ class ModelMixin(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=False), default=None
     )
-
-    @staticmethod
-    async def get_database_now(session: AsyncSession) -> datetime:
-        """读取数据库当前时间并规范为 naive UTC datetime。"""
-        value = (await session.execute(select(func.now()))).scalar_one()
-        if not isinstance(value, datetime):
-            raise RuntimeError("database current time is not a datetime")
-        return ModelMixin.normalize_datetime(value)
 
     @classmethod
     def create(
@@ -109,58 +89,47 @@ class ModelMixin(Base):
         self._fill_insert_fields(audit_actor=audit_actor)
         return self.extract_db_values()
 
-    def prepare_update(
+    def prepare_instance_update_values(
         self,
         updates: Mapping[ColumnKey, Any] | None = None,
         *,
         audit_actor: AuditActor | None = None,
         **kwargs: Any,
-    ) -> PreparedModelUpdate:
-        """构造实例 UPDATE；仅在调用方提交成功后同步内存实例。"""
-        if inspect(self).transient:
+    ) -> dict[str, Any]:
+        """校验实例状态和显式字段，并返回规范化的 UPDATE values。"""
+        state = inspect(self)
+        if state.transient:
             raise RuntimeError(
-                f"prepare_update() requires a persisted {self.__class__.__name__} instance"
+                f"prepare_instance_update_values() requires a persisted {self.__class__.__name__} instance"
             )
         if self.id is None:
             raise RuntimeError("Instance update requires a primary key")
 
-        values = self.prepare_update_values(
-            [*(updates or {}).items(), *kwargs.items()],
-            audit_actor=audit_actor,
-        )
-        statement = (
-            update(self.__class__).where(self.__class__.id == self.id).values(values)
-        )
-        return PreparedModelUpdate(statement=statement, values=values)
+        update_items = [*(updates or {}).items(), *kwargs.items()]
+        declared_columns = {
+            self.normalize_column_name(key) for key, _value in update_items
+        }
+        dirty_columns = {
+            attr.key
+            for attr in state.attrs
+            if self.has_column(attr.key) and attr.history.has_changes()
+        }
+        undeclared_columns = dirty_columns.difference(declared_columns)
+        if undeclared_columns:
+            names = ", ".join(sorted(undeclared_columns))
+            raise ValueError(
+                f"Modified {self.__class__.__name__} column(s) must be passed explicitly: {names}"
+            )
 
-    def prepare_soft_delete(
-        self,
-        *,
-        audit_actor: AuditActor | None = None,
-    ) -> PreparedModelUpdate | None:
-        if not self.has_deleted_at_column():
-            return None
-        return self.prepare_update(
-            updates={"deleted_at": utc_now_naive()},
-            audit_actor=audit_actor,
-        )
-
-    def prepare_restore(
-        self,
-        *,
-        audit_actor: AuditActor | None = None,
-    ) -> PreparedModelUpdate | None:
-        if not self.has_deleted_at_column():
-            return None
-        return self.prepare_update(
-            updates={"deleted_at": None},
+        return self.prepare_update_values(
+            update_items,
             audit_actor=audit_actor,
         )
 
     def apply_persisted_values(self, values: Mapping[str, Any]) -> None:
         """事务提交成功后，将实际写入值同步到内存实例。"""
         for column_name, value in values.items():
-            setattr(self, column_name, value)
+            set_committed_value(self, column_name, value)
 
     @classmethod
     def prepare_update_values(

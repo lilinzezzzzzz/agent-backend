@@ -21,6 +21,7 @@ from pkg.database.audit import AuditActor
 from pkg.database.base import ModelMixin
 from pkg.database.session import SessionProvider
 from pkg.database.types import ColumnKey
+from pkg.toolkit.timer import utc_now_naive
 
 
 @dataclass(frozen=True, slots=True)
@@ -309,20 +310,24 @@ class BaseDao[T: ModelMixin]:
         **kwargs: Any,
     ) -> T:
         self._assert_instance_model_match(instance)
-        prepared = instance.prepare_update(
+        values = instance.prepare_instance_update_values(
             updates=updates,
             audit_actor=audit_actor,
             **kwargs,
         )
-        async with self._session_provider() as session:
-            result = await session.execute(prepared.statement)
-            rowcount = getattr(result, "rowcount", None)
-            await session.commit()
-        if rowcount == 0:
-            raise RuntimeError(
-                f"{self.model_cls.__name__}(id={instance.id}) no longer exists"
-            )
-        instance.apply_persisted_values(prepared.values)
+        statement = (
+            update(self.model_cls)
+            .where(self.model_cls.id == instance.id)
+            .values(values)
+            .execution_options(synchronize_session=False)
+        )
+        async with self._session_provider() as session, session.begin():
+            result = await session.execute(statement)
+            if getattr(result, "rowcount", None) == 0:
+                raise RuntimeError(
+                    f"{self.model_cls.__name__}(id={instance.id}) no longer exists"
+                )
+        instance.apply_persisted_values(values)
         return instance
 
     async def soft_delete(
@@ -332,20 +337,15 @@ class BaseDao[T: ModelMixin]:
         audit_actor: AuditActor | None = None,
     ) -> None:
         self._assert_instance_model_match(instance)
-        prepared = instance.prepare_soft_delete(audit_actor=audit_actor)
-        if prepared is None:
+        if not self.model_cls.has_deleted_at_column():
             raise ValueError(
                 f"{self.model_cls.__name__} does not support soft deletion"
             )
-        async with self._session_provider() as session:
-            result = await session.execute(prepared.statement)
-            rowcount = getattr(result, "rowcount", None)
-            await session.commit()
-        if rowcount == 0:
-            raise RuntimeError(
-                f"{self.model_cls.__name__}(id={instance.id}) no longer exists"
-            )
-        instance.apply_persisted_values(prepared.values)
+        await self.update(
+            instance,
+            updates={"deleted_at": utc_now_naive()},
+            audit_actor=audit_actor,
+        )
 
     async def restore(
         self,
@@ -354,18 +354,13 @@ class BaseDao[T: ModelMixin]:
         audit_actor: AuditActor | None = None,
     ) -> None:
         self._assert_instance_model_match(instance)
-        prepared = instance.prepare_restore(audit_actor=audit_actor)
-        if prepared is None:
+        if not self.model_cls.has_deleted_at_column():
             raise ValueError(f"{self.model_cls.__name__} does not support restoration")
-        async with self._session_provider() as session:
-            result = await session.execute(prepared.statement)
-            rowcount = getattr(result, "rowcount", None)
-            await session.commit()
-        if rowcount == 0:
-            raise RuntimeError(
-                f"{self.model_cls.__name__}(id={instance.id}) no longer exists"
-            )
-        instance.apply_persisted_values(prepared.values)
+        await self.update(
+            instance,
+            updates={"deleted_at": None},
+            audit_actor=audit_actor,
+        )
 
     # ==========================================================================
     # 批量写入

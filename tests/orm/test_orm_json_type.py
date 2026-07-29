@@ -191,7 +191,7 @@ async def test_update_strictness(user_dao, db_session):
     # 3. Strict Update 检查（新对象不能调用 update）
     new_user = User.create(username="charlie")
     with pytest.raises(RuntimeError) as exc:
-        new_user.prepare_update(username="fail")
+        new_user.prepare_instance_update_values(username="fail")
     assert "requires a persisted" in str(exc.value)
 
 

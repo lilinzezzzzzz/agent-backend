@@ -6,10 +6,10 @@ from unittest.mock import MagicMock
 
 import pytest
 import pytest_asyncio  # <--- 新增导入
-from sqlalchemy import String
+from sqlalchemy import String, inspect
 from sqlalchemy.exc import MultipleResultsFound
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, SessionTransaction, mapped_column
 
 # ==========================================
 # 1. 混合 Mock 策略 (保持不变，这部分是正确的)
@@ -195,14 +195,49 @@ async def test_update_strictness(user_dao, db_session):
     assert reloaded.updater_id == 999
 
     with pytest.raises(ValueError, match="Unknown or managed User update column"):
-        db_user.prepare_update(usernmae="typo")
+        db_user.prepare_instance_update_values(usernmae="typo")
     assert db_user.username == "bob_updated"
 
     # 2. Strict Update 检查 (新对象不能调 update)
     new_user = User.create(username="charlie")
     with pytest.raises(RuntimeError) as exc:
-        new_user.prepare_update(username="fail")
+        new_user.prepare_instance_update_values(username="fail")
     assert "requires a persisted" in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_instance_update_rejects_undeclared_dirty_columns(user_dao):
+    user = User.create(username="explicit_update", email="original@example.com")
+    await user_dao.insert(user)
+    user.email = "accidental@example.com"
+
+    with pytest.raises(
+        ValueError,
+        match=r"Modified User column\(s\) must be passed explicitly: email",
+    ):
+        await user_dao.update(user, username="updated")
+
+    reloaded = await user_dao.query_by_primary_id(user.id)
+    assert reloaded is not None
+    assert reloaded.username == "explicit_update"
+    assert reloaded.email == "original@example.com"
+
+
+@pytest.mark.asyncio
+async def test_instance_update_marks_persisted_values_as_committed(user_dao):
+    user = User.create(username="first", email="first@example.com")
+    await user_dao.insert(user)
+    user.username = "second"
+
+    await user_dao.update(user, username="second")
+
+    assert not any(attr.history.has_changes() for attr in inspect(user).attrs)
+    await user_dao.update(user, email="second@example.com")
+
+    reloaded = await user_dao.query_by_primary_id(user.id)
+    assert reloaded is not None
+    assert reloaded.username == "second"
+    assert reloaded.email == "second@example.com"
 
 
 @pytest.mark.asyncio
@@ -211,7 +246,7 @@ async def test_instance_and_statement_updates_require_business_values(user_dao):
     await user_dao.insert(user)
 
     with pytest.raises(ValueError, match="UPDATE requires at least one value"):
-        user.prepare_update()
+        user.prepare_instance_update_values()
 
     with pytest.raises(ValueError, match="UPDATE requires at least one value"):
         user_dao.update_stmt(User.id == user.id, values={})
@@ -223,7 +258,7 @@ async def test_instance_update_rejects_duplicate_normalized_columns(user_dao):
     await user_dao.insert(user)
 
     with pytest.raises(ValueError, match="Duplicate User update column.*username"):
-        user.prepare_update({User.username: "first"}, username="second")
+        user.prepare_instance_update_values({User.username: "first"}, username="second")
 
 
 @pytest.mark.asyncio
@@ -239,11 +274,11 @@ async def test_update_normalizes_aware_datetime_to_naive_utc(user_dao):
         tzinfo=timezone(timedelta(hours=8)),
     )
 
-    prepared = user.prepare_update({User.deleted_at: aware_value})
+    values = user.prepare_instance_update_values({User.deleted_at: aware_value})
 
     expected = datetime(2026, 7, 29, 8, 30)
-    assert prepared.values["deleted_at"] == expected
-    assert prepared.values["updated_at"] == expected
+    assert values["deleted_at"] == expected
+    assert values["updated_at"] == expected
 
 
 def test_instance_insert_preserves_zero_id_and_normalizes_datetime():
@@ -691,10 +726,10 @@ async def test_failed_update_does_not_mutate_instance(user_dao, monkeypatch):
     user = User.create(username="before")
     await user_dao.insert(user)
 
-    async def _fail_commit(*args, **kwargs):
+    def _fail_commit(*args, **kwargs):
         raise RuntimeError("database commit failed")
 
-    monkeypatch.setattr(AsyncSession, "commit", _fail_commit)
+    monkeypatch.setattr(SessionTransaction, "commit", _fail_commit)
 
     with pytest.raises(RuntimeError, match="database commit failed"):
         await user_dao.update(user, username="after")

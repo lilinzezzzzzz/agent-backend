@@ -101,14 +101,22 @@ class TestScopedOperationLockModel:
         }
 
     def test_model_disables_soft_delete_semantics(self):
-        lock = ScopedOperationLock(operation_scope="scope", resource_key="key")
-
         assert ScopedOperationLock.has_deleted_at_column() is False
-        assert lock.prepare_soft_delete() is None
-        assert lock.prepare_restore() is None
 
 
 class TestScopedOperationLockDao:
+    @pytest.mark.asyncio
+    async def test_rejects_soft_delete_and_restore(
+        self,
+        lock_dao: ScopedOperationLockDao,
+    ):
+        lock = ScopedOperationLock(operation_scope="scope", resource_key="key")
+
+        with pytest.raises(ValueError, match="does not support soft deletion"):
+            await lock_dao.soft_delete(lock)
+        with pytest.raises(ValueError, match="does not support restoration"):
+            await lock_dao.restore(lock)
+
     @pytest.mark.asyncio
     async def test_wait_mode_ensures_row_then_locks_for_update(
         self,

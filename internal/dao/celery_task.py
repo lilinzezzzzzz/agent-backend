@@ -9,6 +9,7 @@ from internal.models.celery_task import CeleryTaskRecord
 from internal.schemas.celery_task import CeleryTaskErrorCode, CeleryTaskStatus
 from pkg.database.audit import AuditActor
 from pkg.database.session import SessionProvider
+from pkg.toolkit.timer import utc_now_naive
 
 
 _TASK_AUDIT_ACTOR = AuditActor.task()
@@ -130,7 +131,7 @@ class CeleryTaskDao:
     ) -> tuple[CeleryTaskRecord, bool]:
         """在调用方事务内幂等登记 SUBMITTING 任务。"""
         self._require_postgresql(session)
-        now = await CeleryTaskRecord.get_database_now(session)
+        now = utc_now_naive()
         insert_record = (
             pg_insert(CeleryTaskRecord)
             .values(
@@ -187,7 +188,7 @@ class CeleryTaskDao:
         """Broker 接受消息后将 SUBMITTING CAS 为 QUEUED。"""
         async with self._session_provider() as session, session.begin():
             self._require_postgresql(session)
-            now = await CeleryTaskRecord.get_database_now(session)
+            now = utc_now_naive()
             stmt = (
                 update(CeleryTaskRecord)
                 .where(
@@ -217,7 +218,7 @@ class CeleryTaskDao:
         """将仍为 SUBMITTING 的任务 CAS 为发布失败。"""
         async with self._session_provider() as session, session.begin():
             self._require_postgresql(session)
-            now = await CeleryTaskRecord.get_database_now(session)
+            now = utc_now_naive()
             stmt = (
                 update(CeleryTaskRecord)
                 .where(
@@ -257,7 +258,7 @@ class CeleryTaskDao:
         """允许 SUBMITTING 或 QUEUED delivery 获取唯一执行权。"""
         async with self._session_provider() as session, session.begin():
             self._require_postgresql(session)
-            now = await CeleryTaskRecord.get_database_now(session)
+            now = utc_now_naive()
             stmt = (
                 update(CeleryTaskRecord)
                 .where(
@@ -301,7 +302,7 @@ class CeleryTaskDao:
             raise ValueError(f"unsupported automatic terminal status: {status}")
         async with self._session_provider() as session, session.begin():
             self._require_postgresql(session)
-            now = await CeleryTaskRecord.get_database_now(session)
+            now = utc_now_naive()
             stmt = (
                 update(CeleryTaskRecord)
                 .where(
@@ -327,7 +328,7 @@ class CeleryTaskDao:
         """Worker 在协作检查点确认取消并写入 CANCELLED。"""
         async with self._session_provider() as session, session.begin():
             self._require_postgresql(session)
-            now = await CeleryTaskRecord.get_database_now(session)
+            now = utc_now_naive()
             stmt = (
                 update(CeleryTaskRecord)
                 .where(
@@ -376,7 +377,7 @@ class CeleryTaskDao:
             if status is CeleryTaskStatus.RUNNING and not record.cancel_allowed:
                 return record
 
-            now = await CeleryTaskRecord.get_database_now(session)
+            now = utc_now_naive()
             if status in {CeleryTaskStatus.SUBMITTING, CeleryTaskStatus.QUEUED}:
                 record.status = CeleryTaskStatus.CANCELLED.value
                 record.finished_at = now
@@ -393,7 +394,7 @@ class CeleryTaskDao:
         """Worker 进入不可取消阶段前关闭取消门禁。"""
         async with self._session_provider() as session, session.begin():
             self._require_postgresql(session)
-            now = await CeleryTaskRecord.get_database_now(session)
+            now = utc_now_naive()
             stmt = (
                 update(CeleryTaskRecord)
                 .where(
@@ -417,7 +418,7 @@ class CeleryTaskDao:
         """批量将发布确认超时的 SUBMITTING 任务收敛为 FAILED。"""
         async with self._session_provider() as session, session.begin():
             self._require_postgresql(session)
-            now = await CeleryTaskRecord.get_database_now(session)
+            now = utc_now_naive()
             result = await session.execute(
                 _FAIL_STALE_SUBMITTING_SQL,
                 {
@@ -432,7 +433,7 @@ class CeleryTaskDao:
         """批量将超过启动 deadline 的 QUEUED 任务收敛为 FAILED。"""
         async with self._session_provider() as session, session.begin():
             self._require_postgresql(session)
-            now = await CeleryTaskRecord.get_database_now(session)
+            now = utc_now_naive()
             result = await session.execute(
                 _FAIL_EXPIRED_QUEUED_SQL,
                 {"batch_size": batch_size, "now": now},
@@ -445,7 +446,7 @@ class CeleryTaskDao:
         """批量将超过 hard deadline 的运行中任务隔离为 ORPHANED。"""
         async with self._session_provider() as session, session.begin():
             self._require_postgresql(session)
-            now = await CeleryTaskRecord.get_database_now(session)
+            now = utc_now_naive()
             result = await session.execute(
                 _RECONCILE_EXPIRED_EXECUTION_SQL,
                 {
@@ -470,7 +471,7 @@ class CeleryTaskDao:
             raise ValueError(f"unsupported orphan resolution status: {status}")
         async with self._session_provider() as session, session.begin():
             self._require_postgresql(session)
-            now = await CeleryTaskRecord.get_database_now(session)
+            now = utc_now_naive()
             values = {
                 "status": status.value,
                 "finished_at": now,

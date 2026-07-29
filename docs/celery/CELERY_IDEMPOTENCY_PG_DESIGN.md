@@ -5,8 +5,8 @@
 
 ## 设计边界
 
-- 状态机时间统一来自当前主库事务 session 的 `ModelMixin.get_database_now()`。
-- 数据库存储 UTC naive `TIMESTAMP WITHOUT TIME ZONE`；数据库和 session 必须配置为 UTC。
+- 状态机时间统一来自应用进程的 `utc_now_naive()`。
+- 数据库存储 UTC naive `TIMESTAMP WITHOUT TIME ZONE`；应用进程、数据库和 session 必须配置为 UTC，并保持系统时钟同步。
 - 幂等键在 `(scope, task_name, idempotency_key_hash)` 范围内永久有效。
 - 相同幂等键和相同 `payload_hash` 返回已有任务；payload 不同返回 `IdempotencyConflict`。
 - 不自动重投失败任务，不使用进程内锁，不依赖 Celery result backend。
@@ -67,11 +67,11 @@ ORPHANED
 
 ## 时间与 deadline
 
-跨进程状态转换在每个事务内只读取一次数据库时间，并复用该值设置时间字段和 CAS 条件：
+跨进程状态转换在每个事务内只调用一次 `utc_now_naive()`，并复用该值设置时间字段和 CAS 条件：
 
-- `queued_deadline_at = database_now + CELERY_QUEUE_START_TIMEOUT_SECONDS`
-- `hard_deadline_at = database_now + Celery task time limit + CELERY_EXECUTION_DEADLINE_GRACE_SECONDS`
-- `fence_expires_at = database_now + CELERY_ORPHAN_FENCE_SECONDS`，只在进入 `ORPHANED` 时设置。
+- `queued_deadline_at = now + CELERY_QUEUE_START_TIMEOUT_SECONDS`
+- `hard_deadline_at = now + Celery task time limit + CELERY_EXECUTION_DEADLINE_GRACE_SECONDS`
+- `fence_expires_at = now + CELERY_ORPHAN_FENCE_SECONDS`，只在进入 `ORPHANED` 时设置。
 - `started_at` 只在首次成功 claim 时设置。
 - `finished_at` 在进入 `SUCCEEDED`、`FAILED` 或 `CANCELLED` 时设置；进入 `ORPHANED` 不设置。
 
@@ -139,7 +139,7 @@ Reconciler 只收敛数据库状态，不重新发布消息，也不能保证 de
 因此 hard deadline Reconciler 只能把任务隔离为 `ORPHANED`；最终终态需要业务核对外部副作用后显式写入。
 
 `NEEDS_RECONCILIATION` 不属于持久化状态。是否需要收敛由当前状态和 deadline 条件派生，例如
-`status = 'QUEUED' AND queued_deadline_at <= database_now`。这样 `status` 只表达任务生命周期，后台治理动作不会引入
+`status = 'QUEUED' AND queued_deadline_at <= now`。这样 `status` 只表达任务生命周期，后台治理动作不会引入
 额外中间状态。
 
 ## 配置

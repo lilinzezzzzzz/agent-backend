@@ -11,9 +11,10 @@
 - 保持 SQLAlchemy 2.x typed API 风格。
 - DAO statement factory 和 session provider 是共享基础设施，变更前全仓检索调用方。
 - `BaseDao.select_stmt()`、`count_stmt()` 和 `update_stmt()` 只组合 SQL，不持有 session，也不执行 statement。
-- 普通实体查询通过 `fetch_first()` / `fetch_one()` / `fetch_all()` 执行；需要自定义结果形态时直接通过
-  `read_session_provider()` 获取 session 并执行 statement。`update_stmt()` 生成的单语句批量更新通过
-  `execute_update()` 执行；需要跨语句原子性时才通过 `DAO.transaction()` 获取同一个 `AsyncSession`。
+- 普通实体查询通过 `fetch_first()` / `fetch_one()` / `fetch_all()` 执行；页码分页通过 `fetch_page()` 执行，并由
+  调用方提供稳定唯一排序。需要自定义结果形态时直接通过 `read_session_provider()` 获取 session 并执行
+  statement。`update_stmt()` 生成的单语句批量更新通过 `execute_update()` 执行；需要跨语句原子性时才通过
+  `DAO.transaction()` 获取同一个 `AsyncSession`。
 - 查询条件直接使用 ORM column expression；`update_stmt()` 必须拒绝未知或受管理字段，并要求至少一个显式
   业务条件，不能仅依赖软删除策略限定更新范围。
 - 创建和更新审计统一传 `AuditActor`；无请求用户上下文时默认为 system，异步任务应显式使用 task
@@ -29,6 +30,8 @@
 通用数据库硬约束（禁循环内 ORM 调用、批量优先、不吞异常）见全局 `~/.qoder/AGENTS.md` Database / Performance 章节。本包特有约束：
 
 - 批量操作应提供明确的批量接口，不鼓励调用方逐条执行。
+- `fetch_page()` 只校验 `page >= 1` 和 `limit >= 1`；面向用户的最大页大小由 Controller request schema 限制。
+- 复杂 join、去重或聚合分页应向 `fetch_page()` 显式传入与列表语义一致且经过优化的 `count_statement`。
 
 ## 验证重点
 

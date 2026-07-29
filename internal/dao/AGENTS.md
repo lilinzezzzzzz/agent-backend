@@ -63,8 +63,9 @@ def new_user_dao() -> UserDao:
 - 单条查询返回 `Model | None`，批量查询返回 `list[Model]`。
 - 批量接口接收集合参数，一次查询完成，不让调用方循环查库。
 - DAO statement factory 只构造 statement；普通实体查询优先通过 `fetch_first()` / `fetch_one()` /
-  `fetch_all()` 执行，调用方持有 session 时通过同名方法的 `session` 参数显式传入；`update_stmt()` 生成的
-  单语句批量更新通过 `execute_update()` 执行，跨语句原子写入才使用显式事务 session。
+  `fetch_all()` 执行，页码分页通过 `fetch_page()` 执行并提供稳定唯一排序。调用方持有 session 时通过同名方法的
+  `session` 参数显式传入；`update_stmt()` 生成的单语句批量更新通过 `execute_update()` 执行，跨语句原子写入才
+  使用显式事务 session。
 - factory 按现有 `_xxx_dao` 懒加载单例模式实现，并绑定已有 session provider。
 - 不在 DAO 内创建 engine/session。
 

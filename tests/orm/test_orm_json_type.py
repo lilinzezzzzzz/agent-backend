@@ -231,13 +231,14 @@ async def test_select_statement_composes_with_sqlalchemy(user_dao, db_session):
 
     assert await user_dao.query_by_ids([]) == []
 
-    async with user_dao.read_session_provider() as session:
-        result = await session.execute(
-            user_dao.select_stmt().order_by(User.id.asc()).offset(0).limit(2)
-        )
-        page_res = list(result.scalars().all())
-    assert len(page_res) == 2
-    assert page_res[0].username == "u1"
+    page_result = await user_dao.fetch_page(
+        user_dao.select_stmt().order_by(User.id.asc()),
+        page=1,
+        limit=2,
+    )
+    assert len(page_result.items) == 2
+    assert page_result.items[0].username == "u1"
+    assert page_result.total == 5
 
 
 @pytest.mark.asyncio

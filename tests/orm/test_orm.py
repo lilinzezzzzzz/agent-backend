@@ -389,6 +389,13 @@ async def test_fetch_helpers_prefer_explicit_session(user_dao, db_session):
             session=session,
         )
         assert session.in_transaction()
+        page_result = await user_dao.fetch_page(
+            user_dao.select_stmt().order_by(User.id.asc()),
+            page=1,
+            limit=10,
+            session=session,
+        )
+        assert session.in_transaction()
         assert (await session.execute(user_dao.count_stmt())).scalar_one() == 1
 
     assert fetched is not None
@@ -396,6 +403,8 @@ async def test_fetch_helpers_prefer_explicit_session(user_dao, db_session):
     assert first is not None
     assert first.id == fetched.id
     assert len(all_users) == 1
+    assert page_result.items == [fetched]
+    assert page_result.total == 1
 
 
 @pytest.mark.asyncio
@@ -443,14 +452,48 @@ async def test_select_statement_composes_with_sqlalchemy(user_dao, db_session):
 
     assert await user_dao.query_by_ids([]) == []
 
-    # Test Pagination
-    async with user_dao.read_session_provider() as session:
-        result = await session.execute(
-            user_dao.select_stmt().order_by(User.id.asc()).offset(0).limit(2)
+    page_result = await user_dao.fetch_page(
+        user_dao.select_stmt().order_by(User.id.asc()),
+        page=2,
+        limit=2,
+    )
+    assert [user.username for user in page_result.items] == ["u3", "u4"]
+    assert page_result.page == 2
+    assert page_result.limit == 2
+    assert page_result.total == 5
+
+    filtered_page = await user_dao.fetch_page(
+        user_dao.select_stmt()
+        .where(User.username.in_(["u1", "u2"]))
+        .order_by(User.id.asc()),
+        page=1,
+        limit=2,
+        count_statement=user_dao.count_stmt().where(User.username.in_(["u1", "u2"])),
+    )
+    assert [user.username for user in filtered_page.items] == ["u1", "u2"]
+    assert filtered_page.total == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("page", "limit", "message"),
+    [
+        (0, 10, "page must be greater than or equal to 1"),
+        (1, 0, "limit must be greater than or equal to 1"),
+    ],
+)
+async def test_fetch_page_rejects_invalid_boundaries(
+    user_dao,
+    page,
+    limit,
+    message,
+):
+    with pytest.raises(ValueError, match=message):
+        await user_dao.fetch_page(
+            user_dao.select_stmt().order_by(User.id.asc()),
+            page=page,
+            limit=limit,
         )
-        page_res = list(result.scalars().all())
-    assert len(page_res) == 2
-    assert page_res[0].username == "u1"
 
 
 @pytest.mark.asyncio

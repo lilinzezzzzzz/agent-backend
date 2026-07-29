@@ -1,5 +1,6 @@
 from collections.abc import AsyncGenerator, Mapping
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, nullcontext
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, cast
 
@@ -19,6 +20,16 @@ from sqlalchemy.orm import InstrumentedAttribute, make_transient_to_detached
 
 from pkg.database.base import AuditActor, ModelMixin, SessionProvider
 from pkg.database.types import ColumnKey
+
+
+@dataclass(frozen=True, slots=True)
+class PageResult[T]:
+    """数据库分页查询结果。"""
+
+    items: list[T]
+    page: int
+    limit: int
+    total: int
 
 
 class BaseDao[T: ModelMixin]:
@@ -233,6 +244,44 @@ class BaseDao[T: ModelMixin]:
         async with self._read_session_provider() as owned_session:
             result = await owned_session.execute(statement)
             return cast(list[T], result.scalars().all())
+
+    async def fetch_page(
+        self,
+        statement: Select[Any],
+        *,
+        page: int,
+        limit: int,
+        count_statement: Select[Any] | None = None,
+        session: AsyncSession | None = None,
+    ) -> PageResult[T]:
+        """分页查询 ORM 实例；需要确定性时由调用方提供唯一排序。"""
+        if page < 1:
+            raise ValueError("page must be greater than or equal to 1")
+        if limit < 1:
+            raise ValueError("limit must be greater than or equal to 1")
+
+        unpaged_statement = statement.order_by(None).limit(None).offset(None)
+        counter = (
+            count_statement
+            if count_statement is not None
+            else select(func.count()).select_from(unpaged_statement.subquery())
+        )
+        paged_statement = statement.offset((page - 1) * limit).limit(limit)
+
+        session_context = (
+            nullcontext(session)
+            if session is not None
+            else self._read_session_provider()
+        )
+        async with session_context as active_session:
+            total = (await active_session.execute(counter)).scalar_one()
+            result = await active_session.execute(paged_statement)
+            return PageResult(
+                items=cast(list[T], result.scalars().all()),
+                page=page,
+                limit=limit,
+                total=cast(int, total),
+            )
 
     async def query_by_primary_id(
         self,

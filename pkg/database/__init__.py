@@ -7,7 +7,7 @@ from pkg.database.base import (
     new_async_engine,
     new_async_session_maker,
 )
-from pkg.database.dao import BaseDao
+from pkg.database.dao import BaseDao, PageResult
 from pkg.database.types import JSONType
 
 __all__ = [
@@ -21,6 +21,7 @@ __all__ = [
     "new_async_session_maker",
     # dao
     "BaseDao",
+    "PageResult",
     # types
     "JSONType",
 ]

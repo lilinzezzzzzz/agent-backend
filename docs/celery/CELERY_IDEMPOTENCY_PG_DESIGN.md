@@ -14,9 +14,8 @@
   表示旧 Worker 是否仍在产生外部副作用未知；最终 `FAILED` / `CANCELLED` 必须等 fence 到期且业务核对完成后再写入。
 - `cancel_allowed` 是运行中任务的取消门禁；进入不可取消阶段后由持有 `execution_token` 的 Worker CAS 为 `false`。
 
-这是 breaking schema。新表 DDL 位于：
-`ddl/postgresql/1.2.0_celery_task_state_machine.sql`。已有环境必须人工确认并删除旧表后执行；脚本本身不会删除旧表、
-迁移旧数据或执行回填。
+`celery_task_record` 的建表定义位于脚手架 PostgreSQL 初始化脚本 `ddl/postgresql/init.sql`，并与
+`internal.models.celery_task.CeleryTaskRecord` 保持一致。
 
 ## 状态机
 

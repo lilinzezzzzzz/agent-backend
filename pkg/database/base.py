@@ -138,7 +138,11 @@ class ModelMixin(Base):
     __abstract__ = True
 
     # --- 字段定义 ---
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        autoincrement=False,
+    )
     creator_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     creator_type: Mapped[str] = mapped_column(String(32), nullable=False)
     updater_id: Mapped[int | None] = mapped_column(

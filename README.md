@@ -147,9 +147,8 @@ Worker：
 uv run celery -A internal.infra.celery:celery_app worker -l info -Q default,celery_queue,cron_queue,celery_maintenance_queue
 ```
 
-使用 PostgreSQL 幂等任务前，先在全新环境执行
-`ddl/postgresql/1.2.0_celery_task_state_machine.sql`。该脚本不迁移旧表；已有环境必须人工确认并删除旧的
-`celery_task_record` 后再执行。API 先登记 `SUBMITTING` 记录，再调用 `CeleryClient.submit()`；Worker 可从
+初始化 PostgreSQL 时执行 `ddl/postgresql/init.sql`，该脚本根据 `internal/models` 创建脚手架所需的全部表、
+约束和索引。API 先登记 `SUBMITTING` 记录，再调用 `CeleryClient.submit()`；Worker 可从
 `SUBMITTING` 或 `QUEUED` claim，从而避免快速消费竞态。Beat 会分别收敛发布确认超时、排队启动超时和
 执行 deadline 超时；运行中任务超过 hard deadline 后先进入 `ORPHANED`，等待 fence 过期和业务核对后再进入
 `FAILED/CANCELLED`，不会自动重新提交任务。运行中任务可通过 `cancel_allowed=false` 进入不可取消阶段。取消接口先持久化

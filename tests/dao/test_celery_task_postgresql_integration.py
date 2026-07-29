@@ -20,9 +20,7 @@ def _integration_database_url() -> str:
 
 
 async def _create_test_schema(database_url: str, schema: str) -> None:
-    ddl = Path("ddl/postgresql/1.2.0_celery_task_state_machine.sql").read_text(
-        encoding="utf-8"
-    )
+    ddl = Path("ddl/postgresql/init.sql").read_text(encoding="utf-8")
     engine = create_async_engine(database_url)
     try:
         async with engine.begin() as connection:
@@ -70,11 +68,11 @@ async def test_postgresql_ddl_and_concurrent_claim() -> None:
                     INSERT INTO celery_task_record (
                         id, task_name, trace_id, scope, queue,
                         idempotency_key_hash, payload_hash, status,
-                        attempt_count, created_at, updated_at
+                        attempt_count, creator_type, created_at, updated_at
                     ) VALUES (
                         123, 'task.name', 'trace-1', 'user:1', 'celery_queue',
                         :idempotency_key_hash, :payload_hash, 'QUEUED',
-                        0, :now, :now
+                        0, 'system', :now, :now
                     )
                     """
                 ),

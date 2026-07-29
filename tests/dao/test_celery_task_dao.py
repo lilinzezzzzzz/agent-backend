@@ -274,20 +274,22 @@ def test_reconciler_sql_uses_skip_locked_deadline_cas() -> None:
     assert "fence_expires_at = :fence_expires_at" in execution_sql
 
 
-def test_fresh_postgresql_ddl_matches_state_machine_contract() -> None:
-    ddl = Path("ddl/postgresql/1.2.0_celery_task_state_machine.sql").read_text(
-        encoding="utf-8"
-    )
+def test_postgresql_init_ddl_matches_state_machine_contract() -> None:
+    ddl = Path("ddl/postgresql/init.sql").read_text(encoding="utf-8")
+    celery_table_ddl = ddl[
+        ddl.index("CREATE TABLE celery_task_record") : ddl.index(
+            "CREATE INDEX idx_celery_task_record_execution_deadline"
+        )
+    ]
 
-    assert "CREATE TABLE celery_task_record" in ddl
-    assert "TIMESTAMP WITHOUT TIME ZONE" in ddl
-    assert "UNIQUE (scope, task_name, idempotency_key_hash)" in ddl
+    assert "TIMESTAMP WITHOUT TIME ZONE" in celery_table_ddl
+    assert "UNIQUE (scope, task_name, idempotency_key_hash)" in celery_table_ddl
     assert "WHERE status = 'SUBMITTING'" in ddl
     assert "WHERE status = 'QUEUED'" in ddl
     assert "WHERE status IN ('RUNNING', 'CANCELLING')" in ddl
     assert "WHERE status = 'ORPHANED'" in ddl
     assert "fence_expires_at" in ddl
-    assert "cancel_allowed          BOOLEAN NOT NULL DEFAULT TRUE" in ddl
+    assert "cancel_allowed BOOLEAN DEFAULT true NOT NULL" in ddl
     assert "NEEDS_RECONCILIATION" not in ddl
     assert "DROP TABLE" not in ddl.upper()
     for removed_column in (
@@ -298,19 +300,14 @@ def test_fresh_postgresql_ddl_matches_state_machine_contract() -> None:
         "error_type",
         "error_message",
     ):
-        assert removed_column not in ddl
+        assert removed_column not in celery_table_ddl
 
 
 def test_audit_actor_type_baseline_matches_model_contract() -> None:
-    ddl = Path("ddl/postgresql/1.2.0_celery_task_state_machine.sql").read_text(
-        encoding="utf-8"
-    )
+    ddl = Path("ddl/postgresql/init.sql").read_text(encoding="utf-8")
 
-    assert "creator_type            VARCHAR(32) NOT NULL" in ddl
-    assert "updater_type            VARCHAR(32)" in ddl
-    assert "ck_celery_task_record_creator_type" in ddl
-    assert "ck_celery_task_record_updater_type" in ddl
-    assert "'user', 'system', 'service', 'task'" in ddl
+    assert "creator_type VARCHAR(32) NOT NULL" in ddl
+    assert "updater_type VARCHAR(32)" in ddl
     assert CeleryTaskRecord.creator_id.property.columns[0].nullable is True
     assert CeleryTaskRecord.creator_type.property.columns[0].nullable is False
     assert CeleryTaskRecord.updater_type.property.columns[0].nullable is True

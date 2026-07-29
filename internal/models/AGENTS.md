@@ -39,13 +39,13 @@ class User(ModelMixin):
 - 字段类型、长度、nullable、default、unique、index 与 DDL/迁移一致。
 - 不导入 Controller、Service、DAO、Redis、HTTP client 或配置单例。
 - 不在 model property 中触发数据库查询或外部 I/O。
-- 新字段要能回答默认值、历史数据、读写兼容和回滚策略。
+- 新字段要明确 nullable、默认值和全新建库时的初始化语义。
 
-## 兼容性要求
+## Schema 同步要求
 
-- 修改字段、索引、约束或表名时，同步评估 `ddl/`、迁移、已有数据、DAO 查询、测试 fixture。
-- 删除或重命名字段前确认 API、缓存、任务、历史数据和外部报表是否依赖。
-- 新增非空字段时说明默认值、回填策略、部署顺序和回滚方案。
+- 当前项目是未部署脚手架，不保留旧 schema 兼容或历史数据迁移；修改字段、索引、约束或表名时直接同步
+  `ddl/<dialect>/init.sql`、DAO 字段引用和测试 fixture。
+- 只有任务明确面向已存在环境时，才评估历史数据、外部依赖、回填、部署顺序和回滚方案。
 
 ## 验证重点
 

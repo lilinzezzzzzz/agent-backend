@@ -15,7 +15,7 @@ class AgentSession(ModelMixin):
 
     __tablename__ = "agent_session"
 
-    session_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, comment="对外会话 ID")
+    session_id: Mapped[str] = mapped_column(String(64), nullable=False, comment="对外会话 ID")
     user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, comment="用户 ID")
     entrypoint: Mapped[str] = mapped_column(String(32), nullable=False, comment="创建会话的入口")
     status: Mapped[str] = mapped_column(String(32), nullable=False, comment="会话状态")
@@ -41,7 +41,7 @@ class AgentMessage(ModelMixin):
 
     __tablename__ = "agent_message"
 
-    message_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, comment="对外消息 ID")
+    message_id: Mapped[str] = mapped_column(String(64), nullable=False, comment="对外消息 ID")
     session_id: Mapped[str] = mapped_column(String(64), nullable=False, comment="对外会话 ID")
     run_id: Mapped[str | None] = mapped_column(String(64), nullable=True, comment="关联运行 ID")
     user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, comment="用户 ID")
@@ -66,7 +66,7 @@ class AgentRun(ModelMixin):
 
     __tablename__ = "agent_run"
 
-    run_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, comment="对外运行 ID")
+    run_id: Mapped[str] = mapped_column(String(64), nullable=False, comment="对外运行 ID")
     session_id: Mapped[str] = mapped_column(String(64), nullable=False, comment="对外会话 ID")
     user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, comment="用户 ID")
     entrypoint: Mapped[str] = mapped_column(String(32), nullable=False, comment="请求入口")

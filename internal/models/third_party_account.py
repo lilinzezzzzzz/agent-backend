@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, Index, String, UniqueConstraint
+from sqlalchemy import BigInteger, DateTime, Index, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from pkg.database.base import ModelMixin
@@ -44,6 +44,7 @@ class ThirdPartyAccount(ModelMixin):
 
     # 逻辑外键（不使用数据库外键约束）
     user_id: Mapped[int] = mapped_column(
+        BigInteger,
         comment="用户 ID",
         index=True
     )

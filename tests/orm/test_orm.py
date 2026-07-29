@@ -1,7 +1,7 @@
 import os
 import sys
 import types
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
 import pytest
@@ -203,6 +203,80 @@ async def test_update_strictness(user_dao, db_session):
     with pytest.raises(RuntimeError) as exc:
         new_user.prepare_update(username="fail")
     assert "requires a persisted" in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_instance_and_statement_updates_require_business_values(user_dao):
+    user = User.create(username="no_empty_update")
+    await user_dao.insert(user)
+
+    with pytest.raises(ValueError, match="UPDATE requires at least one value"):
+        user.prepare_update()
+
+    with pytest.raises(ValueError, match="UPDATE requires at least one value"):
+        user_dao.update_stmt(User.id == user.id, values={})
+
+
+@pytest.mark.asyncio
+async def test_instance_update_rejects_duplicate_normalized_columns(user_dao):
+    user = User.create(username="duplicate_update")
+    await user_dao.insert(user)
+
+    with pytest.raises(ValueError, match="Duplicate User update column.*username"):
+        user.prepare_update({User.username: "first"}, username="second")
+
+
+@pytest.mark.asyncio
+async def test_update_normalizes_aware_datetime_to_naive_utc(user_dao):
+    user = User.create(username="aware_datetime")
+    await user_dao.insert(user)
+    aware_value = datetime(
+        2026,
+        7,
+        29,
+        16,
+        30,
+        tzinfo=timezone(timedelta(hours=8)),
+    )
+
+    prepared = user.prepare_update({User.deleted_at: aware_value})
+
+    expected = datetime(2026, 7, 29, 8, 30)
+    assert prepared.values["deleted_at"] == expected
+    assert prepared.values["updated_at"] == expected
+
+
+def test_instance_insert_preserves_zero_id_and_normalizes_datetime():
+    aware_created_at = datetime(
+        2026,
+        7,
+        29,
+        16,
+        30,
+        tzinfo=timezone(timedelta(hours=8)),
+    )
+    user = User.create(id=0, username="zero_id", created_at=aware_created_at)
+
+    assert user.id == 0
+    assert user.created_at == datetime(2026, 7, 29, 8, 30)
+
+
+def test_dict_insert_fills_none_defaults_and_preserves_zero_id():
+    defaults = User.get_write_defaults()
+
+    generated_id_values = User.fill_dict_insert_fields(
+        {"id": None, "username": "generated_id"},
+        defaults,
+    )
+    zero_id_values = User.fill_dict_insert_fields(
+        {"id": 0, "username": "zero_id"},
+        defaults,
+    )
+
+    assert generated_id_values["id"] is not None
+    assert generated_id_values["created_at"] == defaults.now
+    assert generated_id_values["updated_at"] == defaults.now
+    assert zero_id_values["id"] == 0
 
 
 @pytest.mark.asyncio

@@ -5,7 +5,7 @@ from internal.dao.third_party_account import (
 from internal.dao.user import UserDao, new_user_dao
 from internal.models.user import User
 from internal.utils.password import PasswordHandler
-from pkg.database.base import AuditActor
+from pkg.database.audit import AuditActor
 from pkg.third_party_auth.base import ThirdPartyUserInfo
 
 

@@ -74,22 +74,17 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 try:
-    from pkg.database.base import Base, JSONType, ModelMixin, new_async_session_maker
-    from pkg.database import base as database_base
-    from pkg.database.dao import BaseDao
+    from pkg.database import (
+        Base,
+        BaseDao,
+        JSONType,
+        ModelMixin,
+        base as database_base,
+        new_async_session_maker,
+    )
 except ImportError as e:
-    try:
-        from pkg.database import (
-            Base,
-            BaseDao,
-            JSONType,
-            ModelMixin,
-            base as database_base,
-            new_async_session_maker,
-        )
-    except ImportError:
-        print(f"CRITICAL: Cannot import from pkg.database. path={sys.path}")
-        raise e
+    print(f"CRITICAL: Cannot import from pkg.database. path={sys.path}")
+    raise e
 finally:
     for _module_name, _module in _previous_modules.items():
         if _module is None:

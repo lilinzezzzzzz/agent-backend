@@ -7,7 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from internal.infra.database import get_session
 from internal.models.celery_task import CeleryTaskRecord
 from internal.schemas.celery_task import CeleryTaskErrorCode, CeleryTaskStatus
-from pkg.database.base import AuditActor, SessionProvider
+from pkg.database.audit import AuditActor
+from pkg.database.session import SessionProvider
 
 
 _TASK_AUDIT_ACTOR = AuditActor.task()

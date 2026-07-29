@@ -12,7 +12,7 @@ from internal.core import AppException
 from internal.dao.scoped_operation_lock import ScopedOperationLockDao
 from internal.models.scoped_operation_lock import ScopedOperationLock
 from internal.services.scoped_operation_lock import LockMode, ScopedOperationLockService
-from pkg.database.base import AuditActor, AuditActorType
+from pkg.database.audit import AuditActor, AuditActorType
 
 
 class FakeDbapiError(Exception):

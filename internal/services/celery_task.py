@@ -15,7 +15,7 @@ from internal.schemas.celery_task import (
     CeleryTaskStatus,
 )
 from pkg.celery_queue import CeleryClient
-from pkg.database.base import SessionProvider
+from pkg.database.session import SessionProvider
 from pkg.ids import snowflake_id_generator
 from pkg.logger import logger
 

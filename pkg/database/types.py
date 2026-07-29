@@ -26,7 +26,8 @@ class JSONType(TypeDecorator):
         - 其他数据库: TEXT + 手动序列化
 
     用法示例:
-        from pkg.database.base import JSONType, ModelMixin, Mapped, mapped_column
+        from pkg.database import JSONType, ModelMixin
+        from sqlalchemy.orm import Mapped, mapped_column
 
         class MyModel(ModelMixin):
             __tablename__ = "my_table"

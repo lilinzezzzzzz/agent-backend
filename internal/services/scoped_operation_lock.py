@@ -11,7 +11,7 @@ from internal.dao.scoped_operation_lock import (
     ScopedOperationLockDao,
     new_scoped_operation_lock_dao,
 )
-from pkg.database.base import AuditActor
+from pkg.database.audit import AuditActor
 
 
 class LockMode(StrEnum):

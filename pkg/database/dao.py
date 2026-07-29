@@ -1,7 +1,6 @@
 from collections.abc import AsyncGenerator, Mapping
 from contextlib import asynccontextmanager, nullcontext
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Any, cast
 
 from sqlalchemy import (
@@ -18,7 +17,9 @@ from sqlalchemy import (
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute, make_transient_to_detached
 
-from pkg.database.base import AuditActor, ModelMixin, SessionProvider
+from pkg.database.audit import AuditActor
+from pkg.database.base import ModelMixin
+from pkg.database.session import SessionProvider
 from pkg.database.types import ColumnKey
 
 
@@ -95,14 +96,7 @@ class BaseDao[T: ModelMixin]:
     ) -> tuple[ColumnElement[bool], ...]:
         if include_deleted or not self.model_cls.has_deleted_at_column():
             return ()
-        deleted_column = self.model_cls.get_column_or_none(
-            self.model_cls.deleted_at_column_name()
-        )
-        if deleted_column is None:
-            raise RuntimeError(
-                f"Unable to resolve {self.model_cls.__name__} deleted column"
-            )
-        return (cast(ColumnElement[bool], deleted_column.is_(None)),)
+        return (cast(ColumnElement[bool], self.model_cls.deleted_at.is_(None)),)
 
     def select_stmt(
         self,
@@ -148,42 +142,10 @@ class BaseDao[T: ModelMixin]:
             raise ValueError(
                 f"{self.model_cls.__name__} update requires explicit conditions"
             )
-        if not values:
-            raise ValueError("UPDATE requires at least one value")
-
-        protected_columns = self.model_cls.audit_column_names() | {
-            "id",
-            "created_at",
-            self.model_cls.updated_at_column_name(),
-        }
-        invalid_columns: list[str] = []
-        normalized_values: dict[str, Any] = {}
-        for key, value in values.items():
-            column_name = self.model_cls.normalize_update_column_name(key)
-            if (
-                not self.model_cls.has_column(column_name)
-                or column_name in protected_columns
-            ):
-                invalid_columns.append(column_name)
-                continue
-            if isinstance(value, datetime) and value.tzinfo is not None:
-                value = value.replace(tzinfo=None)
-            normalized_values[column_name] = value
-
-        if invalid_columns:
-            names = ", ".join(sorted(invalid_columns))
-            raise ValueError(
-                f"Unknown or managed {self.model_cls.__name__} update column(s): {names}"
-            )
-
-        defaults = self.model_cls.get_context_defaults(audit_actor=audit_actor)
-        if self.model_cls.has_updated_at_column():
-            deleted_at = normalized_values.get(self.model_cls.deleted_at_column_name())
-            normalized_values[self.model_cls.updated_at_column_name()] = (
-                deleted_at or defaults.now
-            )
-        if self.model_cls.has_updater_id_column():
-            normalized_values.update(defaults.audit_actor.updater_values())
+        normalized_values = self.model_cls.prepare_update_values(
+            values.items(),
+            audit_actor=audit_actor,
+        )
 
         return (
             update(self.model_cls)
@@ -294,12 +256,7 @@ class BaseDao[T: ModelMixin]:
             self.model_cls.id == primary_id
         )
         if creator_id is not None:
-            creator_column = self.model_cls.get_creator_id_column()
-            if creator_column is None:
-                raise RuntimeError(
-                    f"Unable to resolve {self.model_cls.__name__} creator column"
-                )
-            statement = statement.where(creator_column == creator_id)
+            statement = statement.where(self.model_cls.creator_id == creator_id)
 
         return await self.fetch_one(statement)
 
@@ -439,7 +396,7 @@ class BaseDao[T: ModelMixin]:
     ) -> Insert | None:
         if not rows:
             return None
-        defaults = self.model_cls.get_context_defaults(audit_actor=audit_actor)
+        defaults = self.model_cls.get_write_defaults(audit_actor=audit_actor)
         values = [self.model_cls.fill_dict_insert_fields(row, defaults) for row in rows]
         return insert(self.model_cls).values(values)
 

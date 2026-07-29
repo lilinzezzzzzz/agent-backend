@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from internal.infra.database import get_read_session, get_session
 from internal.models.scoped_operation_lock import ScopedOperationLock
-from pkg.database.base import AuditActor
+from pkg.database.audit import AuditActor
 from pkg.database.dao import BaseDao
 from pkg.ids import snowflake_id_generator
 from pkg.toolkit.timer import utc_now_naive

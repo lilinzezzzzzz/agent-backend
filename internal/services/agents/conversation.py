@@ -25,7 +25,7 @@ from internal.schemas.agent import (
     to_json_object,
     to_json_value,
 )
-from pkg.database.base import AuditActor
+from pkg.database.audit import AuditActor
 from pkg.database.dao import BaseDao
 from pkg.ids import uuid6_unique_str_id
 from pkg.toolkit.timer import utc_now_naive

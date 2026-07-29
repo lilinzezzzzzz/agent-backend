@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from internal.services.user import UserService
-from pkg.database.base import AuditActor
+from pkg.database.audit import AuditActor
 
 
 @pytest.mark.asyncio

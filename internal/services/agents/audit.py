@@ -14,7 +14,7 @@ from internal.models.agent_audit import AgentAudit
 from internal.schemas.agent import JsonValue
 from internal.schemas.agent import AgentRunResultDTO
 from internal.utils.background_tasks import background_task_manager
-from pkg.database.base import AuditActor
+from pkg.database.audit import AuditActor
 from pkg.logger import logger
 from pkg import request_context as context
 from pkg.toolkit.string import mask_string

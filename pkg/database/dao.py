@@ -26,6 +26,10 @@ class BaseDao[T: ModelMixin]:
 
     _model_cls: type[T]
 
+    # ==========================================================================
+    # 初始化与模型约束
+    # ==========================================================================
+
     def __init__(
         self,
         *,
@@ -62,8 +66,16 @@ class BaseDao[T: ModelMixin]:
         for item in items:
             self._assert_instance_model_match(item)
 
+    # ==========================================================================
+    # 实例构造
+    # ==========================================================================
+
     def create(self, *, audit_actor: AuditActor | None = None, **kwargs: Any) -> T:
         return self.model_cls.create(audit_actor=audit_actor, **kwargs)
+
+    # ==========================================================================
+    # Statement 构造
+    # ==========================================================================
 
     def _policy_conditions(
         self,
@@ -172,6 +184,56 @@ class BaseDao[T: ModelMixin]:
             .execution_options(synchronize_session=False)
         )
 
+    # ==========================================================================
+    # 查询执行
+    # ==========================================================================
+
+    async def fetch_first(
+        self,
+        statement: Select[Any],
+        *,
+        session: AsyncSession | None = None,
+    ) -> T | None:
+        """使用 LIMIT 1 查询首个 ORM 实例；需要确定性时由调用方排序。"""
+        statement = statement.limit(1)
+        if session is not None:
+            result = await session.execute(statement)
+            return cast(T | None, result.scalars().first())
+
+        async with self._read_session_provider() as owned_session:
+            result = await owned_session.execute(statement)
+            return cast(T | None, result.scalars().first())
+
+    async def fetch_one(
+        self,
+        statement: Select[Any],
+        *,
+        session: AsyncSession | None = None,
+    ) -> T | None:
+        """查询零个或一个 ORM 实例；传入 session 时不管理其生命周期。"""
+        if session is not None:
+            result = await session.execute(statement)
+            return cast(T | None, result.scalars().one_or_none())
+
+        async with self._read_session_provider() as owned_session:
+            result = await owned_session.execute(statement)
+            return cast(T | None, result.scalars().one_or_none())
+
+    async def fetch_all(
+        self,
+        statement: Select[Any],
+        *,
+        session: AsyncSession | None = None,
+    ) -> list[T]:
+        """查询 ORM 实例列表；传入 session 时不管理其生命周期。"""
+        if session is not None:
+            result = await session.execute(statement)
+            return cast(list[T], result.scalars().all())
+
+        async with self._read_session_provider() as owned_session:
+            result = await owned_session.execute(statement)
+            return cast(list[T], result.scalars().all())
+
     async def query_by_primary_id(
         self,
         primary_id: int,
@@ -190,18 +252,17 @@ class BaseDao[T: ModelMixin]:
                 )
             statement = statement.where(creator_column == creator_id)
 
-        async with self._read_session_provider() as session:
-            result = await session.execute(statement)
-            return cast(T | None, result.scalars().first())
+        return await self.fetch_one(statement)
 
     async def query_by_ids(self, ids: list[int]) -> list[T]:
         if not ids:
             return []
-        async with self._read_session_provider() as session:
-            result = await session.execute(
-                self.select_stmt().where(self.model_cls.id.in_(ids))
-            )
-            return cast(list[T], result.scalars().all())
+        statement = self.select_stmt().where(self.model_cls.id.in_(ids))
+        return await self.fetch_all(statement)
+
+    # ==========================================================================
+    # 事务管理
+    # ==========================================================================
 
     @asynccontextmanager
     async def transaction(
@@ -215,6 +276,10 @@ class BaseDao[T: ModelMixin]:
             session.begin(),
         ):
             yield session
+
+    # ==========================================================================
+    # 单实例写入
+    # ==========================================================================
 
     async def insert(
         self,
@@ -295,6 +360,27 @@ class BaseDao[T: ModelMixin]:
                 f"{self.model_cls.__name__}(id={instance.id}) no longer exists"
             )
         instance.apply_persisted_values(prepared.values)
+
+    # ==========================================================================
+    # 批量写入
+    # ==========================================================================
+
+    async def execute_update(
+        self,
+        statement: Update,
+        *,
+        session: AsyncSession | None = None,
+    ) -> int:
+        """执行 update_stmt() 生成的 UPDATE；传入 session 时不管理事务。"""
+        if session is not None:
+            result = await session.execute(statement)
+            return getattr(result, "rowcount", 0) or 0
+
+        async with self._session_provider() as owned_session:
+            result = await owned_session.execute(statement)
+            rowcount = getattr(result, "rowcount", 0) or 0
+            await owned_session.commit()
+        return rowcount
 
     def build_insert_rows_stmt(
         self,

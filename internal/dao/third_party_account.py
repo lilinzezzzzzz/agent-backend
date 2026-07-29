@@ -10,14 +10,11 @@ class ThirdPartyAccountDao(BaseDao[ThirdPartyAccount]):
         self, platform: str, openid: str
     ) -> ThirdPartyAccount | None:
         """通过平台和 open_id 查询第三方账号"""
-        async with self.read_session_provider() as session:
-            result = await session.execute(
-                self.select_stmt().where(
-                    self.model_cls.platform == platform,
-                    self.model_cls.open_id == openid,
-                )
-            )
-            return result.scalars().first()
+        statement = self.select_stmt().where(
+            self.model_cls.platform == platform,
+            self.model_cls.open_id == openid,
+        )
+        return await self.fetch_first(statement)
 
     async def is_platform_openid_exist(self, platform: str, openid: str) -> bool:
         """检查指定平台的 open_id 是否已存在"""
@@ -27,24 +24,20 @@ class ThirdPartyAccountDao(BaseDao[ThirdPartyAccount]):
         self, user_id: int, platform: str
     ) -> ThirdPartyAccount | None:
         """通过用户 ID 和平台查询第三方账号"""
-        async with self.read_session_provider() as session:
-            result = await session.execute(
-                self.select_stmt().where(
-                    self.model_cls.user_id == user_id,
-                    self.model_cls.platform == platform,
-                )
-            )
-            return result.scalars().first()
+        statement = self.select_stmt().where(
+            self.model_cls.user_id == user_id,
+            self.model_cls.platform == platform,
+        )
+        return await self.fetch_first(statement)
 
     async def get_all_by_user_id(self, user_id: int) -> list[ThirdPartyAccount]:
         """获取用户的所有第三方账号"""
-        async with self.read_session_provider() as session:
-            result = await session.execute(
-                self.select_stmt()
-                .where(self.model_cls.user_id == user_id)
-                .order_by(self.model_cls.updated_at.desc())
-            )
-            return list(result.scalars().all())
+        statement = (
+            self.select_stmt()
+            .where(self.model_cls.user_id == user_id)
+            .order_by(self.model_cls.updated_at.desc())
+        )
+        return await self.fetch_all(statement)
 
     async def delete_by_user_id_and_platform(self, user_id: int, platform: str) -> None:
         """删除用户的指定平台账号（谨慎使用）"""

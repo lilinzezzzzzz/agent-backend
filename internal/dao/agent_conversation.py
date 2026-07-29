@@ -19,14 +19,11 @@ class AgentSessionDao(BaseDao[AgentSession]):
         self, *, session_id: str, user_id: int
     ) -> AgentSession | None:
         """按 session_id 和 user_id 查询未删除会话。"""
-        async with self.read_session_provider() as session:
-            result = await session.execute(
-                self.select_stmt().where(
-                    self.model_cls.session_id == session_id,
-                    self.model_cls.user_id == user_id,
-                )
-            )
-            return result.scalars().first()
+        statement = self.select_stmt().where(
+            self.model_cls.session_id == session_id,
+            self.model_cls.user_id == user_id,
+        )
+        return await self.fetch_first(statement)
 
 
 class AgentMessageDao(BaseDao[AgentMessage]):
@@ -56,9 +53,7 @@ class AgentMessageDao(BaseDao[AgentMessage]):
         if exclude_run_id is not None:
             stmt = stmt.where(self.model_cls.run_id != exclude_run_id)
 
-        async with self.read_session_provider() as session:
-            result = await session.execute(stmt)
-            rows = list(result.scalars().all())
+        rows = await self.fetch_all(stmt)
 
         messages: list[AgentMessage] = []
         current_chars = 0
@@ -80,14 +75,11 @@ class AgentRunDao(BaseDao[AgentRun]):
         self, *, run_id: str, user_id: int
     ) -> AgentRun | None:
         """按 run_id 和 user_id 查询未删除运行记录。"""
-        async with self.read_session_provider() as session:
-            result = await session.execute(
-                self.select_stmt().where(
-                    self.model_cls.run_id == run_id,
-                    self.model_cls.user_id == user_id,
-                )
-            )
-            return result.scalars().first()
+        statement = self.select_stmt().where(
+            self.model_cls.run_id == run_id,
+            self.model_cls.user_id == user_id,
+        )
+        return await self.fetch_first(statement)
 
 
 class AgentRunStepDao(BaseDao[AgentRunStep]):

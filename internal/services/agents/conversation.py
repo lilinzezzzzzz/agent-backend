@@ -116,7 +116,7 @@ class DatabaseAgentStorageBackend:
                 )
                 sess.add(session)
             else:
-                await sess.execute(
+                await self._session_dao.execute_update(
                     self._session_dao.update_stmt(
                         AgentSession.id == session.id,
                         values={
@@ -124,7 +124,8 @@ class DatabaseAgentStorageBackend:
                             "last_message_at": now,
                         },
                         audit_actor=actor,
-                    )
+                    ),
+                    session=sess,
                 )
 
             sess.add(
@@ -275,7 +276,7 @@ class DatabaseAgentStorageBackend:
                 if statement is not None:
                     await sess.execute(statement)
 
-            await sess.execute(
+            await self._run_dao.execute_update(
                 self._run_dao.update_stmt(
                     AgentRun.id == run.id,
                     values={
@@ -285,9 +286,10 @@ class DatabaseAgentStorageBackend:
                         "elapsed_ms": _elapsed_ms(run.started_at, now),
                     },
                     audit_actor=actor,
-                )
+                ),
+                session=sess,
             )
-            await sess.execute(
+            await self._session_dao.execute_update(
                 self._session_dao.update_stmt(
                     AgentSession.session_id == session_id,
                     AgentSession.user_id == user_id,
@@ -296,7 +298,8 @@ class DatabaseAgentStorageBackend:
                         "last_message_at": now,
                     },
                     audit_actor=actor,
-                )
+                ),
+                session=sess,
             )
 
         await _execute_storage_transaction(self._run_dao, _tx)
@@ -323,7 +326,7 @@ class DatabaseAgentStorageBackend:
             )
             if run is None:
                 return
-            await sess.execute(
+            await self._run_dao.execute_update(
                 self._run_dao.update_stmt(
                     AgentRun.id == run.id,
                     values={
@@ -334,7 +337,8 @@ class DatabaseAgentStorageBackend:
                         "error_message": error_message[:2000],
                     },
                     audit_actor=actor,
-                )
+                ),
+                session=sess,
             )
 
         await _execute_storage_transaction(self._run_dao, _tx)

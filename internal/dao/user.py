@@ -7,22 +7,16 @@ class UserDao(BaseDao[User]):
     _model_cls: type[User] = User
 
     async def get_by_phone(self, phone: str) -> User | None:
-        async with self.read_session_provider() as session:
-            result = await session.execute(
-                self.select_stmt().where(self.model_cls.phone == phone)
-            )
-            return result.scalars().first()
+        statement = self.select_stmt().where(self.model_cls.phone == phone)
+        return await self.fetch_first(statement)
 
     async def get_by_username(self, username: str) -> User | None:
         """根据用户名查询用户"""
-        async with self.read_session_provider() as session:
-            result = await session.execute(
-                self.select_stmt().where(self.model_cls.username == username)
-            )
-            return result.scalars().first()
+        statement = self.select_stmt().where(self.model_cls.username == username)
+        return await self.fetch_first(statement)
 
     async def is_phone_exist(self, phone: str) -> bool:
-        # 利用 first() 查询，找到一条就返回，比 count() 更高效
+        # 复用手机号唯一查询，避免额外 COUNT。
         return await self.get_by_phone(phone) is not None
 
 

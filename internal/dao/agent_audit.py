@@ -12,11 +12,8 @@ class AgentAuditDao(BaseDao[AgentAudit]):
 
     async def get_by_run_id(self, run_id: str) -> AgentAudit | None:
         """按 run_id 查询审计记录。"""
-        async with self.read_session_provider() as session:
-            result = await session.execute(
-                self.select_stmt().where(self.model_cls.run_id == run_id)
-            )
-            return result.scalars().first()
+        statement = self.select_stmt().where(self.model_cls.run_id == run_id)
+        return await self.fetch_first(statement)
 
 
 _agent_audit_dao: AgentAuditDao | None = None

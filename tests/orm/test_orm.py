@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 import pytest_asyncio  # <--- 新增导入
 from sqlalchemy import String
+from sqlalchemy.exc import MultipleResultsFound
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -274,6 +275,49 @@ def test_update_statement_rejects_unscoped_update(user_dao):
 
 
 @pytest.mark.asyncio
+async def test_execute_update_commits_owned_session(user_dao):
+    user = User.create(username="before_execute_update")
+    await user_dao.insert(user)
+
+    statement = user_dao.update_stmt(
+        User.id == user.id,
+        values={"username": "after_execute_update"},
+    )
+    rowcount = await user_dao.execute_update(statement)
+
+    reloaded = await user_dao.query_by_primary_id(user.id)
+    assert rowcount == 1
+    assert reloaded is not None
+    assert reloaded.username == "after_execute_update"
+
+
+@pytest.mark.asyncio
+async def test_execute_update_prefers_explicit_session(user_dao, db_session):
+    user = User.create(username="before_explicit_update")
+    await user_dao.insert(user)
+
+    def _unexpected_provider():
+        raise AssertionError("explicit session must bypass the write session provider")
+
+    user_dao._session_provider = _unexpected_provider
+    async with db_session() as session, session.begin():
+        statement = user_dao.update_stmt(
+            User.id == user.id,
+            values={"username": "after_explicit_update"},
+        )
+        rowcount = await user_dao.execute_update(statement, session=session)
+        reloaded = await user_dao.fetch_one(
+            user_dao.select_stmt().where(User.id == user.id),
+            session=session,
+        )
+
+        assert session.in_transaction()
+        assert rowcount == 1
+        assert reloaded is not None
+        assert reloaded.username == "after_explicit_update"
+
+
+@pytest.mark.asyncio
 async def test_query_does_not_commit_read_session(user_dao, monkeypatch):
     user = User.create(username="read_without_commit")
     await user_dao.insert(user)
@@ -286,6 +330,80 @@ async def test_query_does_not_commit_read_session(user_dao, monkeypatch):
     stored = await user_dao.query_by_primary_id(user.id)
 
     assert stored is not None
+
+
+@pytest.mark.asyncio
+async def test_fetch_helpers_use_owned_read_session(user_dao):
+    await user_dao.insert_rows(
+        rows=[{"username": "fetch_one"}, {"username": "fetch_all"}]
+    )
+
+    fetched = await user_dao.fetch_one(
+        user_dao.select_stmt().where(User.username == "fetch_one")
+    )
+    all_users = await user_dao.fetch_all(
+        user_dao.select_stmt().order_by(User.username.asc())
+    )
+
+    assert fetched is not None
+    assert fetched.username == "fetch_one"
+    assert [user.username for user in all_users] == ["fetch_all", "fetch_one"]
+
+
+@pytest.mark.asyncio
+async def test_fetch_first_returns_ordered_first_result(user_dao):
+    users = [User.create(username="same_first") for _ in range(2)]
+    await user_dao.insert_instances(items=users)
+
+    fetched = await user_dao.fetch_first(
+        user_dao.select_stmt()
+        .where(User.username == "same_first")
+        .order_by(User.id.desc())
+    )
+
+    assert fetched is not None
+    assert fetched.id == max(user.id for user in users)
+
+
+@pytest.mark.asyncio
+async def test_fetch_helpers_prefer_explicit_session(user_dao, db_session):
+    await user_dao.insert_rows(rows=[{"username": "explicit_session"}])
+
+    def _unexpected_provider():
+        raise AssertionError("explicit session must bypass the read session provider")
+
+    user_dao._read_session_provider = _unexpected_provider
+    async with db_session() as session:
+        fetched = await user_dao.fetch_one(
+            user_dao.select_stmt().where(User.username == "explicit_session"),
+            session=session,
+        )
+        assert session.in_transaction()
+        first = await user_dao.fetch_first(
+            user_dao.select_stmt().order_by(User.id.asc()),
+            session=session,
+        )
+        assert session.in_transaction()
+        all_users = await user_dao.fetch_all(
+            user_dao.select_stmt(),
+            session=session,
+        )
+        assert session.in_transaction()
+        assert (await session.execute(user_dao.count_stmt())).scalar_one() == 1
+
+    assert fetched is not None
+    assert fetched.username == "explicit_session"
+    assert first is not None
+    assert first.id == fetched.id
+    assert len(all_users) == 1
+
+
+@pytest.mark.asyncio
+async def test_fetch_one_rejects_multiple_results(user_dao):
+    await user_dao.insert_rows(rows=[{"username": "same"}, {"username": "same"}])
+
+    with pytest.raises(MultipleResultsFound):
+        await user_dao.fetch_one(user_dao.select_stmt().where(User.username == "same"))
 
 
 @pytest.mark.asyncio
@@ -479,7 +597,7 @@ async def test_explicit_transaction_executes_built_statement(user_dao):
         values={"username": "transaction_new"},
     )
     async with user_dao.transaction() as session:
-        await session.execute(statement)
+        await user_dao.execute_update(statement, session=session)
 
     reloaded = await user_dao.query_by_primary_id(user.id)
     assert reloaded is not None

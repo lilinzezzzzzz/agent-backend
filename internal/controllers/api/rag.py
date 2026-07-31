@@ -1,16 +1,12 @@
-from typing import Annotated
+from fastapi import APIRouter
 
-from fastapi import APIRouter, Depends
-
+from internal.dependencies.rag import RagServiceDep
 from internal.schemas import BaseResponse
 from internal.schemas.rag import RagAnswerReqSchema, RagAnswerRespSchema
-from internal.services.rag import RagService, new_rag_service
-from pkg.request_context import get_user_id
 from pkg.api_response import ResponsePayload, success_response
+from pkg.request_context import get_user_id
 
 router = APIRouter(prefix="/rag", tags=["api rag"])
-
-RagServiceDep = Annotated[RagService, Depends(new_rag_service)]
 
 
 @router.post(

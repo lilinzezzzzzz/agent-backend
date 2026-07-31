@@ -9,7 +9,6 @@ from httpx import ASGITransport, AsyncClient
 
 from internal.controllers import internal as internal_controller
 from internal.controllers.api import rag as rag_controller
-from internal.controllers.internal import rag as internal_rag_controller
 from internal.dependencies.auth import require_internal_signature
 from internal.schemas.rag import (
     RagAnswerDTO,
@@ -17,6 +16,7 @@ from internal.schemas.rag import (
     RagRetrievalDTO,
     RagExternalRunDTO,
 )
+from internal.services.rag import new_rag_service
 from pkg.vectors.contracts import RetrievalMode
 
 
@@ -79,8 +79,7 @@ async def rag_client():
     app = FastAPI()
     app.include_router(rag_controller.router, prefix="/v1")
     app.include_router(internal_controller.router)
-    app.dependency_overrides[rag_controller.new_rag_service] = lambda: service
-    app.dependency_overrides[internal_rag_controller.new_rag_service] = lambda: service
+    app.dependency_overrides[new_rag_service] = lambda: service
     app.dependency_overrides[require_internal_signature] = lambda: None
 
     async with AsyncClient(

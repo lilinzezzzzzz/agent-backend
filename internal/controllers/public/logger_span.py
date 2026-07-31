@@ -11,21 +11,16 @@
 from pathlib import Path as FsPath
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Path
+from fastapi import APIRouter, Path
 from fastapi.responses import HTMLResponse
 
 from internal import BASE_DIR
+from internal.dependencies.logger_span import LoggerSpanServiceDep
 from internal.schemas import BaseResponse
 from internal.schemas.logger_span import SpanSimulateRespSchema
-from internal.services.logger_span import (
-    LoggerSpanService,
-    new_logger_span_service,
-)
 from pkg.api_response import ResponsePayload, success_response
 
 router = APIRouter(prefix="/logger-span", tags=["public logger span"])
-
-LoggerSpanServiceDep = Annotated[LoggerSpanService, Depends(new_logger_span_service)]
 
 _FRONTEND_INDEX_FILE: FsPath = BASE_DIR / "frontend" / "logger_span" / "index.html"
 

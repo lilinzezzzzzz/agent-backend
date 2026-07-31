@@ -22,6 +22,9 @@ from internal.services.agents import (
     AgentRouterService,
     OrderAgentService,
     PaymentAgentService,
+    new_agent_router_service,
+    new_order_agent_service,
+    new_payment_agent_service,
 )
 from internal.schemas.agent import (
     AgentChatDTO,
@@ -470,14 +473,10 @@ def test_agent_request_requires_confirmation_token_and_idempotency_key_together(
 async def agent_client():
     app = FastAPI()
     app.include_router(agent_controller.router, prefix="/v1")
-    app.dependency_overrides[agent_controller.new_order_agent_service] = lambda: (
-        FakeOrderAgentService()
-    )
-    app.dependency_overrides[agent_controller.new_agent_router_service] = lambda: (
-        FakeAgentRouterService()
-    )
-    app.dependency_overrides[agent_controller.new_payment_agent_service] = lambda: (
-        FakePaymentAgentService()
+    app.dependency_overrides[new_order_agent_service] = lambda: FakeOrderAgentService()
+    app.dependency_overrides[new_agent_router_service] = lambda: FakeAgentRouterService()
+    app.dependency_overrides[new_payment_agent_service] = (
+        lambda: FakePaymentAgentService()
     )
 
     async with AsyncClient(

@@ -1,9 +1,13 @@
 from collections.abc import AsyncIterable, AsyncIterator
-from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 
+from internal.dependencies.agents import (
+    AgentRouterServiceDep,
+    OrderAgentServiceDep,
+    PaymentAgentServiceDep,
+)
 from internal.schemas import BaseResponse
 from internal.schemas.agent import (
     AgentChatReqSchema,
@@ -12,19 +16,11 @@ from internal.schemas.agent import (
     AgentOrderSupportRespSchema,
     AgentPaymentSupportReqSchema,
     AgentPaymentSupportRespSchema,
+    AgentStreamEventDTO,
 )
-from internal.services.agents import (
-    AgentRouterService,
-    OrderAgentService,
-    PaymentAgentService,
-    new_agent_router_service,
-    new_order_agent_service,
-    new_payment_agent_service,
-)
-from internal.schemas.agent import AgentStreamEventDTO
 from internal.utils.stream import stream_with_chunk_control
-from pkg.request_context import get_user_id
 from pkg.api_response import ResponsePayload, success_response, wrap_sse_event
+from pkg.request_context import get_user_id
 
 router = APIRouter(prefix="/agent", tags=["api agent"])
 _AGENT_STREAM_CHUNK_TIMEOUT_SECONDS = 70.0
@@ -33,13 +29,6 @@ _SSE_HEADERS = {
     "Cache-Control": "no-cache",
     "X-Accel-Buffering": "no",
 }
-
-OrderAgentServiceDep = Annotated[OrderAgentService, Depends(new_order_agent_service)]
-PaymentAgentServiceDep = Annotated[
-    PaymentAgentService, Depends(new_payment_agent_service)
-]
-AgentRouterServiceDep = Annotated[AgentRouterService, Depends(new_agent_router_service)]
-
 
 @router.post(
     "/chat",

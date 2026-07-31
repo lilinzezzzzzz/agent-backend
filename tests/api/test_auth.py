@@ -16,6 +16,7 @@ from internal.schemas.user import (
     WeChatLoginReqSchema,
 )
 from internal.schemas.user import AuthUserDTO, UserLoginDTO
+from internal.services.auth import new_auth_service
 
 
 class FakeAuthService:
@@ -72,7 +73,7 @@ async def auth_client():
     service = FakeAuthService()
     app.include_router(auth_controller.anonymous_router, prefix="/v1")
     app.include_router(auth_controller.authenticated_router, prefix="/v1")
-    app.dependency_overrides[auth_controller.new_auth_service] = lambda: service
+    app.dependency_overrides[new_auth_service] = lambda: service
 
     async with AsyncClient(
         transport=ASGITransport(app=app),

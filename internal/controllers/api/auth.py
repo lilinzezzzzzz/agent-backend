@@ -2,9 +2,10 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 
 from internal.dependencies.auth import (
+    AuthServiceDep,
     AuthenticatedPrincipal,
     AuthenticatedUserDependency,
 )
@@ -17,9 +18,8 @@ from internal.schemas.user import (
     UserRegisterReqSchema,
     WeChatLoginReqSchema,
 )
-from internal.services.auth import AuthService, new_auth_service
-from pkg.request_context import get_user_id
 from pkg.api_response import ResponsePayload, success_response
+from pkg.request_context import get_user_id
 
 anonymous_router = APIRouter(prefix="/auth", tags=["authentication"])
 authenticated_router = APIRouter(
@@ -27,10 +27,6 @@ authenticated_router = APIRouter(
     tags=["authentication"],
     dependencies=[AuthenticatedUserDependency],
 )
-
-
-AuthServiceDep = Annotated[AuthService, Depends(new_auth_service)]
-
 
 @anonymous_router.post(
     "/login", response_model=BaseResponse[UserLoginRespSchema], summary="用户登录"

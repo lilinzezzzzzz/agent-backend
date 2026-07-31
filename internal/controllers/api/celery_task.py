@@ -1,19 +1,14 @@
-from typing import Annotated
-
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 
 from internal.config import settings
 from internal.core import AppException, errors
+from internal.dependencies.celery_task import CeleryTaskServiceDep
 from internal.schemas import BaseResponse
 from internal.schemas.celery_task import (
     CeleryTaskCancelRespSchema,
     CeleryTaskDetailSchema,
     CeleryTaskDispatchRespSchema,
     IdempotentSumCreateReqSchema,
-)
-from internal.services.celery_task import (
-    CeleryTaskService,
-    new_celery_task_service,
 )
 from internal.tasks.constants import (
     IDEMPOTENT_SUM_QUEUE,
@@ -24,8 +19,6 @@ from pkg.request_context import get_trace_id, get_user_id
 
 
 router = APIRouter(prefix="/celery-tasks", tags=["api celery tasks"])
-
-CeleryTaskServiceDep = Annotated[CeleryTaskService, Depends(new_celery_task_service)]
 
 
 @router.post(

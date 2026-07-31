@@ -7,23 +7,18 @@ Span 会由 tracing runtime 异步上报到 Collector；模拟接口只返回 tr
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Path
+from fastapi import APIRouter, Path
 
+from internal.dependencies.logger_span import LoggerSpanServiceDep
 from internal.schemas import BaseResponse
 from internal.schemas.logger_span import (
     SpanSimulateReqSchema,
     SpanSimulateRespSchema,
     SpanSimulateResultSchema,
 )
-from internal.services.logger_span import (
-    LoggerSpanService,
-    new_logger_span_service,
-)
 from pkg.api_response import ResponsePayload, success_response
 
 router = APIRouter(prefix="/logger-span", tags=["api logger span"])
-
-LoggerSpanServiceDep = Annotated[LoggerSpanService, Depends(new_logger_span_service)]
 
 
 @router.post(

@@ -37,3 +37,18 @@ def test_anonymous_paths_are_whitelisted(path: str) -> None:
 @pytest.mark.parametrize("path", ["/auth/login", "/v1/auth/me", "/v1/user/hello-world"])
 def test_non_public_paths_require_authentication(path: str) -> None:
     assert _AuthContext(_http_scope(path)).is_whitelist() is False
+
+
+@pytest.mark.parametrize(
+    ("path", "expected"),
+    [
+        ("/v1/internal", True),
+        ("/v1/internal/rag/external-runs", True),
+        ("/v1/internal-tools", False),
+    ],
+)
+def test_only_internal_router_paths_bypass_token_auth(
+    path: str,
+    expected: bool,
+) -> None:
+    assert _AuthContext(_http_scope(path)).is_internal_api() is expected

@@ -2,7 +2,7 @@ import importlib
 import json
 import sys
 import types
-from collections.abc import AsyncGenerator, Generator
+from collections.abc import AsyncGenerator, Callable, Generator
 from contextvars import ContextVar
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import pytest_asyncio
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from httpx import ASGITransport, AsyncClient
 from loguru import logger as loguru_logger
 from opentelemetry.sdk.trace import TracerProvider
@@ -59,7 +59,12 @@ class _ContextStore:
         return trace_id
 
 
-def _build_app(*, auth_middleware: type, record_middleware: type) -> FastAPI:
+def _build_app(
+    *,
+    auth_middleware: type,
+    internal_auth_dependency: Callable[..., object],
+    record_middleware: type,
+) -> FastAPI:
     app = FastAPI()
     app.add_middleware(auth_middleware)
     app.add_middleware(record_middleware)
@@ -69,7 +74,10 @@ def _build_app(*, auth_middleware: type, record_middleware: type) -> FastAPI:
         loguru_logger.info("handler.public")
         return {"ok": True}
 
-    @app.get("/v1/internal/ping")
+    @app.get(
+        "/v1/internal/ping",
+        dependencies=[Depends(internal_auth_dependency)],
+    )
     async def internal_ping() -> dict[str, bool]:
         loguru_logger.info("handler.internal")
         return {"ok": True}
@@ -159,9 +167,10 @@ def tracing_runtime(
 @pytest.fixture
 def middleware_modules(
     monkeypatch: pytest.MonkeyPatch,
-) -> Generator[tuple[ModuleType, ModuleType], None, None]:
+) -> Generator[tuple[ModuleType, ModuleType, ModuleType], None, None]:
     fake_auth_service = types.ModuleType("internal.services.auth")
     module_names = (
+        "internal.dependencies.auth",
         "internal.middlewares",
         "internal.middlewares.auth",
         "internal.middlewares.recorder",
@@ -177,9 +186,10 @@ def middleware_modules(
     for module_name in module_names:
         sys.modules.pop(module_name, None)
 
+    internal_auth_module = importlib.import_module("internal.dependencies.auth")
     auth_module = importlib.import_module("internal.middlewares.auth")
     recorder_module = importlib.import_module("internal.middlewares.recorder")
-    yield auth_module, recorder_module
+    yield auth_module, internal_auth_module, recorder_module
 
     for module_name, previous_module in previous_modules.items():
         if previous_module is None:
@@ -190,14 +200,15 @@ def middleware_modules(
 
 @pytest_asyncio.fixture
 async def middleware_client(
-    middleware_modules: tuple[ModuleType, ModuleType],
+    middleware_modules: tuple[ModuleType, ModuleType, ModuleType],
     tracing_runtime: InMemorySpanExporter,
 ) -> AsyncGenerator[AsyncClient, None]:
-    auth_module, recorder_module = middleware_modules
+    auth_module, internal_auth_module, recorder_module = middleware_modules
     async with AsyncClient(
         transport=ASGITransport(
             app=_build_app(
                 auth_middleware=auth_module.ASGIAuthMiddleware,
+                internal_auth_dependency=internal_auth_module.require_internal_signature,
                 record_middleware=recorder_module.ASGIRecordMiddleware,
             )
         ),
@@ -237,7 +248,7 @@ async def middleware_client(
 )
 async def test_middlewares_create_real_request_and_auth_spans(
     configured_logger: Path,
-    middleware_modules: tuple[ModuleType, ModuleType],
+    middleware_modules: tuple[ModuleType, ModuleType, ModuleType],
     middleware_client: AsyncClient,
     tracing_runtime: InMemorySpanExporter,
     monkeypatch: pytest.MonkeyPatch,
@@ -246,10 +257,10 @@ async def test_middlewares_create_real_request_and_auth_spans(
     handler_message: str,
     auth_span_name: str,
 ) -> None:
-    auth_module, _ = middleware_modules
+    auth_module, internal_auth_module, _ = middleware_modules
     if auth_span_name == "middleware.auth.internal":
         monkeypatch.setattr(
-            auth_module,
+            internal_auth_module,
             "signature_auth_handler",
             SimpleNamespace(verify=MagicMock(return_value=True)),
         )

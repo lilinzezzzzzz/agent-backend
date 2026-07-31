@@ -216,10 +216,10 @@ uv run celery -A internal.infra.celery:celery_app beat -l info
 | `GET` | `/v1/public/test/test/sse-stream` | SSE 流式响应测试 |
 | `GET` | `/v1/public/test/chat/sse-stream/timeout` | SSE chunk timeout 测试 |
 
-认证中间件规则：
+认证规则：
 
 - `/v1/public/**` 直接放行。
-- `/v1/internal/**` 使用 `X-Signature`、`X-Timestamp`、`X-Nonce` 做签名认证。
+- `/v1/internal/**` 通过 Router dependency 使用 `X-Signature`、`X-Timestamp`、`X-Nonce` 做签名认证。
 - 其他 HTTP 接口默认要求 `Authorization` token，兼容裸 token 和 `Bearer <token>`。
 - 精确白名单包含 `/v1/auth/login`、`/v1/auth/register`、`/v1/auth/wechat/login`、`/docs`、`/openapi.json`。
 

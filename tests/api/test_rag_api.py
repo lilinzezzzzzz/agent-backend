@@ -7,6 +7,7 @@ import pytest_asyncio
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
+from internal.controllers import internal as internal_controller
 from internal.controllers.api import rag as rag_controller
 from internal.controllers.internal import rag as internal_rag_controller
 from internal.schemas.rag import (
@@ -76,9 +77,12 @@ async def rag_client():
     service = FakeRagService()
     app = FastAPI()
     app.include_router(rag_controller.router, prefix="/v1")
-    app.include_router(internal_rag_controller.router, prefix="/v1/internal")
+    app.include_router(internal_controller.router)
     app.dependency_overrides[rag_controller.new_rag_service] = lambda: service
     app.dependency_overrides[internal_rag_controller.new_rag_service] = lambda: service
+    app.dependency_overrides[internal_controller.require_internal_signature] = lambda: (
+        None
+    )
 
     async with AsyncClient(
         transport=ASGITransport(app=app),

@@ -154,10 +154,10 @@ AGENTSCOPE_WORKSPACE_TTL_SECONDS=3600
 
 ### 6.1 外层 HTTP 认证
 
-当前 `ASGIAuthMiddleware` 规则：
+当前认证规则：
 
 - `path.startswith("/v1/public")` 直接放行。
-- `path.startswith("/v1/internal")` 使用 `X-Signature`、`X-Timestamp`、`X-Nonce` 签名认证。
+- `/v1/internal/**` 由 Router dependency 使用 `X-Signature`、`X-Timestamp`、`X-Nonce` 签名认证。
 - 其他 HTTP 请求默认 token 认证，读取 `Authorization`，兼容裸 token 和 `Bearer <token>`。
 - token 校验通过后，认证中间件把 `auth_metadata["id"]` 写入 `pkg.request_context.ContextKey.USER_ID`。
 

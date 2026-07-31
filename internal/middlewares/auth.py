@@ -2,7 +2,6 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from internal.core import AppException, errors
 from internal.services.auth import new_auth_service
-from internal.utils.signature import signature_auth_handler
 from pkg.logger import logger
 from pkg.tracing import span_context
 from pkg import request_context as context
@@ -14,10 +13,6 @@ class _AuthConstants:
 
     # HTTP 头字段名
     HEADER_AUTHORIZATION: str = "Authorization"
-    HEADER_SIGNATURE: str = "X-Signature"
-    HEADER_TIMESTAMP: str = "X-Timestamp"
-    HEADER_NONCE: str = "X-Nonce"
-
     # Token 前缀
     BEARER_PREFIX: str = "Bearer "
 
@@ -28,7 +23,6 @@ class _AuthConstants:
 
     # span 名称
     SPAN_WHITELIST: str = "middleware.auth.whitelist"
-    SPAN_INTERNAL: str = "middleware.auth.internal"
     SPAN_TOKEN: str = "middleware.auth.token"
 
     # 白名单路径 (精确匹配)
@@ -59,14 +53,8 @@ class _AuthContext(BaseMiddlewareContext):
 
     def is_internal_api(self) -> bool:
         """判断是否为内部接口"""
-        return self.path.startswith(_AUTH_CONST.PATH_INTERNAL)
-
-    def get_signature_headers(self) -> tuple[str | None, str | None, str | None]:
-        """获取签名相关头信息"""
-        return (
-            self.headers.get(_AUTH_CONST.HEADER_SIGNATURE),
-            self.headers.get(_AUTH_CONST.HEADER_TIMESTAMP),
-            self.headers.get(_AUTH_CONST.HEADER_NONCE),
+        return self.path == _AUTH_CONST.PATH_INTERNAL or self.path.startswith(
+            f"{_AUTH_CONST.PATH_INTERNAL}/"
         )
 
     def get_token(self) -> str | None:
@@ -100,11 +88,8 @@ class ASGIAuthMiddleware:
             await self.app(scope, receive, send)
             return
 
-        # 2. 内部接口签名校验
+        # 2. 内部接口由 Router dependency 统一进行签名校验
         if auth_ctx.is_internal_api():
-            async with span_context(_AUTH_CONST.SPAN_INTERNAL):
-                logger.debug(f"Internal API access: {auth_ctx.path}")
-                await self._handle_internal_auth(auth_ctx)
             await self.app(scope, receive, send)
             return
 
@@ -113,20 +98,6 @@ class ASGIAuthMiddleware:
             logger.debug(f"Token auth for path: {auth_ctx.path}")
             await self._handle_token_auth(auth_ctx)
         await self.app(scope, receive, send)
-
-    async def _handle_internal_auth(self, auth_ctx: _AuthContext) -> None:
-        """处理内部接口签名认证"""
-        x_signature, x_timestamp, x_nonce = auth_ctx.get_signature_headers()
-
-        if not signature_auth_handler.verify(
-            x_signature=x_signature, x_timestamp=x_timestamp, x_nonce=x_nonce
-        ):
-            raise AppException(
-                errors.InvalidSignature,
-                message=f"Signature authentication failed, x_signature={x_signature}, x_timestamp={x_timestamp}, x_nonce={x_nonce}",
-            )
-
-        logger.debug(f"Internal API signature verified: {auth_ctx.path}")
 
     async def _handle_token_auth(self, auth_ctx: _AuthContext) -> None:
         """处理 Token 认证 (基于 Redis 缓存校验)"""

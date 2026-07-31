@@ -1,11 +1,11 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 
 from internal.controllers.internal import rag
-from internal.dependencies.auth import require_internal_signature
+from internal.dependencies.auth import InternalSignatureDependency
 
 router = APIRouter(
     prefix="/v1/internal",
-    dependencies=[Depends(require_internal_signature)],
+    dependencies=[InternalSignatureDependency],
 )
 
 routers = [

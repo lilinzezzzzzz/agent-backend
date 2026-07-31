@@ -25,8 +25,8 @@ README 只记录当前仓库可直接核对的能力；更细的设计约束和�
   `.secrets`，并严格隔离非敏感配置与凭据字段。
 - 数据库：异步 SQLAlchemy 连接池，支持主库和可选只读副本；配置层支持 PostgreSQL、MySQL、Oracle DSN。
 - Redis：连接池、业务缓存封装、认证 token metadata、Agent action confirmation / idempotency 缓存。
-- 认证：Token 认证、内部签名认证、公共路由白名单、微信登录接入点。
-- 中间件：请求日志、CORS、Endpoint Guard、认证、GZip。
+- 认证：Token 认证、内部签名认证、匿名路由分组、微信登录接入点。
+- 中间件：请求日志、CORS、Endpoint Guard、统一异常处理、GZip。
 - Agent：通用结构化 ReAct / Tool Calling 执行循环，统一 Router Agent，订单售后 Agent，支付支持 Agent。
 - Celery：Worker、Beat、任务路由和示例任务骨架。
 - 向量检索：通用 repository / backend 抽象，包含 Milvus backend。
@@ -220,8 +220,10 @@ uv run celery -A internal.infra.celery:celery_app beat -l info
 
 - `/v1/public/**` 直接放行。
 - `/v1/internal/**` 通过 Router dependency 使用 `X-Signature`、`X-Timestamp`、`X-Nonce` 做签名认证。
-- 其他 HTTP 接口默认要求 `Authorization` token，兼容裸 token 和 `Bearer <token>`。
-- 精确白名单包含 `/v1/auth/login`、`/v1/auth/register`、`/v1/auth/wechat/login`、`/docs`、`/openapi.json`。
+- 其他 `/v1/**` 业务接口通过 Router dependency 校验 `Authorization` token，兼容裸 token 和
+  `Bearer <token>`。
+- `/v1/auth/login`、`/v1/auth/register`、`/v1/auth/wechat/login` 挂载在匿名 Router；调试模式下的
+  `/docs`、`/redoc`、`/openapi.json` 不经过业务 Router 认证。
 
 统一成功响应结构：
 

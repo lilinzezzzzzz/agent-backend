@@ -58,7 +58,7 @@ class AuthService:
         token = self.generate_token()
         await self._save_user_session(user=user, token=token)
 
-        logger.info(f"User {user.id} logged in successfully, token: {token[:10]}...")
+        logger.info(f"User {user.id} logged in successfully")
         return UserLoginDTO(user=self._build_user_dto(user), token=token)
 
     async def register(
@@ -84,7 +84,7 @@ class AuthService:
                 errors.InternalServerError, message="注册失败，请稍后重试"
             ) from exc
 
-        logger.info(f"User {user.id} registered successfully, token: {token[:10]}...")
+        logger.info(f"User {user.id} registered and logged in successfully")
         return UserLoginDTO(user=self._build_user_dto(user), token=token)
 
     async def logout(self, *, user_id: int | None, token: str | None) -> None:

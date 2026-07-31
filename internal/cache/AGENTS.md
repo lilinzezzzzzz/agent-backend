@@ -56,6 +56,6 @@ def new_auth_cache() -> AuthCache:
 
 ## 验证重点
 
-- 修改 key 前缀、TTL、序列化格式属于跨服务兼容性变更：必须同步检查依赖方（认证中间件、Service、Celery 任务）并评估历史数据迁移或过期策略。
+- 修改 key 前缀、TTL、序列化格式属于跨服务兼容性变更：必须同步检查依赖方（认证 dependency、Service、Celery 任务）并评估历史数据迁移或过期策略。
 - 新增业务域缓存时，优先复用 `pkg.redis` 已有原语，不要再实现一层 Redis 封装。
 - 单元测试使用 fake/mock `RedisClient`，覆盖 miss、hit、TTL 过期、并发写入顺序等边界。

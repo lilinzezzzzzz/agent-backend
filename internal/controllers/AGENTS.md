@@ -25,7 +25,7 @@
 - 需要读当前用户时使用上下文工具，例如 `pkg.request_context.get_user_id()`，不要重新解析 token。
 - 业务错误使用 `internal.core.AppException` 和 `internal.core.errors`。
 - 路由 prefix、tags、summary 要与现有风格一致。
-- 新增公开接口时确认认证中间件白名单或路由前缀是否符合预期。
+- 新增接口时按认证边界挂载到匿名、Token 认证或内部签名 Router，不维护路径白名单。
 - 每个 Router 方法必须编写详细的 docstring，按固定结构组织，便于生成 OpenAPI 描述与人工 review：
   - **业务摘要**：一句话描述该接口完成的业务动作（动词开头，避免技术实现细节）。
   - **权限边界**：说明认证要求（匿名 / 普通 token / 内部签名）、所需角色或资源归属校验（如仅本人、仅管理员、仅租户成员）。
@@ -103,7 +103,7 @@ async def get_user(
 
 - 不要在 handler 中写 SQLAlchemy 查询、Redis 操作或循环内数据库访问。
 - 不要在日志中打印完整 token、密码、密钥、连接串或第三方登录凭证。
-- 不要绕过统一错误和认证中间件返回临时错误结构。
+- 不要绕过统一错误处理和 Router 认证 dependency 返回临时错误结构。
 
 ## 验证重点
 

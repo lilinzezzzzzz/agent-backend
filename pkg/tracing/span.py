@@ -4,6 +4,7 @@ import re
 from collections.abc import Mapping
 from contextlib import AbstractContextManager
 from types import TracebackType
+from typing import Literal
 
 from opentelemetry.trace import (
     INVALID_SPAN_CONTEXT,
@@ -92,13 +93,13 @@ class _AsyncSpanContext:
         exc_type: type[BaseException] | None,
         exc: BaseException | None,
         tb: TracebackType | None,
-    ) -> bool:
+    ) -> Literal[False]:
         scope = self._scope
         self._scope = None
         self._entered = False
-        if scope is None:
-            return False
-        return bool(scope.__exit__(exc_type, exc, tb))
+        if scope is not None:
+            scope.__exit__(exc_type, exc, tb)
+        return False
 
 
 def span_context(

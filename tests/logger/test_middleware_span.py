@@ -6,7 +6,7 @@ from collections.abc import AsyncGenerator, Callable, Generator
 from contextvars import ContextVar
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 import pytest_asyncio
@@ -52,6 +52,9 @@ class _ContextStore:
         ctx[str(normalized_key)] = value
         self._ctx_var.set(ctx)
 
+    def set_user_id(self, user_id: int) -> None:
+        self.set_val(context.ContextKey.USER_ID, user_id)
+
     def get_trace_id(self) -> str:
         trace_id = (self._ctx_var.get() or {}).get(context.ContextKey.TRACE_ID.value)
         if not isinstance(trace_id, str) or not trace_id:
@@ -61,12 +64,11 @@ class _ContextStore:
 
 def _build_app(
     *,
-    auth_middleware: type,
     internal_auth_dependency: Callable[..., object],
     record_middleware: type,
+    token_auth_dependency: Callable[..., object],
 ) -> FastAPI:
     app = FastAPI()
-    app.add_middleware(auth_middleware)
     app.add_middleware(record_middleware)
 
     @app.get("/v1/public/ping")
@@ -82,7 +84,10 @@ def _build_app(
         loguru_logger.info("handler.internal")
         return {"ok": True}
 
-    @app.get("/secure")
+    @app.get(
+        "/secure",
+        dependencies=[Depends(token_auth_dependency)],
+    )
     async def secure_ping() -> dict[str, bool]:
         loguru_logger.info("handler.secure")
         return {"ok": True}
@@ -142,6 +147,7 @@ def patched_request_context(monkeypatch: pytest.MonkeyPatch) -> _ContextStore:
     monkeypatch.setattr(context, "init", store.init)
     monkeypatch.setattr(context, "clear", store.clear)
     monkeypatch.setattr(context, "set_val", store.set_val)
+    monkeypatch.setattr(context, "set_user_id", store.set_user_id)
     monkeypatch.setattr(context, "get_trace_id", store.get_trace_id)
     monkeypatch.setattr(otel_runtime, "request_context", context)
     return store
@@ -167,29 +173,28 @@ def tracing_runtime(
 @pytest.fixture
 def middleware_modules(
     monkeypatch: pytest.MonkeyPatch,
-) -> Generator[tuple[ModuleType, ModuleType, ModuleType], None, None]:
+) -> Generator[tuple[ModuleType, ModuleType], None, None]:
     fake_auth_service = types.ModuleType("internal.services.auth")
     module_names = (
         "internal.dependencies.auth",
         "internal.middlewares",
-        "internal.middlewares.auth",
         "internal.middlewares.recorder",
     )
     previous_modules = {name: sys.modules.get(name) for name in module_names}
 
     class FakeAuthService:
         async def verify_token(self, _token: str) -> dict[str, object]:
-            raise AssertionError("verify_token should be patched in this test")
+            return {"id": 123}
 
+    fake_auth_service.AuthService = FakeAuthService
     fake_auth_service.new_auth_service = lambda: FakeAuthService()
     monkeypatch.setitem(sys.modules, "internal.services.auth", fake_auth_service)
     for module_name in module_names:
         sys.modules.pop(module_name, None)
 
     internal_auth_module = importlib.import_module("internal.dependencies.auth")
-    auth_module = importlib.import_module("internal.middlewares.auth")
     recorder_module = importlib.import_module("internal.middlewares.recorder")
-    yield auth_module, internal_auth_module, recorder_module
+    yield internal_auth_module, recorder_module
 
     for module_name, previous_module in previous_modules.items():
         if previous_module is None:
@@ -200,16 +205,16 @@ def middleware_modules(
 
 @pytest_asyncio.fixture
 async def middleware_client(
-    middleware_modules: tuple[ModuleType, ModuleType, ModuleType],
+    middleware_modules: tuple[ModuleType, ModuleType],
     tracing_runtime: InMemorySpanExporter,
 ) -> AsyncGenerator[AsyncClient, None]:
-    auth_module, internal_auth_module, recorder_module = middleware_modules
+    internal_auth_module, recorder_module = middleware_modules
     async with AsyncClient(
         transport=ASGITransport(
             app=_build_app(
-                auth_middleware=auth_module.ASGIAuthMiddleware,
                 internal_auth_dependency=internal_auth_module.require_internal_signature,
                 record_middleware=recorder_module.ASGIRecordMiddleware,
+                token_auth_dependency=internal_auth_module.require_authenticated_user,
             )
         ),
         base_url="http://testserver",
@@ -225,7 +230,7 @@ async def middleware_client(
             "/v1/public/ping",
             {"X-Trace-ID": _PUBLIC_TRACE_ID},
             "handler.public",
-            "middleware.auth.whitelist",
+            None,
         ),
         (
             "/v1/internal/ping",
@@ -246,28 +251,24 @@ async def middleware_client(
         ),
     ],
 )
-async def test_middlewares_create_real_request_and_auth_spans(
+async def test_request_and_route_auth_create_expected_spans(
     configured_logger: Path,
-    middleware_modules: tuple[ModuleType, ModuleType, ModuleType],
+    middleware_modules: tuple[ModuleType, ModuleType],
     middleware_client: AsyncClient,
     tracing_runtime: InMemorySpanExporter,
     monkeypatch: pytest.MonkeyPatch,
     path: str,
     headers: dict[str, str],
     handler_message: str,
-    auth_span_name: str,
+    auth_span_name: str | None,
 ) -> None:
-    auth_module, internal_auth_module, _ = middleware_modules
+    internal_auth_module, _ = middleware_modules
     if auth_span_name == "middleware.auth.internal":
         monkeypatch.setattr(
             internal_auth_module,
             "signature_auth_handler",
             SimpleNamespace(verify=MagicMock(return_value=True)),
         )
-    elif auth_span_name == "middleware.auth.token":
-        fake_svc = AsyncMock()
-        fake_svc.verify_token = AsyncMock(return_value={"id": 123})
-        monkeypatch.setattr(auth_module, "new_auth_service", lambda: fake_svc)
 
     response = await middleware_client.get(path, headers=headers)
     expected_trace_id = headers["X-Trace-ID"]
@@ -276,12 +277,15 @@ async def test_middlewares_create_real_request_and_auth_spans(
 
     finished = {span.name: span for span in tracing_runtime.get_finished_spans()}
     root = finished["middleware.request"]
-    auth = finished[auth_span_name]
     assert root.kind is SpanKind.SERVER
     assert root.parent is None
     assert f"{root.context.trace_id:032x}" == expected_trace_id
-    assert auth.parent is not None
-    assert auth.parent.span_id == root.context.span_id
+    if auth_span_name is None:
+        assert all(not name.startswith("middleware.auth.") for name in finished)
+    else:
+        auth = finished[auth_span_name]
+        assert auth.parent is not None
+        assert auth.parent.span_id == root.context.span_id
 
     loguru_logger.complete()
     records = _read_json_records(configured_logger)

@@ -2,8 +2,12 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header
+from fastapi import APIRouter, Depends
 
+from internal.dependencies.auth import (
+    AuthenticatedPrincipal,
+    AuthenticatedUserDependency,
+)
 from internal.schemas import BaseResponse
 from internal.schemas.user import (
     UserDetailSchema,
@@ -17,21 +21,18 @@ from internal.services.auth import AuthService, new_auth_service
 from pkg.request_context import get_user_id
 from pkg.api_response import ResponsePayload, success_response
 
-router = APIRouter(prefix="/auth", tags=["authentication"])
+anonymous_router = APIRouter(prefix="/auth", tags=["authentication"])
+authenticated_router = APIRouter(
+    prefix="/auth",
+    tags=["authentication"],
+    dependencies=[AuthenticatedUserDependency],
+)
 
 
 AuthServiceDep = Annotated[AuthService, Depends(new_auth_service)]
 
 
-def _extract_bearer_token(authorization: str | None) -> str | None:
-    if authorization is None:
-        return None
-    if authorization.startswith("Bearer "):
-        return authorization[7:]
-    return authorization
-
-
-@router.post(
+@anonymous_router.post(
     "/login", response_model=BaseResponse[UserLoginRespSchema], summary="用户登录"
 )
 async def login(
@@ -62,12 +63,12 @@ async def login(
     return success_response(data=login_data.to_schema())
 
 
-@router.post(
+@authenticated_router.post(
     "/logout", response_model=BaseResponse[UserLogoutRespSchema], summary="用户登出"
 )
 async def logout(
     auth_service: AuthServiceDep,
-    authorization: str | None = Header(None),
+    principal: Annotated[AuthenticatedPrincipal, AuthenticatedUserDependency],
 ) -> ResponsePayload:
     """用户登出。
 
@@ -82,20 +83,20 @@ async def logout(
 
     Args:
         auth_service: 通过依赖注入获取的 `AuthService` 实例。
-        authorization: `Authorization` 请求头，支持裸 token 或 `Bearer <token>`。
+        principal: Token dependency 返回的认证主体，包含当前 user_id 和原始 token。
 
     Returns:
         `BaseResponse[UserLogoutRespSchema]`：成功时返回登出结果；
         缺少 token 或用户上下文无效返回 `errors.Unauthorized`。
     """
     await auth_service.logout(
-        user_id=get_user_id(),
-        token=_extract_bearer_token(authorization),
+        user_id=principal.user_id,
+        token=principal.token,
     )
     return success_response(data=UserLogoutRespSchema(message="登出成功"))
 
 
-@router.post(
+@anonymous_router.post(
     "/register", response_model=BaseResponse[UserLoginRespSchema], summary="用户注册"
 )
 async def register(
@@ -129,14 +130,14 @@ async def register(
     return success_response(data=login_data.to_schema())
 
 
-@router.get(
+@authenticated_router.get(
     "/me", response_model=BaseResponse[UserDetailSchema], summary="获取当前用户信息"
 )
 async def get_current_user(auth_service: AuthServiceDep) -> ResponsePayload:
     """获取当前用户信息。
 
     业务摘要:
-        根据认证中间件写入的用户上下文返回当前用户基础信息。
+        根据 Token dependency 写入的用户上下文返回当前用户基础信息。
 
     权限边界:
         需要有效的用户 token（`/v1` 前缀默认认证）；只返回当前用户上下文对应的数据。
@@ -156,7 +157,7 @@ async def get_current_user(auth_service: AuthServiceDep) -> ResponsePayload:
     return success_response(data=user_data.to_schema())
 
 
-@router.post(
+@anonymous_router.post(
     "/wechat/login",
     response_model=BaseResponse[UserLoginRespSchema],
     summary="微信登录",

@@ -61,7 +61,8 @@
 - 路由前缀：`/v1` 默认 token 认证，`/v1/public` 默认无认证，`/v1/internal` 默认签名认证。
 - 响应信封：Controller 响应约定和 `BaseResponse[T]` 见 `internal/controllers/AGENTS.md`。
 - 错误码：保持 `internal.core.errors` 的稳定语义。
-- 认证与签名：主要实现位于 `internal/middlewares/auth.py`、`internal/services/auth.py`、`internal/controllers/api/auth.py`。
+- 认证与签名：HTTP 认证依赖位于 `internal/dependencies/auth.py`，会话业务位于
+  `internal/services/auth.py`，认证接口位于 `internal/controllers/api/auth.py`。
 - 配置加载：由 `internal/config.py` 管理；`APP_ENV` 只在仓库根目录 `.env` 中维护，Compose 将其注入进程环境；
   应用据此读取 `configs/.env.{APP_ENV}` 和根目录 `.secrets`。非敏感运行参数必须在环境配置中显式声明，
   `.secrets` 只允许凭据字段；除 `APP_ENV` 外不使用 shell 环境变量兜底。
@@ -86,7 +87,8 @@
 - Service 和依赖注入：`internal/services/AGENTS.md`
 - Agent Service / 会话 / 确认 / 审计：`internal/services/agents/AGENTS.md`
 - Schema：`internal/schemas/AGENTS.md`
-- Middleware / auth / request context：`internal/middlewares/AGENTS.md`
+- HTTP auth dependency / Middleware / request context：`internal/dependencies/auth.py`、
+  `internal/middlewares/AGENTS.md`、`pkg/request_context/AGENTS.md`
 - Infra provider / lifecycle：`internal/infra/AGENTS.md`
 - Model / DAO / Cache：`internal/models/AGENTS.md`、`internal/dao/AGENTS.md`、`internal/cache/AGENTS.md`
 - RAG 业务 repository：`internal/rag/AGENTS.md`

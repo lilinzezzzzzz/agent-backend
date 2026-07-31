@@ -52,15 +52,10 @@ def register_exception(app: FastAPI):
 
 
 def register_middleware(app: FastAPI):
-    # 6. GZip 中间件：压缩响应，提高传输效率
+    # 4. GZip 中间件：压缩响应，提高传输效率
     from starlette.middleware.gzip import GZipMiddleware
 
     app.add_middleware(GZipMiddleware)
-
-    # 4. 认证中间件：校验 Token，确保只有合法用户访问 API
-    from internal.middlewares.auth import ASGIAuthMiddleware
-
-    app.add_middleware(ASGIAuthMiddleware)
 
     # 3. Endpoint Guard 中间件：配置化禁用指定 endpoint，避免进入认证和业务处理
     from internal.middlewares.endpoint_guard import ASGIEndpointGuardMiddleware

@@ -10,6 +10,7 @@ from httpx import ASGITransport, AsyncClient
 from internal.controllers import internal as internal_controller
 from internal.controllers.api import rag as rag_controller
 from internal.controllers.internal import rag as internal_rag_controller
+from internal.dependencies.auth import require_internal_signature
 from internal.schemas.rag import (
     RagAnswerDTO,
     RagCitationDTO,
@@ -80,9 +81,7 @@ async def rag_client():
     app.include_router(internal_controller.router)
     app.dependency_overrides[rag_controller.new_rag_service] = lambda: service
     app.dependency_overrides[internal_rag_controller.new_rag_service] = lambda: service
-    app.dependency_overrides[internal_controller.require_internal_signature] = lambda: (
-        None
-    )
+    app.dependency_overrides[require_internal_signature] = lambda: None
 
     async with AsyncClient(
         transport=ASGITransport(app=app),

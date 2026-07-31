@@ -156,12 +156,15 @@ AGENTSCOPE_WORKSPACE_TTL_SECONDS=3600
 
 当前认证规则：
 
-- `path.startswith("/v1/public")` 直接放行。
+- `/v1/public/**` 挂载在匿名 Router，不执行用户 Token 认证。
 - `/v1/internal/**` 由 Router dependency 使用 `X-Signature`、`X-Timestamp`、`X-Nonce` 签名认证。
-- 其他 HTTP 请求默认 token 认证，读取 `Authorization`，兼容裸 token 和 `Bearer <token>`。
-- token 校验通过后，认证中间件把 `auth_metadata["id"]` 写入 `pkg.request_context.ContextKey.USER_ID`。
+- 其他 `/v1/**` 业务接口由 Router dependency 读取并校验 `Authorization`，兼容裸 token 和
+  `Bearer <token>`。
+- token 校验通过后，认证 dependency 把 `auth_metadata["id"]` 写入
+  `pkg.request_context.ContextKey.USER_ID`。
 
-因此 `/v1/agentscope/*` 不应加入白名单，也不应挂载到 `/v1/public` 或 `/v1/internal` 下。
+因此 `/v1/agentscope/*` 应挂载到受保护的 `/v1` Router，不应放入匿名 Router，也不应挂载到
+`/v1/public` 或 `/v1/internal` 下。
 
 ### 6.2 AgentScope user id 注入
 
@@ -183,7 +186,7 @@ agentscope_app.dependency_overrides[agentscope_get_current_user_id] = get_agents
 安全要求：
 
 - 客户端传入的 `X-User-ID` 不得成为 AgentScope 资源归属依据。
-- 未带 token 访问 `/v1/agentscope/*` 应由项目认证中间件拒绝。
+- 未带 token 访问 `/v1/agentscope/*` 应由项目认证 dependency 拒绝。
 - 已认证请求即使带伪造 `X-User-ID`，AgentScope 内部也只能看到项目 token 中的 user id。
 - 如果 context 中没有 user id，应返回未授权或服务配置错误，不要 fallback 到 header。
 
@@ -399,7 +402,7 @@ AgentScope 子应用使用官方响应结构，不包 `BaseResponse[T]`。但外
 
 | 场景 | 处理 |
 | --- | --- |
-| 未认证访问 `/v1/agentscope/*` | 项目认证中间件返回 `errors.Unauthorized` |
+| 未认证访问 `/v1/agentscope/*` | 项目认证 dependency 返回 `errors.Unauthorized` |
 | `X-User-ID` 伪造 | 忽略 header，使用项目 context user id |
 | Redis / storage 不可用 | 启动失败或 AgentScope 官方错误，不吞异常 |
 | workspace 目录不可创建 | 启动失败 |

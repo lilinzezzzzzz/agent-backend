@@ -1,31 +1,9 @@
 # AGENTS.md
 
-适用于 `pkg/logger/`。父级约束见 `pkg/AGENTS.md`。
+`pkg/logger/` 通过 lazy proxy 暴露统一 Loguru logger。
 
-## 模块职责
-
-基于 Loguru 的统一日志封装。
-
-- `handler.py`：`LoggerHandler`，封装格式、固定文件输出和时区处理。
-- `__init__.py`：通过 `pkg.lazy_proxy.lazy_proxy` 暴露延迟初始化的 `logger` 和 `init_logger`。
-
-## 使用协议
-
-- `init_logger()` 必须在应用启动 lifespan 里调用；`logger` 是 `lazy_proxy`，在 init 之前访问会触发延迟解析（测试中需要 `logger_mock` fixture 预置）。
-- 模块顶层不写日志；所有日志必须在函数/类方法内部产生，避免 import 副作用绑定未初始化 logger。
-
-## 编码约定
-
-- 新增字段先扩展 `LogFormat` / `LoggerHandler` 的参数；不要在业务代码里散落自定义 format string。
-- 应用内不实现 rotation、retention 或 compression；由 Docker logging driver、Linux logrotate 或 Kubernetes 日志平台管理日志生命周期。
-- 不允许在日志 message 或 extra 里出现 token、密码、密钥、连接串明文；必要时先脱敏再落日志。
-- 若要在 `pkg/` 其他基础包中使用，优先接受 logger 注入（参考 `pkg/decorators/`），保持基础包可独立使用。
-
-## 兼容性要求
-
-- `logger` 名称和 `init_logger` 签名被业务代码广泛依赖，改动前先全仓检索并补测试。
-- 日志文件路径、命名和输出目标属于运维契约，变更需要同步 `configs/` 与运维文档。
-
-## 验证重点
-
-- 启动期 init、多次 init 的幂等性、未 init 场景的降级。
+- `init_logger()` 由应用 lifespan 初始化；模块 import 时不得写日志或绑定尚未初始化的 logger。
+- 日志格式和输出目标集中在 `LoggerHandler`，业务代码不散落自定义 format string。
+- 应用内不实现 rotation/retention/compression；日志生命周期由部署层管理。
+- logger 名称、初始化签名、文件路径和输出目标是共享运行 contract，变更时同步调用方、配置和运维文档。
+- message 和 extra 必须脱敏，不记录凭据、连接串或敏感 payload。

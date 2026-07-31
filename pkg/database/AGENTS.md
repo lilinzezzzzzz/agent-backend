@@ -1,39 +1,11 @@
 # AGENTS.md
 
-适用于 `pkg/database/`。
+`pkg/database/` 提供 SQLAlchemy async 基础设施、模型 Mixin、DAO 基类和数据库类型。
 
-## 层职责
-
-本目录提供 SQLAlchemy async 基础设施、模型 Mixin、DAO 基类和数据库类型封装。
-
-## 编码约定
-
-- 保持 SQLAlchemy 2.x typed API 风格。
-- DAO statement factory 和 session provider 是共享基础设施，变更前全仓检索调用方。
-- `BaseDao.select_stmt()`、`count_stmt()` 和 `update_stmt()` 只组合 SQL，不持有 session，也不执行 statement。
-- 普通实体查询通过 `fetch_first()` / `fetch_one()` / `fetch_all()` 执行；页码分页通过 `fetch_page()` 执行，并由
-  调用方提供稳定唯一排序。需要自定义结果形态时直接通过 `read_session_provider()` 获取 session 并执行
-  statement。`update_stmt()` 生成的单语句批量更新通过 `execute_update()` 执行；需要跨语句原子性时才通过
-  `DAO.transaction()` 获取同一个 `AsyncSession`。
-- 查询条件直接使用 ORM column expression；`update_stmt()` 必须拒绝未知或受管理字段，并要求至少一个显式
-  业务条件，不能仅依赖软删除策略限定更新范围。
-- 创建和更新审计统一传 `AuditActor`；无请求用户上下文时默认为 system，异步任务应显式使用 task
-  或 service actor。
-- 类型封装要兼容当前支持的 MySQL、PostgreSQL、Oracle，以及测试中的 SQLite。
-- 当前脚手架不保留旧数据库基础 API 的兼容层；破坏性调整应一次性同步仓库内调用方和测试。DAO statement
-  factory 直接返回 SQLAlchemy statement，不提供自定义 builder 或独立 executor 抽象；通用 `fetch_*` 与
-  `execute_update()` 只封装 session 生命周期和结果提取，显式传入 session 时不得 commit、rollback 或关闭该
-  session。
-
-## 数据库约束
-
-通用数据库硬约束（禁循环内 ORM 调用、批量优先、不吞异常）见全局 `~/.qoder/AGENTS.md` Database / Performance 章节。本包特有约束：
-
-- 批量操作应提供明确的批量接口，不鼓励调用方逐条执行。
-- `fetch_page()` 只校验 `page >= 1` 和 `limit >= 1`；面向用户的最大页大小由 Controller request schema 限制。
-- 复杂 join、去重或聚合分页应向 `fetch_page()` 显式传入与列表语义一致且经过优化的 `count_statement`。
-
-## 验证重点
-
-- 运行 ORM 和数据库类型相关测试，例如 `tests/orm/`、`tests/orm/test_json_type.py`。
-- DAO 基类变更还要运行依赖 `BaseDao` 的业务 DAO 测试。
+- 使用 SQLAlchemy 2.x typed API；statement factory 只组合 SQL，不持有 session 或执行语句。
+- 普通实体查询使用现有 `fetch_*`，页码分页提供稳定唯一排序；复杂 join/聚合分页传入与列表语义一致的
+  `count_statement`。
+- `update_stmt()` 拒绝未知或受管理字段，并要求显式业务条件；批量场景提供批量接口，避免逐条 I/O。
+- 调用方传入 session 时 helper 不得 commit、rollback 或关闭它；跨语句原子性由同一事务 session 保证。
+- 审计 actor、软删除、分页语义和数据库类型需兼容当前支持的方言及测试 SQLite。
+- 当前脚手架不维护已删除基础 API 的兼容层，但破坏性调整必须一次性更新仓库内调用方和测试。

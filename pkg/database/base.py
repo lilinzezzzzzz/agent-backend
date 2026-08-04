@@ -266,11 +266,16 @@ class ModelMixin(Base):
             raise ValueError(f"Managed audit column(s) in {operation} values: {names}")
 
     def extract_db_values(self) -> dict[str, Any]:
-        """提取当前实例中已赋值的数据库列。"""
+        """提取实例中已显式赋值的数据库字段。
+
+        未赋值列从 INSERT values 中省略，由 SQLAlchemy default 或数据库
+        server_default 处理；显式赋值的 None、0 和 False 保留。
+        """
+        assigned_values = inspect(self).dict
         return {
-            column_name: getattr(self, column_name)
+            column_name: assigned_values[column_name]
             for column_name in self.get_column_names()
-            if hasattr(self, column_name)
+            if column_name in assigned_values
         }
 
     def to_dict(

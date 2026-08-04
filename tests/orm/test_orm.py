@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 import pytest_asyncio  # <--- 新增导入
-from sqlalchemy import String, inspect
+from sqlalchemy import Boolean, Integer, String, inspect, text
 from sqlalchemy.exc import MultipleResultsFound
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import Mapped, SessionTransaction, mapped_column
@@ -104,8 +104,23 @@ class Admin(ModelMixin):
     username: Mapped[str] = mapped_column(String(50))
 
 
+class InsertDefaultsModel(ModelMixin):
+    __tablename__ = "insert_defaults"
+    client_value: Mapped[int] = mapped_column(Integer, nullable=False, default=7)
+    server_value: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default=text("'server'")
+    )
+    nullable_value: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    zero_value: Mapped[int] = mapped_column(Integer, nullable=False, default=9)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+
 class UserDao(BaseDao[User]):
     _model_cls: type[User] = User
+
+
+class InsertDefaultsDao(BaseDao[InsertDefaultsModel]):
+    _model_cls: type[InsertDefaultsModel] = InsertDefaultsModel
 
 
 # ==========================================
@@ -312,6 +327,71 @@ def test_dict_insert_fills_none_defaults_and_preserves_zero_id():
     assert generated_id_values["created_at"] == defaults.now
     assert generated_id_values["updated_at"] == defaults.now
     assert zero_id_values["id"] == 0
+
+
+@pytest.mark.asyncio
+async def test_instance_insert_uses_defaults_and_preserves_explicit_values(db_session):
+    dao = InsertDefaultsDao(session_provider=db_session)
+    defaulted = InsertDefaultsModel.create()
+    explicit = InsertDefaultsModel.create(
+        nullable_value=None,
+        zero_value=0,
+        enabled=False,
+    )
+
+    defaulted_values = defaulted.prepare_insert_values()
+    explicit_values = explicit.prepare_insert_values()
+
+    assert "client_value" not in defaulted_values
+    assert "server_value" not in defaulted_values
+    assert "nullable_value" not in defaulted_values
+    assert explicit_values["nullable_value"] is None
+    assert explicit_values["zero_value"] == 0
+    assert explicit_values["enabled"] is False
+
+    await dao.insert(defaulted)
+    await dao.insert(explicit)
+
+    async with db_session() as session:
+        persisted_defaulted = await session.get(InsertDefaultsModel, defaulted.id)
+        persisted_explicit = await session.get(InsertDefaultsModel, explicit.id)
+
+    assert persisted_defaulted is not None
+    assert persisted_defaulted.client_value == 7
+    assert persisted_defaulted.server_value == "server"
+    assert persisted_defaulted.zero_value == 9
+    assert persisted_defaulted.enabled is True
+    assert persisted_explicit is not None
+    assert persisted_explicit.nullable_value is None
+    assert persisted_explicit.zero_value == 0
+    assert persisted_explicit.enabled is False
+
+
+@pytest.mark.asyncio
+async def test_batch_instance_insert_uses_per_instance_defaults(db_session):
+    dao = InsertDefaultsDao(session_provider=db_session)
+    defaulted = InsertDefaultsModel.create()
+    explicit = InsertDefaultsModel.create(
+        nullable_value=None,
+        zero_value=0,
+        enabled=False,
+    )
+
+    await dao.insert_instances(items=[defaulted, explicit])
+
+    async with db_session() as session:
+        persisted_defaulted = await session.get(InsertDefaultsModel, defaulted.id)
+        persisted_explicit = await session.get(InsertDefaultsModel, explicit.id)
+
+    assert persisted_defaulted is not None
+    assert persisted_defaulted.client_value == 7
+    assert persisted_defaulted.server_value == "server"
+    assert persisted_defaulted.zero_value == 9
+    assert persisted_defaulted.enabled is True
+    assert persisted_explicit is not None
+    assert persisted_explicit.nullable_value is None
+    assert persisted_explicit.zero_value == 0
+    assert persisted_explicit.enabled is False
 
 
 @pytest.mark.asyncio

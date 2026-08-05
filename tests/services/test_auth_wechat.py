@@ -7,12 +7,12 @@ from pydantic import SecretStr
 from internal.core import AppException
 from internal.services import auth as auth_module
 from internal.services.auth import AuthService
-from pkg.third_party_auth.base import ThirdPartyUserInfo
+from pkg.identity_provider import ExternalIdentityProfile
 
 pytestmark = pytest.mark.asyncio
 
 
-class FakeWeChatStrategy:
+class FakeWeChatIdentityProvider:
     def __init__(self, *, returned_open_id: str = "openid-1") -> None:
         self.returned_open_id = returned_open_id
         self.close = AsyncMock()
@@ -23,10 +23,10 @@ class FakeWeChatStrategy:
 
     async def get_user_info(
         self, access_token: str, open_id: str
-    ) -> ThirdPartyUserInfo:
+    ) -> ExternalIdentityProfile:
         assert access_token == "ephemeral-token"
         assert open_id == "openid-1"
-        return ThirdPartyUserInfo(
+        return ExternalIdentityProfile(
             open_id=self.returned_open_id,
             union_id="union-1",
             nickname="wechat user",
@@ -34,7 +34,14 @@ class FakeWeChatStrategy:
         )
 
 
-def _patch_wechat_dependencies(monkeypatch, strategy: FakeWeChatStrategy) -> None:
+def _patch_wechat_dependencies(
+    monkeypatch, provider: FakeWeChatIdentityProvider
+) -> None:
+    def create_provider(provider_type, *, config):
+        assert provider_type is auth_module.IdentityProviderType.WECHAT
+        assert config.app_id == "app-id"
+        return provider
+
     monkeypatch.setattr(
         auth_module,
         "settings",
@@ -46,16 +53,16 @@ def _patch_wechat_dependencies(monkeypatch, strategy: FakeWeChatStrategy) -> Non
     )
     monkeypatch.setattr(
         auth_module,
-        "WeChatAuthStrategy",
-        lambda *, config: strategy,
+        "IdentityProviderRegistry",
+        SimpleNamespace(create=create_provider),
     )
 
 
 async def test_wechat_login_maps_identity_without_persisting_provider_token(
     monkeypatch,
 ) -> None:
-    strategy = FakeWeChatStrategy()
-    _patch_wechat_dependencies(monkeypatch, strategy)
+    provider = FakeWeChatIdentityProvider()
+    _patch_wechat_dependencies(monkeypatch, provider)
     auth_cache = SimpleNamespace(save_user_session=AsyncMock())
     user = SimpleNamespace(
         id=1001,
@@ -79,12 +86,12 @@ async def test_wechat_login_maps_identity_without_persisting_provider_token(
         nickname="wechat user",
         avatar="https://example.com/avatar.png",
     )
-    strategy.close.assert_awaited_once_with()
+    provider.close.assert_awaited_once_with()
 
 
 async def test_wechat_login_rejects_mismatched_subject(monkeypatch) -> None:
-    strategy = FakeWeChatStrategy(returned_open_id="different-openid")
-    _patch_wechat_dependencies(monkeypatch, strategy)
+    provider = FakeWeChatIdentityProvider(returned_open_id="different-openid")
+    _patch_wechat_dependencies(monkeypatch, provider)
     user_service = SimpleNamespace(get_or_create_user_by_external_identity=AsyncMock())
     service = AuthService(
         auth_cache=SimpleNamespace(save_user_session=AsyncMock()),
@@ -96,4 +103,4 @@ async def test_wechat_login_rejects_mismatched_subject(monkeypatch) -> None:
 
     assert exc_info.value.message == "微信身份校验失败"
     user_service.get_or_create_user_by_external_identity.assert_not_awaited()
-    strategy.close.assert_awaited_once_with()
+    provider.close.assert_awaited_once_with()

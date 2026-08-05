@@ -27,7 +27,7 @@
 ```text
 POST /v1/auth/wechat/login
   -> AuthService.wechat_login()
-  -> WeChatAuthStrategy 获取 token 和用户资料
+  -> WeChatIdentityProvider 获取 token 和用户资料
   -> UserService.get_or_create_user_by_external_identity()
   -> 创建应用会话 token
 ```
@@ -68,7 +68,7 @@ Content-Type: application/json
 
 扩展其他提供方或新增同一提供方的第二个 client 时，需要同步完成：
 
-1. 实现对应的 `BaseThirdPartyAuthStrategy`。
+1. 实现对应的 `BaseIdentityProvider`，并注册到 `IdentityProviderRegistry`。
 2. 为连接分配不可复用的稳定 `connection_key`。
 3. 校验提供方响应中的 subject 与授权流程返回的 subject 一致。
 4. 将标准化后的 subject 和非身份快照传给

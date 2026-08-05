@@ -9,8 +9,12 @@ from internal.core import AppException, errors
 from internal.models.user import User
 from internal.schemas.user import AuthUserDTO, UserLoginDTO
 from internal.services.user import UserService, new_user_service
+from pkg.identity_provider import (
+    IdentityProviderRegistry,
+    IdentityProviderType,
+    WeChatConfig,
+)
 from pkg.logger import logger
-from pkg.third_party_auth import WeChatAuthStrategy, WeChatConfig
 
 TOKEN_EXPIRE_SECONDS = 1800
 WECHAT_CONNECTION_KEY = "wechat_default"
@@ -111,7 +115,8 @@ class AuthService:
 
     async def wechat_login(self, *, code: str) -> UserLoginDTO:
         """使用微信授权码登录并创建用户会话。"""
-        strategy = WeChatAuthStrategy(
+        provider = IdentityProviderRegistry.create(
+            IdentityProviderType.WECHAT,
             config=WeChatConfig(
                 app_id=settings.WECHAT_APP_ID,
                 app_secret=settings.WECHAT_APP_SECRET.get_secret_value(),
@@ -120,13 +125,13 @@ class AuthService:
         )
 
         try:
-            token_result = await strategy.get_access_token(code)
+            token_result = await provider.get_access_token(code)
             access_token = token_result.get("access_token")
             openid = token_result.get("openid")
             if not access_token or not openid:
                 raise AppException(errors.BadRequest, message="微信授权失败")
 
-            wechat_user_info = await strategy.get_user_info(access_token, openid)
+            wechat_user_info = await provider.get_user_info(access_token, openid)
             if wechat_user_info.open_id != openid:
                 raise AppException(errors.BadRequest, message="微信身份校验失败")
             user = await self._user_service.get_or_create_user_by_external_identity(
@@ -151,7 +156,7 @@ class AuthService:
                 errors.InternalServerError, message="微信登录失败，请稍后重试"
             ) from exc
         finally:
-            await strategy.close()
+            await provider.close()
 
         logger.info(f"WeChat user {user.id} logged in successfully")
         return UserLoginDTO(user=self._build_user_dto(user), token=token)

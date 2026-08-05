@@ -1,16 +1,13 @@
-import asyncio
-from collections.abc import Callable, Coroutine, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from functools import partial
 from typing import Any, cast
 
-from celery import Celery, signals
+from celery import Celery
 from celery.result import AsyncResult
 
 from pkg.concurrency import anyio_run_in_thread
-from pkg.logger import logger
-
-LifecycleHook = Callable[[], Any] | Callable[[], Coroutine[Any, Any, Any]]
+from pkg.celery_queue.lifecycle import register_worker_hooks
 
 
 def _is_valid_trace_id(trace_id: str) -> bool:
@@ -212,51 +209,5 @@ class CeleryClient:
         """在线程中撤销 Celery 任务，避免阻塞 async 调用方。"""
         await anyio_run_in_thread(self.revoke, task_id, terminate=terminate)
 
-    # ------------------------------
-    # 3. 生命周期管理
-    # ------------------------------
-    @staticmethod
-    def register_worker_hooks(
-        on_startup: LifecycleHook | None = None,
-        on_shutdown: LifecycleHook | None = None,
-    ):
-        """
-        注册 Worker 进程生命周期钩子
-        注意：使用了 dispatch_uid 防止在多实例下重复注册
-        """
-
-        # --- Startup Handler ---
-        if on_startup:
-
-            @signals.worker_process_init.connect(
-                weak=False, dispatch_uid="pkg_celery_worker_startup"
-            )
-            def _wrapper_startup(**kwargs):
-                try:
-                    if asyncio.iscoroutinefunction(on_startup):
-                        asyncio.run(on_startup())
-                    else:
-                        on_startup()
-                    logger.success("Worker startup hook executed successfully.")
-                except Exception as e:
-                    logger.critical(f"Worker startup hook failed: {e}")
-                    raise e
-
-        # --- Shutdown Handler ---
-        if on_shutdown:
-
-            @signals.worker_process_shutdown.connect(
-                weak=False, dispatch_uid="pkg_celery_worker_shutdown"
-            )
-            def _wrapper_shutdown(**kwargs):
-                logger.info("Executing registered worker shutdown hook...")
-                try:
-                    if asyncio.iscoroutinefunction(on_shutdown):
-                        # 修复: 必须同步运行，确保在进程退出前完成清理
-                        # 严禁在此处使用 loop.create_task，否则进程会立即退出导致清理中断
-                        asyncio.run(on_shutdown())
-                    else:
-                        on_shutdown()
-                    logger.info("Worker shutdown hook executed successfully.")
-                except Exception as e:
-                    logger.warning(f"Worker shutdown hook error: {e}")
+    # 兼容已有调用；实现由独立 lifecycle 模块维护。
+    register_worker_hooks = staticmethod(register_worker_hooks)

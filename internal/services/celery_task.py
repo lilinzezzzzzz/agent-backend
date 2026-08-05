@@ -14,7 +14,7 @@ from internal.schemas.celery_task import (
     CeleryTaskErrorCode,
     CeleryTaskStatus,
 )
-from pkg.celery_queue import CeleryClient
+from pkg.celery_queue.client import CeleryClient
 from pkg.database.session import SessionProvider
 from pkg.ids import snowflake_id_generator
 from pkg.logger import logger
@@ -340,7 +340,7 @@ def new_celery_task_service() -> CeleryTaskService:
     """获取 CeleryTaskService 单例。"""
     global _celery_task_service
     if _celery_task_service is None:
-        from internal.infra.celery import celery_client
+        from internal.infra.celery.application import celery_client
 
         dao = new_celery_task_dao()
         _celery_task_service = CeleryTaskService(

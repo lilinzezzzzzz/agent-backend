@@ -29,7 +29,7 @@ if ! command -v uv &> /dev/null; then
 fi
 
 # 启动 Worker
-exec uv run celery -A internal.infra.celery:celery_app worker \
+exec uv run celery -A internal.infra.celery.application:celery_app worker \
     -l "$LOG_LEVEL" \
     -c "$CONCURRENCY" \
     -Q "$QUEUES" \

@@ -3,7 +3,7 @@ import time
 import pytest
 from celery.result import AsyncResult
 
-from internal.infra.celery import celery_app, celery_client
+from internal.infra.celery.application import celery_app, celery_client
 from internal.tasks.celery import number_sum
 
 pytestmark = pytest.mark.integration

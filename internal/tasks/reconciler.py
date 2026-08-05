@@ -2,7 +2,8 @@ from uuid import uuid4
 
 from internal.config import settings
 from internal.dao.celery_task import new_celery_task_dao
-from internal.infra.celery import celery_client, run_in_async
+from internal.infra.celery.application import celery_client
+from internal.infra.celery.execution import run_in_async
 from internal.tasks.constants import (
     EXECUTION_RECONCILER_TASK_NAME,
     QUEUED_RECONCILER_TASK_NAME,

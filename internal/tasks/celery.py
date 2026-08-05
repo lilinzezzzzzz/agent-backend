@@ -11,7 +11,8 @@
 
 from collections.abc import Mapping
 
-from internal.infra.celery import celery_client, run_in_async
+from internal.infra.celery.application import celery_client
+from internal.infra.celery.execution import run_in_async
 from pkg.logger import logger
 
 

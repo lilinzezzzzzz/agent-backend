@@ -3,7 +3,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from pkg.celery_queue import CeleryClient
+from pkg.celery_queue.client import CeleryClient
 
 
 @pytest.fixture

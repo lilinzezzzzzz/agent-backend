@@ -4,7 +4,7 @@ import pytest
 from fastapi import FastAPI
 
 import internal.app as app_module
-import internal.infra.celery as celery_module
+import internal.infra.celery.lifecycle as celery_lifecycle
 
 
 @pytest.mark.asyncio
@@ -38,12 +38,12 @@ async def test_fastapi_shutdown_waits_for_enqueued_logs(
 async def test_celery_worker_shutdown_waits_for_enqueued_logs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(celery_module, "shutdown_tracing", MagicMock())
+    monkeypatch.setattr(celery_lifecycle, "shutdown_tracing", MagicMock())
     complete = AsyncMock()
     logger = MagicMock()
     logger.complete = complete
-    monkeypatch.setattr(celery_module, "logger", logger)
+    monkeypatch.setattr(celery_lifecycle, "logger", logger)
 
-    await celery_module._worker_shutdown()
+    await celery_lifecycle.worker_shutdown()
 
     complete.assert_awaited_once_with()

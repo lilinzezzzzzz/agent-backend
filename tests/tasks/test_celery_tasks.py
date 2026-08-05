@@ -1,6 +1,6 @@
 import pytest
 
-from internal.infra.celery import celery_app
+from internal.infra.celery.application import celery_app
 from internal.tasks import celery as celery_tasks
 from internal.tasks.celery import number_sum
 from pkg.logger import init_logger

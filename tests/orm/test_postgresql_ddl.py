@@ -12,8 +12,8 @@ from internal.models.agent_conversation import (
     AgentSession,
 )
 from internal.models.celery_task import CeleryTaskRecord
+from internal.models.external_identity import ExternalIdentity
 from internal.models.scoped_operation_lock import ScopedOperationLock
-from internal.models.third_party_account import ThirdPartyAccount
 from internal.models.user import User
 
 
@@ -27,8 +27,8 @@ MODEL_TABLES = tuple(
             AgentRunStep.__table__,
             AgentSession.__table__,
             CeleryTaskRecord.__table__,
+            ExternalIdentity.__table__,
             ScopedOperationLock.__table__,
-            ThirdPartyAccount.__table__,
             User.__table__,
         ),
         key=lambda table: table.name,

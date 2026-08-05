@@ -231,17 +231,16 @@ CREATE TABLE scoped_operation_locks (
         UNIQUE (operation_scope, resource_key)
 );
 
-CREATE TABLE third_party_account (
+CREATE TABLE external_identity (
     user_id BIGINT NOT NULL,
-    platform VARCHAR(32) NOT NULL,
-    open_id VARCHAR(256) NOT NULL,
+    provider VARCHAR(32) NOT NULL,
+    connection_key VARCHAR(64) NOT NULL,
+    subject VARCHAR(256) NOT NULL,
+    email_snapshot VARCHAR(255),
     union_id VARCHAR(256),
-    avatar VARCHAR(512),
-    nickname VARCHAR(128),
-    access_token VARCHAR(512),
-    refresh_token VARCHAR(512),
-    expires_at TIMESTAMP WITHOUT TIME ZONE,
-    extra_data JSONB,
+    nickname_snapshot VARCHAR(128),
+    avatar_snapshot VARCHAR(512),
+    last_authenticated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
     id BIGINT NOT NULL,
     creator_id BIGINT,
     creator_type VARCHAR(32) NOT NULL,
@@ -251,19 +250,12 @@ CREATE TABLE third_party_account (
     created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
     deleted_at TIMESTAMP WITHOUT TIME ZONE,
     PRIMARY KEY (id),
-    CONSTRAINT uq_platform_openid UNIQUE (platform, open_id)
+    CONSTRAINT uq_external_identity_subject
+        UNIQUE (provider, connection_key, subject)
 );
 
-CREATE INDEX idx_user_platform
-    ON third_party_account (user_id, platform);
-CREATE INDEX ix_third_party_account_open_id
-    ON third_party_account (open_id);
-CREATE INDEX ix_third_party_account_platform
-    ON third_party_account (platform);
-CREATE INDEX ix_third_party_account_union_id
-    ON third_party_account (union_id);
-CREATE INDEX ix_third_party_account_user_id
-    ON third_party_account (user_id);
+CREATE INDEX idx_external_identity_user_provider
+    ON external_identity (user_id, provider, deleted_at);
 
 CREATE TABLE "user" (
     username VARCHAR(64) NOT NULL,

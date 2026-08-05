@@ -1,18 +1,23 @@
-from internal.dao.third_party_account import (
-    ThirdPartyAccountDao,
-    new_third_party_account_dao,
+import hashlib
+
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from internal.dao.external_identity import (
+    ExternalIdentityDao,
+    new_external_identity_dao,
 )
 from internal.dao.user import UserDao, new_user_dao
 from internal.models.user import User
 from internal.utils.password import PasswordHandler
 from pkg.database.audit import AuditActor
-from pkg.third_party_auth.base import ThirdPartyUserInfo
+from pkg.toolkit.timer import utc_now_naive
 
 
 class UserService:
-    def __init__(self, dao: UserDao, third_party_dao: ThirdPartyAccountDao):
+    def __init__(self, dao: UserDao, external_identity_dao: ExternalIdentityDao):
         self._user_dao = dao
-        self._third_party_dao = third_party_dao
+        self._external_identity_dao = external_identity_dao
 
     @staticmethod
     async def hello_world():
@@ -78,108 +83,176 @@ class UserService:
 
         return user
 
-    async def get_or_create_user_by_third_party(
-        self, platform: str, third_party_info: ThirdPartyUserInfo
+    async def get_or_create_user_by_external_identity(
+        self,
+        *,
+        provider: str,
+        connection_key: str,
+        subject: str,
+        email: str | None = None,
+        union_id: str | None = None,
+        nickname: str | None = None,
+        avatar: str | None = None,
     ) -> User:
-        """
-        根据第三方用户信息获取或创建用户
-
-        Args:
-            platform: 平台名称 (wechat, alipay, google, github 等)
-            third_party_info: 第三方用户信息
-
-        Returns:
-            User: 用户对象
-        """
-        # 查询第三方账号是否已存在
-        existing_account = await self._third_party_dao.get_by_platform_and_openid(
-            platform, third_party_info.open_id
+        """按外部稳定身份获取用户，不存在时原子创建用户和映射。"""
+        self._validate_external_identity_key(
+            provider=provider,
+            connection_key=connection_key,
+            subject=subject,
         )
+        email = self._snapshot(email, max_length=255)
+        union_id = self._snapshot(union_id, max_length=256)
+        nickname = self._snapshot(nickname, max_length=128)
+        avatar = self._snapshot(avatar, max_length=512)
 
-        # 如果账号已存在，返回关联的用户
-        if existing_account:
-            user = await self._user_dao.query_by_primary_id(existing_account.user_id)
-            if not user:
-                raise RuntimeError(f"User {existing_account.user_id} not found")
+        try:
+            return await self._get_or_create_external_identity_in_transaction(
+                provider=provider,
+                connection_key=connection_key,
+                subject=subject,
+                email=email,
+                union_id=union_id,
+                nickname=nickname,
+                avatar=avatar,
+            )
+        except IntegrityError:
+            # 并发首登时仅一个事务能创建唯一身份。失败方读取获胜事务的结果。
+            identity = await self._external_identity_dao.get_by_identity(
+                provider=provider,
+                connection_key=connection_key,
+                subject=subject,
+            )
+            if identity is None:
+                raise
+            user = await self._get_active_user_from_primary(identity.user_id)
+            if user is None:
+                raise RuntimeError(
+                    f"External identity {identity.id} references a missing user"
+                )
             return user
 
-        # 否则创建新用户并绑定第三方账号
-        username = (
-            third_party_info.nickname or f"{platform}_{third_party_info.open_id[:8]}"
-        )
-
-        # 创建用户
-        user = self._user_dao.create(
-            username=username,
-            account=f"{platform}_{third_party_info.open_id}",
-            phone="",  # 第三方登录默认无手机号，需要后续绑定
-            password_hash=None,  # 无密码
-        )
-
-        # 创建第三方账号关联记录
-        self._third_party_dao.create(
-            user_id=user.id,
-            platform=platform,
-            open_id=third_party_info.open_id,
-            union_id=third_party_info.union_id,
-            avatar=third_party_info.avatar,
-            nickname=third_party_info.nickname,
-            access_token=getattr(third_party_info, "access_token", None),
-            refresh_token=getattr(third_party_info, "refresh_token", None),
-            expires_at=getattr(third_party_info, "expires_at", None),
-            extra_data=getattr(third_party_info, "extra_data", None),
-        )
-
-        return user
-
-    async def bind_third_party_account(
-        self, user: User, platform: str, third_party_info: ThirdPartyUserInfo
-    ) -> None:
-        """
-        将第三方账号绑定到现有用户
-
-        Args:
-            user: 现有用户对象
-            platform: 平台名称
-            third_party_info: 第三方用户信息
-
-        Raises:
-            ValueError: 当该第三方账号已被其他用户绑定时
-        """
-        # 检查该第三方账号是否已被绑定
-        existing_account = await self._third_party_dao.get_by_platform_and_openid(
-            platform, third_party_info.open_id
-        )
-
-        if existing_account and existing_account.user_id != user.id:
-            raise ValueError(f"该{platform}账号已被其他用户绑定")
-
-        # 如果已经绑定到当前用户，更新信息
-        if existing_account:
-            await self._third_party_dao.update(
-                existing_account,
-                union_id=third_party_info.union_id,
-                avatar=third_party_info.avatar,
-                nickname=third_party_info.nickname,
-                access_token=getattr(third_party_info, "access_token", None),
-                refresh_token=getattr(third_party_info, "refresh_token", None),
-                expires_at=getattr(third_party_info, "expires_at", None),
-                extra_data=getattr(third_party_info, "extra_data", None),
+    async def _get_or_create_external_identity_in_transaction(
+        self,
+        *,
+        provider: str,
+        connection_key: str,
+        subject: str,
+        email: str | None,
+        union_id: str | None,
+        nickname: str | None,
+        avatar: str | None,
+    ) -> User:
+        authenticated_at = utc_now_naive()
+        async with self._user_dao.transaction() as session:
+            identity = await self._external_identity_dao.get_by_identity(
+                provider=provider,
+                connection_key=connection_key,
+                subject=subject,
+                include_deleted=True,
+                for_update=True,
+                session=session,
             )
-        else:
-            # 创建新的绑定关系
-            self._third_party_dao.create(
+            if identity is not None:
+                user = await self._get_active_user(identity.user_id, session=session)
+                if user is None:
+                    raise RuntimeError(
+                        f"External identity {identity.id} references a missing user"
+                    )
+                updates: dict[str, object] = {
+                    "last_authenticated_at": authenticated_at,
+                }
+                if identity.deleted_at is not None:
+                    updates["deleted_at"] = None
+                if email is not None:
+                    updates["email_snapshot"] = email
+                if union_id is not None:
+                    updates["union_id"] = union_id
+                if nickname is not None:
+                    updates["nickname_snapshot"] = nickname
+                if avatar is not None:
+                    updates["avatar_snapshot"] = avatar
+                statement = self._external_identity_dao.update_stmt(
+                    self._external_identity_dao.model_cls.id == identity.id,
+                    values=updates,
+                    audit_actor=AuditActor.system(),
+                    include_deleted=True,
+                )
+                updated = await self._external_identity_dao.execute_update(
+                    statement,
+                    session=session,
+                )
+                if updated != 1:
+                    raise RuntimeError(
+                        f"External identity {identity.id} no longer exists"
+                    )
+                return user
+
+            identity_digest = hashlib.sha256(
+                f"{provider}\0{connection_key}\0{subject}".encode()
+            ).hexdigest()
+            username = (nickname or f"{provider}_user_{identity_digest[:8]}")[:64]
+            user = self._user_dao.create(
+                audit_actor=AuditActor.system(),
+                username=username,
+                account=f"external_{identity_digest[:32]}",
+                phone="",
+                password_hash=None,
+            )
+            identity = self._external_identity_dao.create(
+                audit_actor=AuditActor.system(),
                 user_id=user.id,
-                platform=platform,
-                open_id=third_party_info.open_id,
-                union_id=third_party_info.union_id,
-                avatar=third_party_info.avatar,
-                nickname=third_party_info.nickname,
-                access_token=getattr(third_party_info, "access_token", None),
-                refresh_token=getattr(third_party_info, "refresh_token", None),
-                expires_at=getattr(third_party_info, "expires_at", None),
-                extra_data=getattr(third_party_info, "extra_data", None),
+                provider=provider,
+                connection_key=connection_key,
+                subject=subject,
+                email_snapshot=email,
+                union_id=union_id,
+                nickname_snapshot=nickname,
+                avatar_snapshot=avatar,
+                last_authenticated_at=authenticated_at,
             )
+            session.add_all((user, identity))
+            return user
+
+    async def _get_active_user(
+        self,
+        user_id: int,
+        *,
+        session: AsyncSession,
+    ) -> User | None:
+        statement = (
+            self._user_dao.select_stmt()
+            .where(self._user_dao.model_cls.id == user_id)
+            .with_for_update()
+        )
+        return await self._user_dao.fetch_one(statement, session=session)
+
+    async def _get_active_user_from_primary(self, user_id: int) -> User | None:
+        statement = self._user_dao.select_stmt().where(
+            self._user_dao.model_cls.id == user_id
+        )
+        async with self._user_dao.session_provider() as session:
+            return await self._user_dao.fetch_one(statement, session=session)
+
+    @staticmethod
+    def _snapshot(value: str | None, *, max_length: int) -> str | None:
+        if not value:
+            return None
+        return value[:max_length]
+
+    @staticmethod
+    def _validate_external_identity_key(
+        *, provider: str, connection_key: str, subject: str
+    ) -> None:
+        limits = {
+            "provider": (provider, 32),
+            "connection_key": (connection_key, 64),
+            "subject": (subject, 256),
+        }
+        for name, (value, max_length) in limits.items():
+            if not value:
+                raise ValueError(f"{name} must not be empty")
+            if len(value) > max_length:
+                raise ValueError(f"{name} exceeds {max_length} characters")
 
 
 # 全局单例（懒加载）
@@ -192,6 +265,6 @@ def new_user_service() -> UserService:
     if _user_service is None:
         _user_service = UserService(
             dao=new_user_dao(),
-            third_party_dao=new_third_party_account_dao(),
+            external_identity_dao=new_external_identity_dao(),
         )
     return _user_service

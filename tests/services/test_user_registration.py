@@ -16,7 +16,7 @@ async def test_create_user_persists_constructed_model(monkeypatch) -> None:
     monkeypatch.setattr(
         "internal.services.user.PasswordHandler.hash_password", lambda _: "hashed"
     )
-    service = UserService(dao=user_dao, third_party_dao=MagicMock())
+    service = UserService(dao=user_dao, external_identity_dao=MagicMock())
 
     result = await service.create_user(
         username="new-user",

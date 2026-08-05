@@ -13,6 +13,7 @@ from pkg.logger import logger
 from pkg.third_party_auth import WeChatAuthStrategy, WeChatConfig
 
 TOKEN_EXPIRE_SECONDS = 1800
+WECHAT_CONNECTION_KEY = "wechat_default"
 
 
 class AuthService:
@@ -126,9 +127,15 @@ class AuthService:
                 raise AppException(errors.BadRequest, message="微信授权失败")
 
             wechat_user_info = await strategy.get_user_info(access_token, openid)
-            user = await self._user_service.get_or_create_user_by_third_party(
-                platform="wechat",
-                third_party_info=wechat_user_info,
+            if wechat_user_info.open_id != openid:
+                raise AppException(errors.BadRequest, message="微信身份校验失败")
+            user = await self._user_service.get_or_create_user_by_external_identity(
+                provider="wechat",
+                connection_key=WECHAT_CONNECTION_KEY,
+                subject=openid,
+                union_id=wechat_user_info.union_id,
+                nickname=wechat_user_info.nickname,
+                avatar=wechat_user_info.avatar,
             )
 
             token = self.generate_token()
@@ -146,7 +153,7 @@ class AuthService:
         finally:
             await strategy.close()
 
-        logger.info(f"WeChat user {user.id} logged in successfully, openid: {openid}")
+        logger.info(f"WeChat user {user.id} logged in successfully")
         return UserLoginDTO(user=self._build_user_dto(user), token=token)
 
     async def verify_token(self, token: str) -> dict:

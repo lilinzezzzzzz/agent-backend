@@ -1,8 +1,9 @@
-from fastapi import APIRouter
+from typing import Annotated
+
+from fastapi import APIRouter, Depends
 
 from internal.config import settings
 from internal.core import AppException, errors
-from internal.dependencies.celery_task import CeleryTaskServiceDep
 from internal.schemas import BaseResponse
 from internal.schemas.celery_task import (
     CeleryTaskCancelRespSchema,
@@ -14,6 +15,7 @@ from internal.tasks.constants import (
     IDEMPOTENT_SUM_QUEUE,
     IDEMPOTENT_SUM_TASK_NAME,
 )
+from internal.services.celery_task import CeleryTaskService, new_celery_task_service
 from pkg.api_response import ResponsePayload, success_response
 from pkg.request_context import get_trace_id, get_user_id
 
@@ -28,7 +30,7 @@ router = APIRouter(prefix="/celery-tasks", tags=["api celery tasks"])
 )
 async def create_idempotent_sum_task(
     req: IdempotentSumCreateReqSchema,
-    service: CeleryTaskServiceDep,
+    service: Annotated[CeleryTaskService, Depends(new_celery_task_service)],
 ) -> ResponsePayload:
     """创建幂等 Celery 加法任务。
 
@@ -74,7 +76,7 @@ async def create_idempotent_sum_task(
 )
 async def get_celery_task(
     record_id: int,
-    service: CeleryTaskServiceDep,
+    service: Annotated[CeleryTaskService, Depends(new_celery_task_service)],
 ) -> ResponsePayload:
     """查询 Celery 逻辑任务。
 
@@ -106,7 +108,7 @@ async def get_celery_task(
 )
 async def cancel_celery_task(
     record_id: int,
-    service: CeleryTaskServiceDep,
+    service: Annotated[CeleryTaskService, Depends(new_celery_task_service)],
 ) -> ResponsePayload:
     """幂等请求取消指定 Celery 逻辑任务。
 

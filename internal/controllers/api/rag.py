@@ -1,8 +1,10 @@
-from fastapi import APIRouter
+from typing import Annotated
 
-from internal.dependencies.rag import RagServiceDep
+from fastapi import APIRouter, Depends
+
 from internal.schemas import BaseResponse
 from internal.schemas.rag import RagAnswerReqSchema, RagAnswerRespSchema
+from internal.services.rag import RagService, new_rag_service
 from pkg.api_response import ResponsePayload, success_response
 from pkg.request_context import get_user_id
 
@@ -16,7 +18,7 @@ router = APIRouter(prefix="/rag", tags=["api rag"])
 )
 async def answer_rag_question(
     req: RagAnswerReqSchema,
-    rag_service: RagServiceDep,
+    rag_service: Annotated[RagService, Depends(new_rag_service)],
 ) -> ResponsePayload:
     """执行用户态 RAG 知识问答。
 

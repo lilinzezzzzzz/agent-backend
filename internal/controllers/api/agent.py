@@ -1,12 +1,16 @@
 from collections.abc import AsyncIterable, AsyncIterator
+from typing import Annotated
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
-from internal.dependencies.agents import (
-    AgentRouterServiceDep,
-    OrderAgentServiceDep,
-    PaymentAgentServiceDep,
+from internal.services.agents import (
+    AgentRouterService,
+    OrderAgentService,
+    PaymentAgentService,
+    new_agent_router_service,
+    new_order_agent_service,
+    new_payment_agent_service,
 )
 from internal.schemas import BaseResponse
 from internal.schemas.agent import (
@@ -37,7 +41,10 @@ _SSE_HEADERS = {
 )
 async def agent_chat(
     req: AgentChatReqSchema,
-    agent_router_service: AgentRouterServiceDep,
+    agent_router_service: Annotated[
+        AgentRouterService,
+        Depends(new_agent_router_service),
+    ],
 ) -> ResponsePayload:
     """路由统一 Agent 聊天请求。
 
@@ -80,7 +87,10 @@ async def agent_chat(
 )
 async def agent_chat_stream(
     req: AgentChatReqSchema,
-    agent_router_service: AgentRouterServiceDep,
+    agent_router_service: Annotated[
+        AgentRouterService,
+        Depends(new_agent_router_service),
+    ],
 ) -> StreamingResponse:
     """流式路由统一 Agent 聊天请求。
 
@@ -123,7 +133,10 @@ async def agent_chat_stream(
 )
 async def order_support_agent(
     req: AgentOrderSupportReqSchema,
-    order_agent_service: OrderAgentServiceDep,
+    order_agent_service: Annotated[
+        OrderAgentService,
+        Depends(new_order_agent_service),
+    ],
 ) -> ResponsePayload:
     """订单支持 Agent。
 
@@ -168,7 +181,10 @@ async def order_support_agent(
 )
 async def order_support_agent_stream(
     req: AgentOrderSupportReqSchema,
-    order_agent_service: OrderAgentServiceDep,
+    order_agent_service: Annotated[
+        OrderAgentService,
+        Depends(new_order_agent_service),
+    ],
 ) -> StreamingResponse:
     """流式执行订单支持 Agent。
 
@@ -211,7 +227,10 @@ async def order_support_agent_stream(
 )
 async def payment_support_agent(
     req: AgentPaymentSupportReqSchema,
-    payment_agent_service: PaymentAgentServiceDep,
+    payment_agent_service: Annotated[
+        PaymentAgentService,
+        Depends(new_payment_agent_service),
+    ],
 ) -> ResponsePayload:
     """支付支持 Agent。
 
@@ -255,7 +274,10 @@ async def payment_support_agent(
 )
 async def payment_support_agent_stream(
     req: AgentPaymentSupportReqSchema,
-    payment_agent_service: PaymentAgentServiceDep,
+    payment_agent_service: Annotated[
+        PaymentAgentService,
+        Depends(new_payment_agent_service),
+    ],
 ) -> StreamingResponse:
     """流式执行支付支持 Agent。
 

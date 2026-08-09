@@ -1,8 +1,10 @@
-from fastapi import APIRouter
+from typing import Annotated
 
-from internal.dependencies.rag import RagServiceDep
+from fastapi import APIRouter, Depends
+
 from internal.schemas import BaseResponse
 from internal.schemas.rag import RagExternalRunReqSchema, RagExternalRunRespSchema
+from internal.services.rag import RagService, new_rag_service
 from pkg.api_response import ResponsePayload, success_response
 
 router = APIRouter(prefix="/rag", tags=["internal rag"])
@@ -15,7 +17,7 @@ router = APIRouter(prefix="/rag", tags=["internal rag"])
 )
 async def create_rag_external_run(
     req: RagExternalRunReqSchema,
-    rag_service: RagServiceDep,
+    rag_service: Annotated[RagService, Depends(new_rag_service)],
 ) -> ResponsePayload:
     """运行单个外部 RAG case 并返回运行数据。
 

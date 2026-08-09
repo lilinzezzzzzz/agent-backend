@@ -7,15 +7,15 @@ Span 会由 tracing runtime 异步上报到 Collector；模拟接口只返回 tr
 
 from typing import Annotated
 
-from fastapi import APIRouter, Path
+from fastapi import APIRouter, Depends, Path
 
-from internal.dependencies.logger_span import LoggerSpanServiceDep
 from internal.schemas import BaseResponse
 from internal.schemas.logger_span import (
     SpanSimulateReqSchema,
     SpanSimulateRespSchema,
     SpanSimulateResultSchema,
 )
+from internal.services.logger_span import LoggerSpanService, new_logger_span_service
 from pkg.api_response import ResponsePayload, success_response
 
 router = APIRouter(prefix="/logger-span", tags=["api logger span"])
@@ -28,7 +28,7 @@ router = APIRouter(prefix="/logger-span", tags=["api logger span"])
 )
 async def simulate_logger_span(
     req: SpanSimulateReqSchema,
-    service: LoggerSpanServiceDep,
+    service: Annotated[LoggerSpanService, Depends(new_logger_span_service)],
 ) -> ResponsePayload:
     """模拟一次带多层 span 的请求链路，返回 trace_id。
 
@@ -72,7 +72,7 @@ async def simulate_logger_span(
     summary="查询 Logger span trace",
 )
 async def get_logger_span_trace(
-    service: LoggerSpanServiceDep,
+    service: Annotated[LoggerSpanService, Depends(new_logger_span_service)],
     trace_id: Annotated[
         str,
         Path(

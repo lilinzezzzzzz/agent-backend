@@ -2,10 +2,9 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from internal.dependencies.auth import (
-    AuthServiceDep,
     AuthenticatedPrincipal,
     AuthenticatedUserDependency,
 )
@@ -18,6 +17,7 @@ from internal.schemas.user import (
     UserRegisterReqSchema,
     WeChatLoginReqSchema,
 )
+from internal.services.auth import AuthService, new_auth_service
 from pkg.api_response import ResponsePayload, success_response
 from pkg.request_context import get_user_id
 
@@ -33,7 +33,7 @@ authenticated_router = APIRouter(
 )
 async def login(
     req: UserLoginReqSchema,
-    auth_service: AuthServiceDep,
+    auth_service: Annotated[AuthService, Depends(new_auth_service)],
 ) -> ResponsePayload:
     """用户登录。
 
@@ -63,7 +63,7 @@ async def login(
     "/logout", response_model=BaseResponse[UserLogoutRespSchema], summary="用户登出"
 )
 async def logout(
-    auth_service: AuthServiceDep,
+    auth_service: Annotated[AuthService, Depends(new_auth_service)],
     principal: Annotated[AuthenticatedPrincipal, AuthenticatedUserDependency],
 ) -> ResponsePayload:
     """用户登出。
@@ -97,7 +97,7 @@ async def logout(
 )
 async def register(
     req: UserRegisterReqSchema,
-    auth_service: AuthServiceDep,
+    auth_service: Annotated[AuthService, Depends(new_auth_service)],
 ) -> ResponsePayload:
     """用户注册。
 
@@ -129,7 +129,9 @@ async def register(
 @authenticated_router.get(
     "/me", response_model=BaseResponse[UserDetailSchema], summary="获取当前用户信息"
 )
-async def get_current_user(auth_service: AuthServiceDep) -> ResponsePayload:
+async def get_current_user(
+    auth_service: Annotated[AuthService, Depends(new_auth_service)],
+) -> ResponsePayload:
     """获取当前用户信息。
 
     业务摘要:
@@ -160,7 +162,7 @@ async def get_current_user(auth_service: AuthServiceDep) -> ResponsePayload:
 )
 async def wechat_login(
     req: WeChatLoginReqSchema,
-    auth_service: AuthServiceDep,
+    auth_service: Annotated[AuthService, Depends(new_auth_service)],
 ) -> ResponsePayload:
     """微信登录。
 

@@ -17,7 +17,6 @@ OptionalSignatureHeader = Annotated[str | None, Header(alias="X-Signature")]
 OptionalTimestampHeader = Annotated[str | None, Header(alias="X-Timestamp")]
 OptionalNonceHeader = Annotated[str | None, Header(alias="X-Nonce")]
 OptionalAuthorizationHeader = Annotated[str | None, Header(alias="Authorization")]
-AuthServiceDep = Annotated[AuthService, Depends(new_auth_service)]
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,7 +37,7 @@ def _extract_token(authorization: str | None) -> str | None:
 
 async def require_authenticated_user(
     request: Request,
-    auth_service: AuthServiceDep,
+    auth_service: Annotated[AuthService, Depends(new_auth_service)],
     authorization: OptionalAuthorizationHeader = None,
 ) -> AuthenticatedPrincipal:
     """校验用户 Token，并把用户 ID 写入当前请求上下文。"""

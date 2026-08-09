@@ -7,6 +7,8 @@
 
 - 本仓库是面向 Agent、RAG 与 AI 平台场景的 FastAPI demo 和后端脚手架；运行方式与依赖版本以
   `README.md`、`pyproject.toml` 和现有 entrypoint 为准。
+- `plans/pending/` 保存未完成计划，`plans/completed/` 只保存实现和验证均有证据的历史计划。
+- 计划状态、checklist 和验证结论必须与仓库事实一致；废弃计划标记替代方案，已完成计划不回写成当前设计。
 - `internal/` 承载应用装配和业务实现，可以依赖 `pkg/`；`pkg/` 是可复用基础包，不得反向依赖
   `internal/`。
 - 修改现有能力时优先沿用相邻代码的 Controller / Service / DAO / Cache / Schema / Infra 边界，

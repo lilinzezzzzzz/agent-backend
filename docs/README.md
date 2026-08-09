@@ -36,12 +36,12 @@ Celery 任务状态、幂等、取消和后台收敛机制相关文档。
 - [OpenTelemetry 上下文传播与 OTLP 上报机制](opentelemetry/opentelemetry_context_and_otlp.md)
 - [当前项目 OpenTelemetry 接入与可观测性数据持久化](opentelemetry/project_integration_and_persistence.md)
 
-## `plans/`
+## `../plans/`
 
-按实施状态归档的开发计划，完整索引见 [开发计划索引](plans/README.md)。
+按实施状态归档的开发计划，完整索引见 [开发计划索引](../plans/README.md)。
 
-- [未完成计划](plans/pending/README.md)
-- [已完成计划](plans/completed/README.md)
+- [未完成计划](../plans/pending/README.md)
+- [已完成计划](../plans/completed/README.md)
 
 ## `agent/`
 

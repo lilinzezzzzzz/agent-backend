@@ -2,7 +2,7 @@
 
 状态：历史实施记录，已于 2026-07-18 实施。本计划记录的是首阶段不接入 OTLP Exporter 的实施边界；
 后续代码已经接入 OTLP/HTTP Exporter，当前实现与持久化边界以
-[当前项目 OpenTelemetry 接入与可观测性数据持久化](../../opentelemetry/project_integration_and_persistence.md)为准。
+[当前项目 OpenTelemetry 接入与可观测性数据持久化](../../docs/opentelemetry/project_integration_and_persistence.md)为准。
 
 项目已使用 OpenTelemetry Span 替换 `pkg/tracing/span.py` 中的自研 Span 树，不保留
 `SpanFrame`、`span_seq`、`parent_span_seq`、`span_path` 或 `span.start` / `span.end` / `span.error`

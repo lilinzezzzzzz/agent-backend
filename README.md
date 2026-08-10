@@ -356,6 +356,8 @@ docker run --rm -p 8000:8000 \
 `compose.yaml` 面向单台 Linux 主机，运行一个可配置多 Worker 的 API service 和一个单副本
 logrotate sidecar。两者共享宿主机日志目录，活动日志固定为 `app.log`；sidecar 每 5 分钟检查一次，负责
 `copytruncate`、压缩和保留 30 个归档。该方案不提供审计级零丢失保证，也不用于 Kubernetes。
+若改为 Kubernetes 部署，通常每个 FastAPI Pod 运行一个 Uvicorn worker，通过多个 Pod 横向扩展；每个 Pod
+是否配置 1 核 CPU，应根据请求类型、延迟目标、内存占用和压测结果确定，而不是固定规则。
 文件输出、日志目录和关闭业务控制台日志均由 `configs/.env.prod` 配置；Compose 只注入 `APP_ENV`。
 
 部署前需要 Docker Engine、Docker Compose v2、可访问的 PostgreSQL/Redis 等外部依赖，以及不含 `APP_ENV` 的

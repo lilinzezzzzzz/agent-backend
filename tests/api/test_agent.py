@@ -1,6 +1,7 @@
 import json
 from collections.abc import AsyncIterator
 from typing import Any
+from uuid import UUID
 
 import pytest
 import pytest_asyncio
@@ -39,19 +40,22 @@ from internal.services.order import OrderService
 from pkg.vectors.contracts import RetrievalMode
 from pkg import request_context as context
 
+TEST_USER_ID = UUID("00000000-0000-7000-8000-000000000999")
+OTHER_USER_ID = UUID("00000000-0000-7000-8000-000000001000")
+
 
 class FakeOrderAgentService:
     async def answer_order_support_question(
         self,
         *,
-        user_id: int,
+        user_id: UUID,
         session_id: str | None = None,
         question: str,
         max_steps: int = 4,
         confirmation_token: str | None = None,
         idempotency_key: str | None = None,
     ) -> AgentRunResultDTO:
-        assert user_id == 999
+        assert user_id == TEST_USER_ID
         assert session_id is None
         assert question == "订单 1001 到哪了？"
         assert max_steps == 3
@@ -77,7 +81,7 @@ class FakeOrderAgentService:
     async def stream_order_support_question(
         self,
         *,
-        user_id: int,
+        user_id: UUID,
         session_id: str | None = None,
         question: str,
         max_steps: int = 4,
@@ -102,14 +106,14 @@ class FakeAgentRouterService:
     async def chat(
         self,
         *,
-        user_id: int,
+        user_id: UUID,
         session_id: str | None = None,
         question: str,
         max_steps: int = 4,
         confirmation_token: str | None = None,
         idempotency_key: str | None = None,
     ) -> AgentChatDTO:
-        assert user_id == 999
+        assert user_id == TEST_USER_ID
         assert session_id is None
         assert question == "订单 1001 到哪了？"
         assert max_steps == 3
@@ -126,7 +130,7 @@ class FakeAgentRouterService:
     async def stream_chat(
         self,
         *,
-        user_id: int,
+        user_id: UUID,
         session_id: str | None = None,
         question: str,
         max_steps: int = 4,
@@ -149,14 +153,14 @@ class FakePaymentAgentService:
     async def answer_payment_support_question(
         self,
         *,
-        user_id: int,
+        user_id: UUID,
         session_id: str | None = None,
         question: str,
         max_steps: int = 4,
         confirmation_token: str | None = None,
         idempotency_key: str | None = None,
     ) -> AgentRunResultDTO:
-        assert user_id == 999
+        assert user_id == TEST_USER_ID
         assert session_id is None
         assert question == "支付失败怎么办？"
         assert max_steps == 3
@@ -182,7 +186,7 @@ class FakePaymentAgentService:
     async def stream_payment_support_question(
         self,
         *,
-        user_id: int,
+        user_id: UUID,
         session_id: str | None = None,
         question: str,
         max_steps: int = 4,
@@ -247,7 +251,7 @@ class FakeAgentActionStore:
     def __init__(self):
         self.pending: dict[str, dict[str, object]] = {}
         self.confirmation_results: dict[str, dict[str, object]] = {}
-        self.idempotency_results: dict[tuple[int, str], dict[str, object]] = {}
+        self.idempotency_results: dict[tuple[UUID, str], dict[str, object]] = {}
 
     async def save_pending_action(
         self, *, token: str, payload: dict[str, object], expires_in_seconds: int
@@ -275,7 +279,7 @@ class FakeAgentActionStore:
     async def save_idempotency_result(
         self,
         *,
-        user_id: int,
+        user_id: UUID,
         idempotency_key: str,
         payload: dict[str, object],
         expires_in_seconds: int,
@@ -285,7 +289,7 @@ class FakeAgentActionStore:
         return True
 
     async def get_idempotency_result(
-        self, *, user_id: int, idempotency_key: str
+        self, *, user_id: UUID, idempotency_key: str
     ) -> dict[str, object] | None:
         return self.idempotency_results.get((user_id, idempotency_key))
 
@@ -408,7 +412,7 @@ def test_order_agent_system_prompt_names_all_registered_tools() -> None:
         llm_client=FakeLLMClient([]),
         order_service=_new_order_service(),
         rag_service=FakeRagService(),
-        user_id=999,
+        user_id=TEST_USER_ID,
         max_steps=3,
     )
     registered_tools = builder.build_tools()
@@ -439,7 +443,7 @@ def test_payment_agent_system_prompt_names_all_registered_tools() -> None:
     builder = PaymentAgentBuilder(
         llm_client=FakeLLMClient([]),
         rag_service=FakeRagService(),
-        user_id=999,
+        user_id=TEST_USER_ID,
         max_steps=3,
     )
     registered_tools = builder.build_tools()
@@ -474,9 +478,11 @@ async def agent_client():
     app = FastAPI()
     app.include_router(agent_controller.router, prefix="/v1")
     app.dependency_overrides[new_order_agent_service] = lambda: FakeOrderAgentService()
-    app.dependency_overrides[new_agent_router_service] = lambda: FakeAgentRouterService()
-    app.dependency_overrides[new_payment_agent_service] = (
-        lambda: FakePaymentAgentService()
+    app.dependency_overrides[new_agent_router_service] = lambda: (
+        FakeAgentRouterService()
+    )
+    app.dependency_overrides[new_payment_agent_service] = lambda: (
+        FakePaymentAgentService()
     )
 
     async with AsyncClient(
@@ -632,11 +638,13 @@ async def test_agent_router_service_routes_order_question_without_llm() -> None:
         action_store=FakeAgentActionStore(),
     )
 
-    result = await service.chat(user_id=999, question="订单 1001 到哪了？", max_steps=3)
+    result = await service.chat(
+        user_id=TEST_USER_ID, question="订单 1001 到哪了？", max_steps=3
+    )
 
     assert result.route == "order"
     assert result.result.answer == "订单 Agent 已处理。"
-    assert order_agent_service.calls[0]["user_id"] == 999
+    assert order_agent_service.calls[0]["user_id"] == TEST_USER_ID
     assert payment_agent_service.calls == []
     assert llm_client.calls == []
 
@@ -657,7 +665,7 @@ async def test_agent_router_service_streams_route_and_agent_events() -> None:
     events = [
         event
         async for event in service.stream_chat(
-            user_id=999,
+            user_id=TEST_USER_ID,
             question="订单 1001 到哪了？",
             max_steps=3,
         )
@@ -669,7 +677,7 @@ async def test_agent_router_service_streams_route_and_agent_events() -> None:
     assert events[1].data["route"] == "order"
     assert events[1].result is not None
     assert events[1].result.answer == "订单 Agent 已处理。"
-    assert order_agent_service.calls[0]["user_id"] == 999
+    assert order_agent_service.calls[0]["user_id"] == TEST_USER_ID
     assert payment_agent_service.calls == []
 
 
@@ -686,7 +694,7 @@ async def test_agent_router_service_falls_back_to_llm_for_ambiguous_question() -
         action_store=FakeAgentActionStore(),
     )
 
-    result = await service.chat(user_id=999, question="我买的东西怎么还没到")
+    result = await service.chat(user_id=TEST_USER_ID, question="我买的东西怎么还没到")
 
     assert result.route == "order"
     assert result.result.answer == "订单 Agent 已处理。"
@@ -707,12 +715,14 @@ async def test_agent_router_service_routes_payment_question_without_llm() -> Non
         action_store=FakeAgentActionStore(),
     )
 
-    result = await service.chat(user_id=999, question="支付失败怎么办？", max_steps=3)
+    result = await service.chat(
+        user_id=TEST_USER_ID, question="支付失败怎么办？", max_steps=3
+    )
 
     assert result.route == "payment"
     assert result.result.answer == "支付 Agent 已处理。"
     assert order_agent_service.calls == []
-    assert payment_agent_service.calls[0]["user_id"] == 999
+    assert payment_agent_service.calls[0]["user_id"] == TEST_USER_ID
     assert llm_client.calls == []
 
 
@@ -731,7 +741,7 @@ async def test_agent_router_service_returns_unsupported_without_calling_agents()
         action_store=FakeAgentActionStore(),
     )
 
-    result = await service.chat(user_id=999, question="帮我写一首诗")
+    result = await service.chat(user_id=TEST_USER_ID, question="帮我写一首诗")
 
     assert result.route == "unsupported"
     assert "当前仅支持订单" in result.result.answer
@@ -749,7 +759,7 @@ async def test_agent_router_service_bypasses_llm_for_confirmation() -> None:
     action_store.pending["confirmation-token"] = {
         "route": "order",
         "action": "submit_invoice_request",
-        "user_id": 999,
+        "user_id": TEST_USER_ID.hex,
     }
     service = AgentRouterService(
         llm_client=llm_client,
@@ -760,7 +770,7 @@ async def test_agent_router_service_bypasses_llm_for_confirmation() -> None:
     )
 
     result = await service.chat(
-        user_id=999,
+        user_id=TEST_USER_ID,
         question="确认提交",
         confirmation_token="confirmation-token",
         idempotency_key="invoice-request-1001",
@@ -783,7 +793,7 @@ async def test_agent_router_service_routes_confirmation_by_pending_action_route(
     action_store.pending["payment-confirmation-token"] = {
         "route": "payment",
         "action": "submit_payment",
-        "user_id": 999,
+        "user_id": TEST_USER_ID.hex,
     }
     service = AgentRouterService(
         llm_client=llm_client,
@@ -794,7 +804,7 @@ async def test_agent_router_service_routes_confirmation_by_pending_action_route(
     )
 
     result = await service.chat(
-        user_id=999,
+        user_id=TEST_USER_ID,
         question="确认支付",
         confirmation_token="payment-confirmation-token",
         idempotency_key="payment-request-1001",
@@ -852,7 +862,7 @@ async def test_order_agent_service_runs_react_with_tools() -> None:
     service = _new_order_agent_service(llm_client)
 
     result = await service.answer_order_support_question(
-        user_id=999, question="订单 1001 到哪了？", max_steps=3
+        user_id=TEST_USER_ID, question="订单 1001 到哪了？", max_steps=3
     )
 
     assert result.status == "completed"
@@ -888,7 +898,7 @@ async def test_order_agent_service_streams_react_events() -> None:
     events = [
         event
         async for event in service.stream_order_support_question(
-            user_id=999,
+            user_id=TEST_USER_ID,
             question="订单 1001 到哪了？",
             max_steps=3,
         )
@@ -924,7 +934,7 @@ async def test_payment_agent_service_runs_react_with_tools() -> None:
     service = _new_payment_agent_service(llm_client)
 
     result = await service.answer_payment_support_question(
-        user_id=999, question="支付失败怎么办？", max_steps=3
+        user_id=TEST_USER_ID, question="支付失败怎么办？", max_steps=3
     )
 
     action_result = result.steps[0].action_result
@@ -960,7 +970,7 @@ async def test_payment_agent_service_calculates_payment_total() -> None:
     service = _new_payment_agent_service(llm_client)
 
     result = await service.answer_payment_support_question(
-        user_id=999,
+        user_id=TEST_USER_ID,
         question="商品 129.90 元，加 12 元运费，减 30 元优惠，需要付多少？",
         max_steps=3,
     )
@@ -981,7 +991,7 @@ async def test_payment_agent_service_rejects_confirmation_token() -> None:
 
     with pytest.raises(AppException) as exc_info:
         await service.answer_payment_support_question(
-            user_id=999,
+            user_id=TEST_USER_ID,
             question="确认支付",
             confirmation_token="confirmation-token",
             idempotency_key="payment-request-1001",
@@ -1003,7 +1013,7 @@ async def test_order_agent_service_records_unknown_order_action_result() -> None
     service = _new_order_agent_service(llm_client)
 
     result = await service.answer_order_support_question(
-        user_id=999, question="订单 404 到哪了？", max_steps=3
+        user_id=TEST_USER_ID, question="订单 404 到哪了？", max_steps=3
     )
 
     assert result.status == "completed"
@@ -1027,7 +1037,7 @@ async def test_order_agent_service_hides_order_owned_by_another_user() -> None:
     service = _new_order_agent_service(llm_client)
 
     result = await service.answer_order_support_question(
-        user_id=1000, question="订单 1001 到哪了？", max_steps=3
+        user_id=OTHER_USER_ID, question="订单 1001 到哪了？", max_steps=3
     )
 
     assert result.steps[0].action_result == {
@@ -1060,7 +1070,7 @@ async def test_order_agent_service_requires_confirmation_before_invoice_request(
     monkeypatch.setattr(context, "get_trace_id", lambda: "trace_invoice_test")
 
     prepared = await service.answer_order_support_question(
-        user_id=999,
+        user_id=TEST_USER_ID,
         question="帮我给订单 1001 开发票",
         max_steps=3,
     )
@@ -1077,13 +1087,13 @@ async def test_order_agent_service_requires_confirmation_before_invoice_request(
     assert pending_action["action"] == "submit_invoice_request"
 
     confirmed = await service.answer_order_support_question(
-        user_id=999,
+        user_id=TEST_USER_ID,
         question="确认提交",
         confirmation_token=prepared.confirmation.token,
         idempotency_key="invoice-request-1001",
     )
     replayed = await service.answer_order_support_question(
-        user_id=999,
+        user_id=TEST_USER_ID,
         question="确认提交",
         confirmation_token=prepared.confirmation.token,
         idempotency_key="invoice-request-1001",
@@ -1105,7 +1115,7 @@ async def test_order_agent_service_requires_confirmation_before_invoice_request(
 
     with pytest.raises(AppException) as exc_info:
         await service.answer_order_support_question(
-            user_id=999,
+            user_id=TEST_USER_ID,
             question="再次确认提交",
             confirmation_token=prepared.confirmation.token,
             idempotency_key="different-idempotency-key",
@@ -1119,7 +1129,7 @@ async def test_order_service_rejects_confirmation_from_another_user() -> None:
     action_store = FakeAgentActionStore()
     order_service = _new_order_service(action_store)
     confirmation = await order_service.prepare_invoice_request(
-        user_id=999,
+        user_id=TEST_USER_ID,
         order_id="1001",
         invoice_title="个人",
         tax_no=None,
@@ -1128,7 +1138,7 @@ async def test_order_service_rejects_confirmation_from_another_user() -> None:
 
     with pytest.raises(AppException) as exc_info:
         await order_service.confirm_invoice_request(
-            user_id=1000,
+            user_id=OTHER_USER_ID,
             confirmation_token=confirmation.token,
             idempotency_key="another-user-key",
         )
@@ -1154,7 +1164,7 @@ async def test_order_agent_service_searches_mock_rag_knowledge() -> None:
     service = _new_order_agent_service(llm_client)
 
     result = await service.answer_order_support_question(
-        user_id=999, question="电子发票多久能开好？", max_steps=3
+        user_id=TEST_USER_ID, question="电子发票多久能开好？", max_steps=3
     )
 
     action_result = result.steps[0].action_result
@@ -1189,7 +1199,7 @@ async def test_order_agent_service_calculates_refund_amount() -> None:
     service = _new_order_agent_service(llm_client)
 
     result = await service.answer_order_support_question(
-        user_id=999,
+        user_id=TEST_USER_ID,
         question="两件单价 129.90 元的商品，加上 12 元可退运费并扣回 30 元优惠，能退多少钱？",
         max_steps=3,
     )
@@ -1230,7 +1240,7 @@ async def test_order_agent_service_rejects_excessive_refund_discount() -> None:
     service = _new_order_agent_service(llm_client)
 
     result = await service.answer_order_support_question(
-        user_id=999,
+        user_id=TEST_USER_ID,
         question="商品 10 元，退款时扣回 11 元优惠，能退多少？",
         max_steps=3,
     )
@@ -1256,7 +1266,7 @@ async def test_order_agent_service_rejects_decimal_refund_amount_input() -> None
     service = _new_order_agent_service(llm_client)
 
     result = await service.answer_order_support_question(
-        user_id=999, question="按 1000.5 分计算退款", max_steps=3
+        user_id=TEST_USER_ID, question="按 1000.5 分计算退款", max_steps=3
     )
 
     assert result.steps[0].action_result == {

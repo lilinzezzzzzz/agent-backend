@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,7 +28,7 @@ from internal.schemas.agent import (
 )
 from pkg.database.audit import AuditActor
 from pkg.database.dao import BaseDao
-from pkg.ids import uuid6_unique_str_id
+from pkg.ids import uuid7_unique_str_id
 from pkg.toolkit.timer import utc_now_naive
 
 
@@ -73,7 +74,7 @@ class DatabaseAgentStorageBackend:
     async def start_run(
         self,
         *,
-        user_id: int,
+        user_id: UUID,
         session_id: str | None,
         entrypoint: str,
         agent_name: str,
@@ -83,9 +84,9 @@ class DatabaseAgentStorageBackend:
     ) -> AgentRunStartDTO:
         """创建或校验会话，并写入用户消息和 running run。"""
         now = utc_now_naive()
-        resolved_session_id = session_id or uuid6_unique_str_id()
-        run_id = uuid6_unique_str_id()
-        user_message_id = uuid6_unique_str_id()
+        resolved_session_id = session_id or uuid7_unique_str_id()
+        run_id = uuid7_unique_str_id()
+        user_message_id = uuid7_unique_str_id()
         actor = AuditActor.user(user_id)
 
         async def _tx(sess: AsyncSession) -> None:
@@ -177,7 +178,7 @@ class DatabaseAgentStorageBackend:
     async def load_context(
         self,
         *,
-        user_id: int,
+        user_id: UUID,
         session_id: str,
         max_recent_messages: int,
         max_recent_chars: int,
@@ -212,7 +213,7 @@ class DatabaseAgentStorageBackend:
     async def complete_run(
         self,
         *,
-        user_id: int,
+        user_id: UUID,
         session_id: str,
         run_id: str,
         route: str | None,
@@ -235,7 +236,7 @@ class DatabaseAgentStorageBackend:
             sess.add(
                 AgentMessage.create(
                     audit_actor=actor,
-                    message_id=uuid6_unique_str_id(),
+                    message_id=uuid7_unique_str_id(),
                     session_id=session_id,
                     run_id=run_id,
                     user_id=user_id,
@@ -307,7 +308,7 @@ class DatabaseAgentStorageBackend:
     async def fail_run(
         self,
         *,
-        user_id: int,
+        user_id: UUID,
         session_id: str,
         run_id: str,
         error_code: str,
@@ -371,7 +372,7 @@ async def _execute_storage_transaction(
 
 
 async def _get_session_for_update(
-    *, sess, session_id: str, user_id: int
+    *, sess, session_id: str, user_id: UUID
 ) -> AgentSession | None:
     result = await sess.execute(
         select(AgentSession).where(
@@ -388,7 +389,7 @@ async def _get_run_for_update(
     sess,
     run_id: str,
     session_id: str,
-    user_id: int,
+    user_id: UUID,
 ) -> AgentRun | None:
     result = await sess.execute(
         select(AgentRun).where(

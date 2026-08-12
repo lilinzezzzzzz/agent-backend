@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from uuid import UUID
 
 import pytest
 
@@ -8,6 +9,8 @@ from internal.dao.rag import RagChunkMetadata
 from internal.services.rag import RagService
 from pkg.vectors.contracts import FilterOperator, RetrievalMode, SearchHit
 from pkg.vectors.post_retrieval import PostRetrievalResult, PostRetrievalStats
+
+TEST_USER_ID = UUID("00000000-0000-7000-8000-000000000999")
 
 
 class FakeRepository:
@@ -57,12 +60,12 @@ class FakeMetadataDao:
 
 
 class FakeScopeResolver:
-    def resolve_allowed_domains(self, *, user_id: int, requested_context):
-        assert user_id == 999
+    def resolve_allowed_domains(self, *, user_id: UUID, requested_context):
+        assert user_id == TEST_USER_ID
         return {"order", "payment"}
 
-    def resolve_allowed_kb_ids(self, *, user_id: int, requested_context):
-        assert user_id == 999
+    def resolve_allowed_kb_ids(self, *, user_id: UUID, requested_context):
+        assert user_id == TEST_USER_ID
         return {2, 3}
 
 
@@ -82,7 +85,9 @@ class FakeLLMClient:
 
 
 @pytest.mark.asyncio
-async def test_prepare_retrieval_query_normalizes_question_and_preserves_original() -> None:
+async def test_prepare_retrieval_query_normalizes_question_and_preserves_original() -> (
+    None
+):
     service = RagService(
         llm_client=FakeLLMClient(["ev_001"]),
         embedder=object(),
@@ -110,7 +115,7 @@ async def test_rag_retrieve_intersects_requested_scope_and_builds_evidence() -> 
     )
 
     result = await service.retrieve(
-        user_id=999,
+        user_id=TEST_USER_ID,
         query=" 发票   多久开具 ",
         requested_domain="order",
         requested_kb_ids=[2, 99],
@@ -146,7 +151,7 @@ async def test_rag_answer_uses_only_valid_evidence_citations() -> None:
     )
 
     result = await service.answer(
-        user_id=999,
+        user_id=TEST_USER_ID,
         question="发票多久开具？",
         requested_domain="order",
         requested_kb_ids=[2],
@@ -171,7 +176,7 @@ async def test_rag_empty_effective_scope_returns_stable_error_without_repository
     )
 
     result = await service.retrieve(
-        user_id=999,
+        user_id=TEST_USER_ID,
         query="支付失败怎么办？",
         requested_domain="general",
         requested_kb_ids=[999],

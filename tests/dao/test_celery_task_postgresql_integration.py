@@ -2,7 +2,7 @@ import os
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import text
@@ -10,6 +10,8 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from internal.dao.celery_task import CeleryTaskDao
 from pkg.concurrency import anyio_gather
+
+TEST_RECORD_ID = UUID("00000000-0000-7000-8000-000000000123")
 
 
 def _integration_database_url() -> str:
@@ -70,13 +72,14 @@ async def test_postgresql_ddl_and_concurrent_claim() -> None:
                         idempotency_key_hash, payload_hash, status,
                         attempt_count, creator_type, created_at, updated_at
                     ) VALUES (
-                        123, 'task.name', 'trace-1', 'user:1', 'celery_queue',
+                        :record_id, 'task.name', 'trace-1', 'user:1', 'celery_queue',
                         :idempotency_key_hash, :payload_hash, 'QUEUED',
                         0, 'system', :now, :now
                     )
                     """
                 ),
                 {
+                    "record_id": TEST_RECORD_ID,
                     "idempotency_key_hash": "a" * 64,
                     "payload_hash": "b" * 64,
                     "now": datetime(2026, 7, 7, 8, 0, 0),
@@ -87,14 +90,14 @@ async def test_postgresql_ddl_and_concurrent_claim() -> None:
         dao = CeleryTaskDao(session_provider=session_provider)
         claims = await anyio_gather(
             dao.claim_execution(
-                record_id=123,
+                record_id=TEST_RECORD_ID,
                 task_name="task.name",
                 scope="user:1",
                 execution_token="delivery-a",
                 hard_deadline_seconds=60,
             ),
             dao.claim_execution(
-                record_id=123,
+                record_id=TEST_RECORD_ID,
                 task_name="task.name",
                 scope="user:1",
                 execution_token="delivery-b",
@@ -112,9 +115,10 @@ async def test_postgresql_ddl_and_concurrent_claim() -> None:
                         SELECT status, execution_token, attempt_count,
                                started_at, hard_deadline_at
                         FROM celery_task_record
-                        WHERE id = 123
+                        WHERE id = :record_id
                         """
-                    )
+                    ),
+                    {"record_id": TEST_RECORD_ID},
                 )
             ).one()
         assert row.status == "RUNNING"

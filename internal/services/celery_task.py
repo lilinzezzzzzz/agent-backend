@@ -2,6 +2,7 @@ import hashlib
 import json
 from collections.abc import Mapping, Sequence
 from typing import Any
+from uuid import UUID
 
 from internal.config import settings
 from internal.core import AppException, errors
@@ -16,7 +17,7 @@ from internal.schemas.celery_task import (
 )
 from pkg.celery_queue.client import CeleryClient
 from pkg.database.session import SessionProvider
-from pkg.ids import snowflake_id_generator
+from pkg.ids import uuid7_unique_id
 from pkg.logger import logger
 
 
@@ -109,7 +110,7 @@ class CeleryTaskService:
         async with self._session_provider() as session, session.begin():
             record, created = await self._dao.reserve_task(
                 session=session,
-                record_id=snowflake_id_generator.generate(),
+                record_id=uuid7_unique_id(),
                 task_name=task_name,
                 trace_id=trace_id,
                 scope=scope,
@@ -160,7 +161,7 @@ class CeleryTaskService:
             raise RuntimeError("Celery task disappeared after broker publish")
         return self._to_dispatch_dto(current, created=True)
 
-    async def get_task(self, *, record_id: int, scope: str) -> CeleryTaskDetailDTO:
+    async def get_task(self, *, record_id: UUID, scope: str) -> CeleryTaskDetailDTO:
         """查询当前 scope 可见的逻辑任务。"""
         record = await self._dao.get_by_id_and_scope(record_id=record_id, scope=scope)
         if record is None:
@@ -169,7 +170,7 @@ class CeleryTaskService:
             raise RuntimeError("Celery task record updated_at is missing")
         return self._to_detail_dto(record)
 
-    async def cancel_task(self, *, record_id: int, scope: str) -> CeleryTaskCancelDTO:
+    async def cancel_task(self, *, record_id: UUID, scope: str) -> CeleryTaskCancelDTO:
         """幂等请求取消指定任务，并 best-effort 通知 Celery Broker。"""
         record = await self._dao.request_cancellation(
             record_id=record_id,
@@ -200,7 +201,7 @@ class CeleryTaskService:
     async def claim(
         self,
         *,
-        record_id: int,
+        record_id: UUID,
         task_name: str,
         scope: str,
         execution_token: str,
@@ -220,7 +221,7 @@ class CeleryTaskService:
         return record is not None
 
     async def acknowledge_cancellation(
-        self, *, record_id: int, execution_token: str
+        self, *, record_id: UUID, execution_token: str
     ) -> bool:
         """Worker 在协作检查点确认取消。"""
         return await self._dao.acknowledge_cancellation(
@@ -229,7 +230,7 @@ class CeleryTaskService:
         )
 
     async def disallow_cancellation(
-        self, *, record_id: int, execution_token: str
+        self, *, record_id: UUID, execution_token: str
     ) -> bool:
         """Worker 进入不可取消阶段前关闭取消门禁。"""
         return await self._dao.disallow_cancellation(
@@ -237,7 +238,7 @@ class CeleryTaskService:
             execution_token=execution_token,
         )
 
-    async def succeed(self, *, record_id: int, execution_token: str) -> bool:
+    async def succeed(self, *, record_id: UUID, execution_token: str) -> bool:
         """使用 execution token 将当前任务写入 SUCCEEDED。"""
         updated = await self._dao.finish_execution(
             record_id=record_id,
@@ -253,7 +254,7 @@ class CeleryTaskService:
         raise RuntimeError("Celery task success state write rejected by token fencing")
 
     async def fail(
-        self, *, record_id: int, execution_token: str, exc: Exception
+        self, *, record_id: UUID, execution_token: str, exc: Exception
     ) -> bool:
         """使用 execution token 写入脱敏失败信息。"""
         updated = await self._dao.finish_execution(

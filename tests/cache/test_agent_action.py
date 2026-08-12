@@ -1,8 +1,11 @@
 from typing import Any
+from uuid import UUID
 
 import pytest
 
 from internal.cache.agent_action import AgentActionCache
+
+TEST_USER_ID = UUID("00000000-0000-7000-8000-000000000999")
 
 
 class FakeRedisClient:
@@ -70,7 +73,7 @@ async def test_agent_action_cache_hashes_idempotency_key_and_passes_ttl() -> Non
     cache = AgentActionCache(redis_cli=redis)
 
     saved = await cache.save_idempotency_result(
-        user_id=999,
+        user_id=TEST_USER_ID,
         idempotency_key="client-visible-idempotency-key",
         payload={"status": "queued"},
         expires_in_seconds=86400,
@@ -79,6 +82,6 @@ async def test_agent_action_cache_hashes_idempotency_key_and_passes_ttl() -> Non
     assert saved is True
     method, args, kwargs = redis.calls[0]
     assert method == "set_dict"
-    assert args[0].startswith("agent_action:idempotency:999:")
+    assert args[0].startswith(f"agent_action:idempotency:{TEST_USER_ID}:")
     assert "client-visible-idempotency-key" not in args[0]
     assert kwargs == {"ex": 86400}

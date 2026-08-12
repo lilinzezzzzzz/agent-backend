@@ -11,7 +11,6 @@ from internal.utils.background_tasks import (
     init_background_task_manager,
 )
 from internal.utils.signature import init_signature_auth_handler
-from internal.utils.snowflake import init_snowflake_id_generator
 from pkg.logger import init_logger, logger
 from pkg.tracing import init_tracing, shutdown_tracing
 
@@ -109,8 +108,6 @@ async def lifespan(_app: FastAPI):
     init_async_redis()
     # 初始化签名认证
     init_signature_auth_handler()
-    # 初始化 Snowflake ID Generator
-    init_snowflake_id_generator()
     # 初始化后台任务管理器
     await init_background_task_manager()
 

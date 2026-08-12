@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from typing import Any
+from uuid import UUID
 
 from internal.services.rag import RagService
 from pkg.agents import StructuredTool
@@ -22,7 +23,7 @@ def build_get_supported_payment_methods_tool() -> StructuredTool:
 
 
 def build_search_payment_knowledge_tool(
-    *, rag_service: RagService, user_id: int
+    *, rag_service: RagService, user_id: UUID
 ) -> StructuredTool:
     """创建支付知识检索工具。"""
 
@@ -108,7 +109,7 @@ async def _search_payment_knowledge(
     args: Mapping[str, Any],
     *,
     rag_service: RagService,
-    user_id: int,
+    user_id: UUID,
 ) -> dict[str, Any]:
     query = str(args.get("query") or "").strip()
     if not query:

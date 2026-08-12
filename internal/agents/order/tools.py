@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from typing import Any
+from uuid import UUID
 
 from internal.services.order import OrderService
 from internal.services.rag import RagService
@@ -10,7 +11,7 @@ from pkg.vectors.contracts import RetrievalMode
 
 
 def build_get_order_status_tool(
-    *, order_service: OrderService, user_id: int
+    *, order_service: OrderService, user_id: UUID
 ) -> StructuredTool:
     """创建订单状态查询工具。"""
 
@@ -55,7 +56,7 @@ def build_get_return_policy_tool() -> StructuredTool:
 
 
 def build_search_order_knowledge_tool(
-    *, rag_service: RagService, user_id: int
+    *, rag_service: RagService, user_id: UUID
 ) -> StructuredTool:
     """创建订单知识检索工具。"""
 
@@ -130,7 +131,7 @@ def build_calculate_refund_amount_tool() -> StructuredTool:
 
 
 def build_prepare_invoice_request_tool(
-    *, order_service: OrderService, user_id: int
+    *, order_service: OrderService, user_id: UUID
 ) -> StructuredTool:
     """创建开票申请确认准备工具。"""
 
@@ -200,7 +201,7 @@ async def _search_order_knowledge(
     args: Mapping[str, Any],
     *,
     rag_service: RagService,
-    user_id: int,
+    user_id: UUID,
 ) -> dict[str, Any]:
     query = str(args.get("query") or "").strip()
     if not query:

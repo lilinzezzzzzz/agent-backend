@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from uuid import UUID
 
 from internal.agents.order import OrderAgentBuilder
 from internal.core import AppException, errors
@@ -28,7 +29,7 @@ from internal.services.order import OrderService, new_order_service
 from internal.services.rag import RagService, new_rag_service
 from pkg.logger import logger
 from pkg import request_context as context
-from pkg.ids import uuid6_unique_str_id
+from pkg.ids import uuid7_unique_str_id
 
 
 class OrderAgentService:
@@ -50,7 +51,7 @@ class OrderAgentService:
     async def answer_order_support_question(
         self,
         *,
-        user_id: int,
+        user_id: UUID,
         question: str,
         max_steps: int = 4,
         session_id: str | None = None,
@@ -183,7 +184,7 @@ class OrderAgentService:
                 result=failed_agent_result(
                     run_id=run_start.run_id
                     if run_start is not None
-                    else uuid6_unique_str_id(),
+                    else uuid7_unique_str_id(),
                     error_type=f"AppException:{exc.error.code}",
                     message=exc.message,
                 ),
@@ -206,7 +207,7 @@ class OrderAgentService:
                 result=failed_agent_result(
                     run_id=run_start.run_id
                     if run_start is not None
-                    else uuid6_unique_str_id(),
+                    else uuid7_unique_str_id(),
                     error_type=type(exc).__name__,
                 ),
             )
@@ -217,7 +218,7 @@ class OrderAgentService:
     async def stream_order_support_question(
         self,
         *,
-        user_id: int,
+        user_id: UUID,
         question: str,
         max_steps: int = 4,
         session_id: str | None = None,
@@ -296,7 +297,7 @@ class OrderAgentService:
                 audit_writer=self._audit_service,
                 audit_context=audit_context,
                 result=failed_agent_result(
-                    run_id=run_id or uuid6_unique_str_id(),
+                    run_id=run_id or uuid7_unique_str_id(),
                     error_type=f"AppException:{exc.error.code}",
                     message=exc.message,
                 ),
@@ -309,7 +310,7 @@ class OrderAgentService:
                 audit_writer=self._audit_service,
                 audit_context=audit_context,
                 result=failed_agent_result(
-                    run_id=run_id or uuid6_unique_str_id(),
+                    run_id=run_id or uuid7_unique_str_id(),
                     error_type=type(exc).__name__,
                 ),
             )

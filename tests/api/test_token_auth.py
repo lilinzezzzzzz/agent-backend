@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+from uuid import UUID
 
 import pytest
 from fastapi import FastAPI
@@ -11,6 +12,8 @@ from internal.controllers import api as api_controller
 from internal.core import AppException, errors
 from internal.dependencies.auth import require_authenticated_user
 from pkg import request_context as context
+
+TEST_USER_ID = UUID("00000000-0000-7000-8000-000000000123")
 
 
 def _request(path: str = "/v1/test") -> Request:
@@ -36,7 +39,7 @@ def _request(path: str = "/v1/test") -> Request:
 async def test_token_dependency_accepts_bare_and_bearer_tokens(
     authorization: str,
 ) -> None:
-    verify_token = AsyncMock(return_value={"id": 123})
+    verify_token = AsyncMock(return_value={"id": TEST_USER_ID.hex})
     auth_service = SimpleNamespace(verify_token=verify_token)
     context.set_user_id.reset_mock()
 
@@ -46,10 +49,10 @@ async def test_token_dependency_accepts_bare_and_bearer_tokens(
         authorization=authorization,
     )
 
-    assert principal.user_id == 123
+    assert principal.user_id == TEST_USER_ID
     assert principal.token == "token-123"
     verify_token.assert_awaited_once_with("token-123")
-    context.set_user_id.assert_called_once_with(123)
+    context.set_user_id.assert_called_once_with(TEST_USER_ID)
 
 
 @pytest.mark.asyncio

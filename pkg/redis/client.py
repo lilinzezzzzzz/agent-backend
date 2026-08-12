@@ -8,7 +8,7 @@ from typing import Any
 import anyio
 from redis.asyncio import Redis
 
-from pkg.ids import uuid6_unique_str_id
+from pkg.ids import uuid7_unique_str_id
 from pkg.toolkit.json import orjson_dumps, orjson_loads
 
 SessionProvider = Callable[[], AbstractAsyncContextManager[Redis]]
@@ -220,7 +220,7 @@ class RedisClient:
             RedisOperationError: 获取锁超时或 Redis 操作失败时抛出
         """
 
-        identifier = uuid6_unique_str_id()
+        identifier = uuid7_unique_str_id()
         start_time = time.perf_counter()
         timeout_seconds = timeout_ms / 1000
         retry_interval_seconds = retry_interval_ms / 1000

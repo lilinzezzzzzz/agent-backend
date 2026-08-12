@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import Depends, Header, Request
 
@@ -23,7 +24,7 @@ OptionalAuthorizationHeader = Annotated[str | None, Header(alias="Authorization"
 class AuthenticatedPrincipal:
     """当前请求通过 Token 认证后得到的最小身份信息。"""
 
-    user_id: int
+    user_id: UUID
     token: str
 
 
@@ -48,12 +49,14 @@ async def require_authenticated_user(
             raise AppException(errors.Unauthorized, message="invalid or missing token")
 
         auth_metadata = await auth_service.verify_token(token)
-        user_id = auth_metadata.get("id")
-        if not isinstance(user_id, int):
+        raw_user_id = auth_metadata.get("id")
+        try:
+            user_id = UUID(str(raw_user_id))
+        except (TypeError, ValueError, AttributeError):
             raise AppException(
                 errors.Unauthorized,
                 message="Invalid user_id in token metadata",
-            )
+            ) from None
 
         context.set_user_id(user_id)
         logger.debug(f"Set user_id to context: {user_id}")

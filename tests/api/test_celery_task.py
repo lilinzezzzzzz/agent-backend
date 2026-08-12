@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from uuid import UUID
 
 import pytest
 
@@ -11,21 +12,25 @@ from internal.schemas.celery_task import (
     IdempotentSumCreateReqSchema,
 )
 
+TEST_RECORD_ID = UUID("00000000-0000-7000-8000-000000000123")
+TEST_USER_ID = UUID("00000000-0000-7000-8000-000000000999")
+TEST_SCOPE = f"user:{TEST_USER_ID}"
+
 
 class FakeCeleryTaskService:
     async def submit_once(self, **kwargs) -> CeleryTaskDispatchDTO:
-        assert kwargs["scope"] == "user:999"
+        assert kwargs["scope"] == TEST_SCOPE
         assert kwargs["trace_id"] == "test-trace-id"
         assert kwargs["args"] == (7, 11)
         return CeleryTaskDispatchDTO(
-            record_id=123,
+            record_id=TEST_RECORD_ID,
             status=CeleryTaskStatus.QUEUED,
             created=True,
         )
 
-    async def get_task(self, *, record_id: int, scope: str) -> CeleryTaskDetailDTO:
-        assert record_id == 123
-        assert scope == "user:999"
+    async def get_task(self, *, record_id: UUID, scope: str) -> CeleryTaskDetailDTO:
+        assert record_id == TEST_RECORD_ID
+        assert scope == TEST_SCOPE
         now = datetime.now(UTC)
         return CeleryTaskDetailDTO(
             record_id=record_id,
@@ -46,9 +51,9 @@ class FakeCeleryTaskService:
             updated_at=now,
         )
 
-    async def cancel_task(self, *, record_id: int, scope: str) -> CeleryTaskCancelDTO:
-        assert record_id == 123
-        assert scope == "user:999"
+    async def cancel_task(self, *, record_id: UUID, scope: str) -> CeleryTaskCancelDTO:
+        assert record_id == TEST_RECORD_ID
+        assert scope == TEST_SCOPE
         return CeleryTaskCancelDTO(
             record_id=record_id,
             status=CeleryTaskStatus.CANCELLING,
@@ -63,8 +68,8 @@ async def test_create_idempotent_sum_uses_authenticated_scope() -> None:
     )
 
     assert response.data == {
-        "record_id": 123,
-        "task_id": "task_123",
+        "record_id": TEST_RECORD_ID,
+        "task_id": f"task_{TEST_RECORD_ID}",
         "status": "QUEUED",
         "created": True,
     }
@@ -73,11 +78,11 @@ async def test_create_idempotent_sum_uses_authenticated_scope() -> None:
 @pytest.mark.asyncio
 async def test_get_celery_task_uses_authenticated_scope() -> None:
     response = await celery_task_controller.get_celery_task(
-        123,
+        TEST_RECORD_ID,
         FakeCeleryTaskService(),  # type: ignore[arg-type]
     )
 
-    assert response.data["record_id"] == 123
+    assert response.data["record_id"] == TEST_RECORD_ID
     assert response.data["status"] == "SUCCEEDED"
     assert response.data["queue"] == "celery_demo_queue"
     assert response.data["cancel_allowed"] is False
@@ -87,12 +92,12 @@ async def test_get_celery_task_uses_authenticated_scope() -> None:
 @pytest.mark.asyncio
 async def test_cancel_celery_task_uses_authenticated_scope() -> None:
     response = await celery_task_controller.cancel_celery_task(
-        123,
+        TEST_RECORD_ID,
         FakeCeleryTaskService(),  # type: ignore[arg-type]
     )
 
     assert response.data == {
-        "record_id": 123,
-        "task_id": "task_123",
+        "record_id": TEST_RECORD_ID,
+        "task_id": f"task_{TEST_RECORD_ID}",
         "status": "CANCELLING",
     }

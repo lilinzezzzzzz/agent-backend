@@ -2,6 +2,7 @@ import contextlib
 from contextvars import ContextVar
 from enum import StrEnum
 from typing import Any
+from uuid import UUID
 
 _request_context_var: ContextVar[dict[str, Any]] = ContextVar("request_context")
 
@@ -56,7 +57,9 @@ class _RequestContextManager:
             # 修改：移除自动 init，直接报错或记录严重错误
             # 如果这是一个纯 Web 包，应该 raise 异常。
             # 如果为了兼容，打印 Error 且不执行操作可能更安全。
-            raise RuntimeError("Request Context not initialized. Is Middleware added?") from e
+            raise RuntimeError(
+                "Request Context not initialized. Is Middleware added?"
+            ) from e
 
     @staticmethod
     def all() -> dict[str, Any]:
@@ -91,11 +94,11 @@ def get_val(key: ContextKeyType, default: Any = None):
     return _ctx_manager.get(key, default)
 
 
-def set_user_id(user_id: int):
+def set_user_id(user_id: UUID):
     _ctx_manager.set(ContextKey.USER_ID, user_id)
 
 
-def get_user_id() -> int:
+def get_user_id() -> UUID:
     user_id = _ctx_manager.get(ContextKey.USER_ID)
     if user_id is None:
         raise LookupError("user_id is not set")
@@ -116,7 +119,9 @@ def get_trace_id() -> str:
     trace_id = _ctx_manager.get(ContextKey.TRACE_ID)
 
     if not is_valid_trace_id(trace_id):
-        raise LookupError(f"trace_id is invalid or not set, current value: {repr(trace_id)}")
+        raise LookupError(
+            f"trace_id is invalid or not set, current value: {repr(trace_id)}"
+        )
 
     return trace_id
 

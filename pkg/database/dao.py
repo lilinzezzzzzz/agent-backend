@@ -2,6 +2,7 @@ from collections.abc import AsyncGenerator, Mapping
 from contextlib import asynccontextmanager, nullcontext
 from dataclasses import dataclass
 from typing import Any, cast
+from uuid import UUID
 
 from sqlalchemy import (
     ColumnElement,
@@ -248,9 +249,9 @@ class BaseDao[T: ModelMixin]:
 
     async def query_by_primary_id(
         self,
-        primary_id: int,
+        primary_id: UUID,
         *,
-        creator_id: int | None = None,
+        creator_id: UUID | None = None,
         include_deleted: bool = False,
     ) -> T | None:
         statement = self.select_stmt(include_deleted=include_deleted).where(
@@ -261,7 +262,7 @@ class BaseDao[T: ModelMixin]:
 
         return await self.fetch_one(statement)
 
-    async def query_by_ids(self, ids: list[int]) -> list[T]:
+    async def query_by_ids(self, ids: list[UUID]) -> list[T]:
         if not ids:
             return []
         statement = self.select_stmt().where(self.model_cls.id.in_(ids))

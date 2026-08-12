@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import Any
+from uuid import UUID
 
 import pytest
 
@@ -11,6 +12,8 @@ from internal.services.agents.audit import (
 )
 from internal.schemas.agent import AgentRunResultDTO, AgentStepDTO
 from pkg.agents import LLMActionModel
+
+TEST_USER_ID = UUID("00000000-0000-7000-8000-000000000999")
 
 
 class FakeAgentAuditDao:
@@ -115,7 +118,7 @@ async def test_agent_audit_service_redacts_sensitive_payloads() -> None:
 
     saved = await service.record_agent_run(
         agent_name="order_support",
-        user_id=999,
+        user_id=TEST_USER_ID,
         trace_id="trace-audit",
         user_input="发票发送到 buyer@example.com，手机 13812345678",
         max_steps=3,
@@ -160,7 +163,7 @@ async def test_record_agent_audit_uses_background_task_manager(
     audit_writer = FakeAgentAuditService()
     audit_context = AgentAuditContext.start(
         agent_name="order_support",
-        user_id=999,
+        user_id=TEST_USER_ID,
         user_input="查询订单",
         max_steps=3,
     )
@@ -202,7 +205,7 @@ async def test_record_agent_audit_falls_back_when_background_task_manager_is_uni
     audit_writer = FakeAgentAuditService()
     audit_context = AgentAuditContext.start(
         agent_name="order_support",
-        user_id=999,
+        user_id=TEST_USER_ID,
         user_input="查询订单",
         max_steps=3,
     )
@@ -235,7 +238,7 @@ async def test_record_agent_audit_does_not_write_inline_when_background_task_man
     audit_writer = FakeAgentAuditService()
     audit_context = AgentAuditContext.start(
         agent_name="order_support",
-        user_id=999,
+        user_id=TEST_USER_ID,
         user_input="查询订单",
         max_steps=3,
     )
@@ -260,7 +263,7 @@ async def test_record_agent_audit_does_not_write_inline_when_background_task_man
 async def test_audited_agent_llm_client_records_structured_calls() -> None:
     audit_context = AgentAuditContext.start(
         agent_name="order_support",
-        user_id=999,
+        user_id=TEST_USER_ID,
         user_input="订单 1001 到哪了？",
         max_steps=3,
     )

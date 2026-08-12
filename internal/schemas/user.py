@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from uuid import UUID
 
 from pydantic import BaseModel, Field
 
@@ -71,7 +72,7 @@ class UserListReqSchema(BaseModel):
 
 
 class UserDetailSchema(BaseModel):
-    id: int
+    id: UUID
     name: str
     phone: str
 
@@ -84,7 +85,7 @@ class UserListResponseSchema(BaseListResponse[UserDetailSchema]):
 class AuthUserDTO:
     """认证用例返回给 Router 的用户数据。"""
 
-    id: int
+    id: UUID
     name: str
     phone: str
 

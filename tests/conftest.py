@@ -5,7 +5,7 @@ Pytest 配置文件 (conftest.py)
 所有 fixtures 和 hooks 在此文件定义后，可在任意测试文件中直接使用。
 
 主要功能：
-1. Mock 外部依赖（logger、snowflake ID、配置等）
+1. Mock 外部依赖（logger、UUIDv7、配置等）
 2. 提供数据库测试 fixtures（内存 SQLite）
 3. 提供 Redis 测试 fixtures
 4. 提供 FastAPI 测试客户端
@@ -148,7 +148,9 @@ if not _skip_context_mock:
 
     mock_context = types.ModuleType("pkg.request_context")
     mock_context.ContextKey = MockContextKey
-    mock_context.get_user_id = MagicMock(return_value=999)
+    mock_context.get_user_id = MagicMock(
+        return_value=uuid.UUID("00000000-0000-7000-8000-000000000999")
+    )
     mock_context.get_trace_id = MagicMock(return_value="test-trace-id")
     mock_context.set_user_id = MagicMock()
     mock_context.set_trace_id = MagicMock()
@@ -167,38 +169,19 @@ if not _skip_context_mock:
     if tracing_otel_module is not None:
         tracing_otel_module.request_context = mock_context
 
-# Mock snowflake ID 生成器
+# Mock UUIDv7 生成器
 _id_counter = 0
 
 
-def mock_gen_id() -> int:
+def mock_gen_id() -> uuid.UUID:
     global _id_counter
     _id_counter += 1
-    return _id_counter
+    return uuid.UUID(f"00000000-0000-7000-8000-{_id_counter:012x}")
 
 
-mock_snowflake_generator = MagicMock()
-mock_snowflake_generator.generate = mock_gen_id
-
-
-class MockSnowflakeIDGenerator:
-    def __init__(self, node_id: int):
-        self.node_id = node_id
-
-    def generate(self) -> int:
-        return mock_gen_id()
-
-    def generate_batch(self, count: int) -> list[int]:
-        return [mock_gen_id() for _ in range(count)]
-
-
-mock_snowflake_module = types.ModuleType("pkg.ids")
-mock_snowflake_module.snowflake_id_generator = mock_snowflake_generator
-mock_snowflake_module.SnowflakeIDGenerator = MockSnowflakeIDGenerator
-mock_snowflake_module.auto_snowflake_node_id = MagicMock(return_value=1)
-mock_snowflake_module.uuid6_unique_str_id = MagicMock(
-    side_effect=lambda: uuid6.uuid7().hex
-)
+mock_ids_module = types.ModuleType("pkg.ids")
+mock_ids_module.uuid7_unique_id = MagicMock(side_effect=mock_gen_id)
+mock_ids_module.uuid7_unique_str_id = MagicMock(side_effect=lambda: uuid6.uuid7().hex)
 
 
 def _normalize_uuid7_trace_id(value: str | None) -> str | None:
@@ -211,8 +194,8 @@ def _normalize_uuid7_trace_id(value: str | None) -> str | None:
     return parsed.hex if parsed.version == 7 and parsed.int != 0 else None
 
 
-mock_snowflake_module.normalize_uuid7_trace_id = _normalize_uuid7_trace_id
-sys.modules["pkg.ids"] = mock_snowflake_module
+mock_ids_module.normalize_uuid7_trace_id = _normalize_uuid7_trace_id
+sys.modules["pkg.ids"] = mock_ids_module
 
 # ==========================================
 # 3. 测试配置

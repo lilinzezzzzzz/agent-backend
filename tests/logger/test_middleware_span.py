@@ -7,6 +7,7 @@ from contextvars import ContextVar
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock
+from uuid import UUID
 
 import pytest
 import pytest_asyncio
@@ -29,6 +30,7 @@ _PUBLIC_TRACE_ID = "019da8cd058b76ed8a4a52141c1c6b38"
 _INTERNAL_TRACE_ID = "019da8cd058b76ed8a4a52141c1c6b39"
 _TOKEN_TRACE_ID = "019da8cd058b76ed8a4a52141c1c6b3a"
 _MISSING_TOKEN_TRACE_ID = "019da8cd058b76ed8a4a52141c1c6b3b"
+_TEST_USER_ID = UUID("00000000-0000-7000-8000-000000000123")
 
 
 class _ContextStore:
@@ -52,7 +54,7 @@ class _ContextStore:
         ctx[str(normalized_key)] = value
         self._ctx_var.set(ctx)
 
-    def set_user_id(self, user_id: int) -> None:
+    def set_user_id(self, user_id: UUID) -> None:
         self.set_val(context.ContextKey.USER_ID, user_id)
 
     def get_trace_id(self) -> str:
@@ -184,7 +186,7 @@ def middleware_modules(
 
     class FakeAuthService:
         async def verify_token(self, _token: str) -> dict[str, object]:
-            return {"id": 123}
+            return {"id": _TEST_USER_ID.hex}
 
     fake_auth_service.AuthService = FakeAuthService
     fake_auth_service.new_auth_service = lambda: FakeAuthService()

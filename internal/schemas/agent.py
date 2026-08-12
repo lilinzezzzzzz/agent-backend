@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from internal.schemas.order import AgentActionConfirmationDTO, InvoiceRequestDTO
 from pkg.agents import AgentFinal, AgentRunResult, AgentStepRecord, AgentToolCall
-from pkg.ids import uuid6_unique_str_id
+from pkg.ids import uuid7_unique_str_id
 
 type JsonValue = (
     str | int | float | bool | None | list["JsonValue"] | dict[str, "JsonValue"]
@@ -253,7 +253,7 @@ class AgentRunResultDTO:
     ) -> AgentRunResultDTO:
         """构造确定性确认执行结果。"""
         return cls(
-            run_id=run_id or uuid6_unique_str_id(),
+            run_id=run_id or uuid7_unique_str_id(),
             status="completed",
             answer=result.message,
             steps=[
@@ -279,7 +279,7 @@ class AgentRunResultDTO:
     ) -> AgentRunResultDTO:
         """构造无需运行专业 Agent 的最终回答。"""
         return cls(
-            run_id=run_id or uuid6_unique_str_id(),
+            run_id=run_id or uuid7_unique_str_id(),
             status="completed",
             answer=answer,
             steps=[],

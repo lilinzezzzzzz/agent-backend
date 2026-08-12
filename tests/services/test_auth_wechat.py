@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+from uuid import UUID
 
 import pytest
 from pydantic import SecretStr
@@ -10,6 +11,7 @@ from internal.services.auth import AuthService
 from pkg.identity_provider import ExternalIdentityProfile
 
 pytestmark = pytest.mark.asyncio
+TEST_USER_ID = UUID("00000000-0000-7000-8000-000000001001")
 
 
 class FakeWeChatIdentityProvider:
@@ -65,7 +67,7 @@ async def test_wechat_login_maps_identity_without_persisting_provider_token(
     _patch_wechat_dependencies(monkeypatch, provider)
     auth_cache = SimpleNamespace(save_user_session=AsyncMock())
     user = SimpleNamespace(
-        id=1001,
+        id=TEST_USER_ID,
         username="wechat user",
         phone="",
     )

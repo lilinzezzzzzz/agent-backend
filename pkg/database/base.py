@@ -2,11 +2,12 @@ from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Self
+from uuid import UUID
 
 from sqlalchemy import (
-    BigInteger,
     DateTime,
     String,
+    Uuid,
     inspect,
 )
 from sqlalchemy.orm import DeclarativeBase, InstrumentedAttribute, Mapped, mapped_column
@@ -15,7 +16,7 @@ from sqlalchemy.orm.attributes import set_committed_value
 from pkg import request_context as context
 from pkg.database.audit import AuditActor
 from pkg.database.types import ColumnKey
-from pkg.ids import snowflake_id_generator
+from pkg.ids import uuid7_unique_id
 from pkg.toolkit.timer import utc_now_naive
 
 _AUDIT_COLUMNS = frozenset({"creator_id", "creator_type", "updater_id", "updater_type"})
@@ -39,15 +40,15 @@ class ModelMixin(Base):
 
     __abstract__ = True
 
-    id: Mapped[int] = mapped_column(
-        BigInteger,
+    id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
         primary_key=True,
         autoincrement=False,
     )
-    creator_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    creator_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
     creator_type: Mapped[str] = mapped_column(String(32), nullable=False)
-    updater_id: Mapped[int | None] = mapped_column(
-        BigInteger, nullable=True, default=None
+    updater_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True), nullable=True, default=None
     )
     updater_type: Mapped[str | None] = mapped_column(
         String(32), nullable=True, default=None
@@ -205,7 +206,7 @@ class ModelMixin(Base):
         defaults = self.get_write_defaults(audit_actor=audit_actor)
 
         if self.id is None:
-            self.id = snowflake_id_generator.generate()
+            self.id = uuid7_unique_id()
         if self.created_at is None:
             self.created_at = defaults.now
         if self.updated_at is None:
@@ -242,7 +243,7 @@ class ModelMixin(Base):
         if values.get("updated_at") is None:
             values["updated_at"] = defaults.now
         if values.get("id") is None:
-            values["id"] = snowflake_id_generator.generate()
+            values["id"] = uuid7_unique_id()
         values.update(defaults.audit_actor.creator_values())
         values["updater_id"] = None
         values["updater_type"] = None

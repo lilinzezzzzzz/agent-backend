@@ -1,5 +1,5 @@
 from collections.abc import Mapping
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from celery.exceptions import Ignore
 
@@ -30,7 +30,7 @@ def _resolve_trace_id(task) -> str:
     soft_time_limit=25,
     time_limit=IDEMPOTENT_SUM_TIMEOUT_SECONDS,
 )
-def sum_numbers(self, record_id: int, scope: str, x: int, y: int) -> dict[str, int]:
+def sum_numbers(self, record_id: UUID, scope: str, x: int, y: int) -> dict[str, int]:
     """执行一次经 PostgreSQL claim 门禁的加法 demo。"""
 
     async def _execute() -> dict[str, int]:

@@ -78,7 +78,7 @@ from inspect import isawaitable
 from time import monotonic
 from typing import Any, Protocol
 
-from pkg.ids import uuid6_unique_str_id
+from pkg.ids import uuid7_unique_str_id
 
 ToolArgs = Mapping[str, Any]
 ActionResult = Any
@@ -332,7 +332,7 @@ class ReActAgent:
     ) -> AsyncIterator[AgentRunEvent]:
         """执行动作/工具迭代，并在运行开始、每步完成和运行结束时产出事件。"""
         state = AgentRunState(
-            run_id=run_id or uuid6_unique_str_id(),
+            run_id=run_id or uuid7_unique_str_id(),
             user_input=user_input,
             max_steps=self._max_steps,
         )

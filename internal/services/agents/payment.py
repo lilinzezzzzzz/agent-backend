@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from uuid import UUID
 
 from internal.agents.payment import PaymentAgentBuilder
 from internal.core import AppException, errors
@@ -26,7 +27,7 @@ from internal.schemas.agent import AgentRunResultDTO, AgentStreamEventDTO
 from internal.services.rag import RagService, new_rag_service
 from pkg.logger import logger
 from pkg import request_context as context
-from pkg.ids import uuid6_unique_str_id
+from pkg.ids import uuid7_unique_str_id
 
 
 class PaymentAgentService:
@@ -46,7 +47,7 @@ class PaymentAgentService:
     async def answer_payment_support_question(
         self,
         *,
-        user_id: int,
+        user_id: UUID,
         question: str,
         max_steps: int = 4,
         session_id: str | None = None,
@@ -137,7 +138,7 @@ class PaymentAgentService:
                 result=failed_agent_result(
                     run_id=run_start.run_id
                     if run_start is not None
-                    else uuid6_unique_str_id(),
+                    else uuid7_unique_str_id(),
                     error_type=f"AppException:{exc.error.code}",
                     message=exc.message,
                 ),
@@ -159,7 +160,7 @@ class PaymentAgentService:
                 result=failed_agent_result(
                     run_id=run_start.run_id
                     if run_start is not None
-                    else uuid6_unique_str_id(),
+                    else uuid7_unique_str_id(),
                     error_type=type(exc).__name__,
                 ),
             )
@@ -170,7 +171,7 @@ class PaymentAgentService:
     async def stream_payment_support_question(
         self,
         *,
-        user_id: int,
+        user_id: UUID,
         question: str,
         max_steps: int = 4,
         session_id: str | None = None,
@@ -216,7 +217,7 @@ class PaymentAgentService:
                 audit_writer=self._audit_service,
                 audit_context=audit_context,
                 result=failed_agent_result(
-                    run_id=run_id or uuid6_unique_str_id(),
+                    run_id=run_id or uuid7_unique_str_id(),
                     error_type=f"AppException:{exc.error.code}",
                     message=exc.message,
                 ),
@@ -228,7 +229,7 @@ class PaymentAgentService:
                 audit_writer=self._audit_service,
                 audit_context=audit_context,
                 result=failed_agent_result(
-                    run_id=run_id or uuid6_unique_str_id(),
+                    run_id=run_id or uuid7_unique_str_id(),
                     error_type=type(exc).__name__,
                 ),
             )

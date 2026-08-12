@@ -1,4 +1,5 @@
 from collections.abc import AsyncIterator
+from uuid import UUID
 
 from internal.agents.router import AgentRoute, HybridAgentRouter
 from internal.cache import AgentActionCache, new_agent_action_cache
@@ -37,7 +38,7 @@ from internal.schemas.agent import (
 )
 from pkg.logger import logger
 from pkg import request_context as context
-from pkg.ids import uuid6_unique_str_id
+from pkg.ids import uuid7_unique_str_id
 
 
 class AgentRouterService:
@@ -63,7 +64,7 @@ class AgentRouterService:
     async def chat(
         self,
         *,
-        user_id: int,
+        user_id: UUID,
         question: str,
         max_steps: int = 4,
         session_id: str | None = None,
@@ -204,7 +205,7 @@ class AgentRouterService:
                     run_id=(
                         run_start.run_id
                         if run_start is not None
-                        else uuid6_unique_str_id()
+                        else uuid7_unique_str_id()
                     ),
                     error_type=f"AppException:{exc.error.code}",
                     message=exc.message,
@@ -230,7 +231,7 @@ class AgentRouterService:
                     run_id=(
                         run_start.run_id
                         if run_start is not None
-                        else uuid6_unique_str_id()
+                        else uuid7_unique_str_id()
                     ),
                     error_type=type(exc).__name__,
                 ),
@@ -242,7 +243,7 @@ class AgentRouterService:
     async def stream_chat(
         self,
         *,
-        user_id: int,
+        user_id: UUID,
         question: str,
         max_steps: int = 4,
         session_id: str | None = None,
@@ -302,7 +303,7 @@ class AgentRouterService:
                             audit_writer=self._audit_service,
                             audit_context=audit_context,
                             result=failed_agent_result(
-                                run_id=run_id or uuid6_unique_str_id(),
+                                run_id=run_id or uuid7_unique_str_id(),
                                 error_type="StreamError",
                                 message=str(routed_event.data.get("message") or ""),
                             ),
@@ -335,7 +336,7 @@ class AgentRouterService:
                             audit_writer=self._audit_service,
                             audit_context=audit_context,
                             result=failed_agent_result(
-                                run_id=run_id or uuid6_unique_str_id(),
+                                run_id=run_id or uuid7_unique_str_id(),
                                 error_type="StreamError",
                                 message=str(routed_event.data.get("message") or ""),
                             ),
@@ -360,7 +361,7 @@ class AgentRouterService:
                 audit_writer=self._audit_service,
                 audit_context=audit_context,
                 result=failed_agent_result(
-                    run_id=run_id or uuid6_unique_str_id(),
+                    run_id=run_id or uuid7_unique_str_id(),
                     error_type=f"AppException:{exc.error.code}",
                     message=exc.message,
                 ),
@@ -376,7 +377,7 @@ class AgentRouterService:
                 audit_writer=self._audit_service,
                 audit_context=audit_context,
                 result=failed_agent_result(
-                    run_id=run_id or uuid6_unique_str_id(),
+                    run_id=run_id or uuid7_unique_str_id(),
                     error_type=type(exc).__name__,
                 ),
             )

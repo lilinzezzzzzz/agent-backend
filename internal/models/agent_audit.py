@@ -2,15 +2,16 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any
+from uuid import UUID
 
 from sqlalchemy import (
-    BigInteger,
     DateTime,
     Float,
     Index,
     Integer,
     String,
     Text,
+    Uuid,
     UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column
@@ -30,7 +31,9 @@ class AgentAudit(ModelMixin):
     agent_name: Mapped[str] = mapped_column(
         String(64), nullable=False, comment="Agent 名称"
     )
-    user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, comment="用户 ID")
+    user_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), nullable=False, comment="用户 ID"
+    )
     trace_id: Mapped[str | None] = mapped_column(
         String(128), nullable=True, comment="请求 trace_id"
     )

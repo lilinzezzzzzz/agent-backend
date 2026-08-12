@@ -1,5 +1,7 @@
 """Auth 业务缓存：用户会话 token 与元数据"""
 
+from uuid import UUID
+
 from internal.infra.redis.connection import redis_client
 from pkg.logger import logger
 from pkg.toolkit.json import orjson_dumps, orjson_loads
@@ -22,7 +24,7 @@ class AuthCache:
         return f"token:{token}"
 
     @staticmethod
-    def _user_token_list_key(user_id: int) -> str:
+    def _user_token_list_key(user_id: UUID) -> str:
         return f"token_list:{user_id}"
 
     # ---------- metadata ----------
@@ -49,7 +51,7 @@ class AuthCache:
 
     # ---------- token list ----------
 
-    async def get_user_token_list(self, user_id: int) -> list[str]:
+    async def get_user_token_list(self, user_id: UUID) -> list[str]:
         """读取某用户的有效 token 列表。"""
         val = await self._redis.get_list(self._user_token_list_key(user_id))
         if not val:
@@ -60,11 +62,11 @@ class AuthCache:
 
         return val
 
-    async def add_user_token(self, user_id: int, token: str) -> int:
+    async def add_user_token(self, user_id: UUID, token: str) -> int:
         """向用户 token 列表追加新 token。"""
         return await self._redis.push_to_list(self._user_token_list_key(user_id), token)
 
-    async def remove_user_token(self, user_id: int, token: str) -> int:
+    async def remove_user_token(self, user_id: UUID, token: str) -> int:
         """从用户 token 列表移除指定 token。"""
         return await self._redis.remove_from_list(
             self._user_token_list_key(user_id), token
@@ -73,13 +75,13 @@ class AuthCache:
     # ---------- 组合操作 ----------
 
     async def save_user_session(
-        self, user_id: int, token: str, metadata: dict, ex: int | None = None
+        self, user_id: UUID, token: str, metadata: dict, ex: int | None = None
     ) -> None:
         """保存一次会话：写入 metadata 并把 token 追加到用户 token 列表。"""
         await self.set_user_metadata(token, metadata, ex=ex)
         await self.add_user_token(user_id, token)
 
-    async def revoke_user_session(self, user_id: int, token: str) -> int:
+    async def revoke_user_session(self, user_id: UUID, token: str) -> int:
         """
         撤销一次会话：
         删除 metadata 并从用户 token 列表中移除。返回 metadata 删除数量。

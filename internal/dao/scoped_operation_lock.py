@@ -10,7 +10,7 @@ from internal.infra.database import get_read_session, get_session
 from internal.models.scoped_operation_lock import ScopedOperationLock
 from pkg.database.audit import AuditActor
 from pkg.database.dao import BaseDao
-from pkg.ids import snowflake_id_generator
+from pkg.ids import uuid7_unique_id
 from pkg.toolkit.timer import utc_now_naive
 
 
@@ -112,7 +112,7 @@ class ScopedOperationLockDao(BaseDao[ScopedOperationLock]):
         await session.execute(
             _INSERT_IGNORE_LOCK_ROW_STMT,
             {
-                "id": snowflake_id_generator.generate(),
+                "id": uuid7_unique_id(),
                 "operation_scope": operation_scope,
                 "resource_key": resource_key,
                 **actor.creator_values(),

@@ -1,4 +1,5 @@
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import APIRouter, Depends
 
@@ -75,7 +76,7 @@ async def create_idempotent_sum_task(
     summary="查询 Celery 逻辑任务",
 )
 async def get_celery_task(
-    record_id: int,
+    record_id: UUID,
     service: Annotated[CeleryTaskService, Depends(new_celery_task_service)],
 ) -> ResponsePayload:
     """查询 Celery 逻辑任务。
@@ -107,7 +108,7 @@ async def get_celery_task(
     summary="取消 Celery 逻辑任务",
 )
 async def cancel_celery_task(
-    record_id: int,
+    record_id: UUID,
     service: Annotated[CeleryTaskService, Depends(new_celery_task_service)],
 ) -> ResponsePayload:
     """幂等请求取消指定 Celery 逻辑任务。

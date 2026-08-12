@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from pkg.lazy_proxy import lazy_proxy
 from pkg.smart_types import (
@@ -66,6 +66,17 @@ class TestSmartInt:
         assert model.id == 999
         assert isinstance(model.id, int)
 
+    @pytest.mark.parametrize("value", [1, "1"])
+    def test_smart_int_accepts_minimum(self, value):
+        """测试最小值 1 可通过校验"""
+        assert DemoModel(id=value).id == 1
+
+    @pytest.mark.parametrize("value", [0, "0", -1, "-1"])
+    def test_smart_int_rejects_values_below_minimum(self, value):
+        """测试拒绝小于 1 的整数和数字字符串"""
+        with pytest.raises(ValidationError):
+            DemoModel(id=value)
+
     def test_smart_int_invalid(self):
         """测试非法输入"""
         with pytest.raises(ValidationError):
@@ -77,6 +88,14 @@ class TestSmartInt:
             DemoModel(id=True)
         with pytest.raises(ValidationError):
             DemoModel(id=False)
+
+    def test_smart_int_json_schema_declares_minimum(self):
+        """测试 JSON Schema 与运行时最小值约束一致"""
+        schema = TypeAdapter(SmartInt).json_schema()
+        assert schema["anyOf"] == [
+            {"minimum": 1, "type": "integer"},
+            {"pattern": r"^\+?0*[1-9]\d*$", "type": "string"},
+        ]
 
 
 # ==========================================

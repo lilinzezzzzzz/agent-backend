@@ -4,6 +4,7 @@ import hashlib
 import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Any
+from uuid import UUID
 
 import anyio
 from pydantic import BaseModel, Field
@@ -25,7 +26,7 @@ from internal.schemas.rag import (
     RagRetrievalDTO,
 )
 from pkg import request_context as context
-from pkg.ids import uuid6_unique_str_id
+from pkg.ids import uuid7_unique_str_id
 from pkg.logger import logger
 from pkg.vectors.contracts import (
     FilterCondition,
@@ -57,12 +58,12 @@ class SettingsRagScopeResolver:
     """Resolve RAG visibility from server-side settings."""
 
     def resolve_allowed_domains(
-        self, *, user_id: int, requested_context: Mapping[str, Any]
+        self, *, user_id: UUID, requested_context: Mapping[str, Any]
     ) -> set[str]:
         return {domain for domain in settings.RAG_ALLOWED_DOMAINS if domain}
 
     def resolve_allowed_kb_ids(
-        self, *, user_id: int, requested_context: Mapping[str, Any]
+        self, *, user_id: UUID, requested_context: Mapping[str, Any]
     ) -> set[int]:
         return {kb_id for kb_id in settings.RAG_ALLOWED_KB_IDS if kb_id > 0}
 
@@ -97,7 +98,7 @@ class RagService:
     async def retrieve(
         self,
         *,
-        user_id: int,
+        user_id: UUID,
         query: str,
         requested_domain: str | None = None,
         requested_kb_ids: Sequence[int] | None = None,
@@ -206,7 +207,7 @@ class RagService:
     async def answer(
         self,
         *,
-        user_id: int,
+        user_id: UUID,
         question: str,
         requested_domain: str | None = None,
         requested_kb_ids: Sequence[int] | None = None,
@@ -281,7 +282,7 @@ class RagService:
         self,
         *,
         case_id: str,
-        subject_user_id: int,
+        subject_user_id: UUID,
         question: str,
         requested_domain: str | None = None,
         requested_kb_ids: Sequence[int] | None = None,
@@ -486,7 +487,7 @@ class RagService:
     def _resolve_effective_scope(
         self,
         *,
-        user_id: int,
+        user_id: UUID,
         requested_domain: str | None,
         requested_kb_ids: Sequence[int] | None,
     ) -> _ResolvedRagScope:
@@ -602,14 +603,14 @@ class RagService:
 
     @staticmethod
     def _new_run_id() -> str:
-        return f"rag_run_{uuid6_unique_str_id()}"
+        return f"rag_run_{uuid7_unique_str_id()}"
 
     @staticmethod
     def _resolve_trace_id() -> str:
         try:
             return context.get_trace_id()
         except LookupError:
-            return f"trace_{uuid6_unique_str_id()}"
+            return f"trace_{uuid7_unique_str_id()}"
 
 
 class _ResolvedRagScope(BaseModel):

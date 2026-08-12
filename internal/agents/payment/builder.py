@@ -1,5 +1,6 @@
 from collections.abc import Mapping
 from typing import Any
+from uuid import UUID
 
 from internal.agents.payment.prompt import PAYMENT_SUPPORT_SYSTEM_PROMPT
 from internal.agents.payment.tools import (
@@ -20,7 +21,7 @@ class PaymentAgentBuilder:
         *,
         llm_client: OpenAIClient,
         rag_service: RagService,
-        user_id: int,
+        user_id: UUID,
         max_steps: int,
         session_context: Mapping[str, Any] | None = None,
     ):

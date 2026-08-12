@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from internal.infra.database import get_read_session, get_session
@@ -35,7 +37,7 @@ class ExternalIdentityDao(BaseDao[ExternalIdentity]):
         async with self.session_provider() as primary_session:
             return await self.fetch_one(statement, session=primary_session)
 
-    async def get_all_by_user_id(self, user_id: int) -> list[ExternalIdentity]:
+    async def get_all_by_user_id(self, user_id: UUID) -> list[ExternalIdentity]:
         statement = (
             self.select_stmt()
             .where(self.model_cls.user_id == user_id)

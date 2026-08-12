@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Annotated, Any
 
+from annotated_types import Ge
 from pydantic import BeforeValidator, PlainSerializer, WithJsonSchema
 
 from pkg.toolkit.float import is_safe_float_range
@@ -51,12 +52,16 @@ def _serialize_smart_int(v: int) -> int | str:
 SmartInt = Annotated[
     int,  # Python 内部类型始终是 int
     BeforeValidator(_parse_smart_int),
+    Ge(1),
     PlainSerializer(_serialize_smart_int, return_type=int | str, when_used="json"),
     WithJsonSchema(
         {
-            "anyOf": [{"type": "integer"}, {"type": "string"}],
+            "anyOf": [
+                {"type": "integer", "minimum": 1},
+                {"type": "string", "pattern": r"^\+?0*[1-9]\d*$"},
+            ],
             "title": "SmartInt",
-            "description": "Int in Python. Auto-converts to string in JSON if > JS safe range.",
+            "description": "Integer >= 1 in Python. Auto-converts to string in JSON if > JS safe range.",
             "example": 12345,
         }
     ),

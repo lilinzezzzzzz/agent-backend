@@ -1,4 +1,5 @@
 from datetime import timedelta
+from uuid import UUID
 
 from sqlalchemy import func, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -121,7 +122,7 @@ class CeleryTaskDao:
         self,
         *,
         session: AsyncSession,
-        record_id: int,
+        record_id: UUID,
         task_name: str,
         trace_id: str,
         scope: str,
@@ -170,7 +171,7 @@ class CeleryTaskDao:
         return record, True
 
     async def get_by_id_and_scope(
-        self, *, record_id: int, scope: str
+        self, *, record_id: UUID, scope: str
     ) -> CeleryTaskRecord | None:
         """从主库读取指定 scope 的任务记录。"""
         async with self._session_provider() as session:
@@ -181,7 +182,7 @@ class CeleryTaskDao:
     async def mark_queued(
         self,
         *,
-        record_id: int,
+        record_id: UUID,
         scope: str,
         queue_start_timeout_seconds: int,
     ) -> CeleryTaskRecord | None:
@@ -213,7 +214,7 @@ class CeleryTaskDao:
             )
 
     async def mark_dispatch_failed(
-        self, *, record_id: int, scope: str
+        self, *, record_id: UUID, scope: str
     ) -> tuple[CeleryTaskRecord | None, bool]:
         """将仍为 SUBMITTING 的任务 CAS 为发布失败。"""
         async with self._session_provider() as session, session.begin():
@@ -249,7 +250,7 @@ class CeleryTaskDao:
     async def claim_execution(
         self,
         *,
-        record_id: int,
+        record_id: UUID,
         task_name: str,
         scope: str,
         execution_token: str,
@@ -291,7 +292,7 @@ class CeleryTaskDao:
     async def finish_execution(
         self,
         *,
-        record_id: int,
+        record_id: UUID,
         execution_token: str,
         status: CeleryTaskStatus,
         error_code: CeleryTaskErrorCode | None = None,
@@ -323,7 +324,7 @@ class CeleryTaskDao:
             return (await session.execute(stmt)).scalar_one_or_none() is not None
 
     async def acknowledge_cancellation(
-        self, *, record_id: int, execution_token: str
+        self, *, record_id: UUID, execution_token: str
     ) -> bool:
         """Worker 在协作检查点确认取消并写入 CANCELLED。"""
         async with self._session_provider() as session, session.begin():
@@ -347,7 +348,7 @@ class CeleryTaskDao:
             return (await session.execute(stmt)).scalar_one_or_none() is not None
 
     async def request_cancellation(
-        self, *, record_id: int, scope: str
+        self, *, record_id: UUID, scope: str
     ) -> CeleryTaskRecord | None:
         """锁定记录并按当前状态提交幂等取消请求。"""
         async with self._session_provider() as session, session.begin():
@@ -389,7 +390,7 @@ class CeleryTaskDao:
             return record
 
     async def disallow_cancellation(
-        self, *, record_id: int, execution_token: str
+        self, *, record_id: UUID, execution_token: str
     ) -> bool:
         """Worker 进入不可取消阶段前关闭取消门禁。"""
         async with self._session_provider() as session, session.begin():
@@ -414,7 +415,7 @@ class CeleryTaskDao:
 
     async def fail_stale_submitting(
         self, *, batch_size: int, stale_seconds: int
-    ) -> list[int]:
+    ) -> list[UUID]:
         """批量将发布确认超时的 SUBMITTING 任务收敛为 FAILED。"""
         async with self._session_provider() as session, session.begin():
             self._require_postgresql(session)
@@ -429,7 +430,7 @@ class CeleryTaskDao:
             )
             return list(result.scalars().all())
 
-    async def fail_expired_queued(self, *, batch_size: int) -> list[int]:
+    async def fail_expired_queued(self, *, batch_size: int) -> list[UUID]:
         """批量将超过启动 deadline 的 QUEUED 任务收敛为 FAILED。"""
         async with self._session_provider() as session, session.begin():
             self._require_postgresql(session)
@@ -442,7 +443,7 @@ class CeleryTaskDao:
 
     async def reconcile_expired_execution(
         self, *, batch_size: int, orphan_fence_seconds: int
-    ) -> list[int]:
+    ) -> list[UUID]:
         """批量将超过 hard deadline 的运行中任务隔离为 ORPHANED。"""
         async with self._session_provider() as session, session.begin():
             self._require_postgresql(session)
@@ -460,7 +461,7 @@ class CeleryTaskDao:
     async def resolve_orphaned(
         self,
         *,
-        record_id: int,
+        record_id: UUID,
         scope: str,
         status: CeleryTaskStatus,
         error_code: CeleryTaskErrorCode | None = None,
@@ -497,7 +498,7 @@ class CeleryTaskDao:
 
     @staticmethod
     async def _get_by_id_and_scope_in_session(
-        session: AsyncSession, *, record_id: int, scope: str
+        session: AsyncSession, *, record_id: UUID, scope: str
     ) -> CeleryTaskRecord | None:
         result = await session.execute(
             select(CeleryTaskRecord).where(

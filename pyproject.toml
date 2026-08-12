@@ -34,7 +34,6 @@ dependencies = [
     "bcrypt>=5.0.0",
     "python-dotenv>=1.2.2",
     "shortuuid>=1.0.13",
-    "snowflake-id>=1.0.2",
     "openai>=2.24.0",
     "orjson>=3.11.7",
     "tqdm>=4.67.3",

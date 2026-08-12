@@ -1,6 +1,7 @@
 from datetime import datetime
+from uuid import UUID
 
-from sqlalchemy import BigInteger, DateTime, Index, String, UniqueConstraint
+from sqlalchemy import DateTime, Index, String, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from pkg.database.base import ModelMixin
@@ -11,8 +12,8 @@ class ExternalIdentity(ModelMixin):
 
     __tablename__ = "external_identity"
 
-    user_id: Mapped[int] = mapped_column(
-        BigInteger,
+    user_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
         nullable=False,
         comment="关联 user.id 的逻辑外键",
     )

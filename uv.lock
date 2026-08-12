@@ -69,7 +69,6 @@ dependencies = [
     { name = "pyyaml" },
     { name = "redis" },
     { name = "shortuuid" },
-    { name = "snowflake-id" },
     { name = "sqlalchemy" },
     { name = "starlette" },
     { name = "tqdm" },
@@ -159,7 +158,6 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "redis", specifier = ">=7.2.1" },
     { name = "shortuuid", specifier = ">=1.0.13" },
-    { name = "snowflake-id", specifier = ">=1.0.2" },
     { name = "sqlalchemy", specifier = ">=2.0.47" },
     { name = "starlette", specifier = ">=0.52.1" },
     { name = "tqdm", specifier = ">=4.67.3" },
@@ -3268,15 +3266,6 @@ source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
 sdist = { url = "https://mirrors.aliyun.com/pypi/packages/a2/87/a6771e1546d97e7e041b6ae58d80074f81b7d5121207425c964ddf5cfdbd/sniffio-1.3.1.tar.gz", hash = "sha256:f4324edc670a0f49750a81b895f35c3adb843cca46f0530f79fc1babb23789dc" }
 wheels = [
     { url = "https://mirrors.aliyun.com/pypi/packages/e9/44/75a9c9421471a6c4805dbf2356f7c181a29c1879239abab1ea2cc8f38b40/sniffio-1.3.1-py3-none-any.whl", hash = "sha256:2f6da418d1f1e0fddd844478f41680e794e6051915791a034ff65e5f100525a2" },
-]
-
-[[package]]
-name = "snowflake-id"
-version = "1.0.2"
-source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
-sdist = { url = "https://mirrors.aliyun.com/pypi/packages/7a/d0/91bd3d2e54ea849e8c4e73681ef75c1c93f37a8c9f0627b1553522267e08/snowflake_id-1.0.2.tar.gz", hash = "sha256:4a4cd49508599aaa16488311f4b9121e9ac3bac57edff3e9f71b1d79086dbfe8" }
-wheels = [
-    { url = "https://mirrors.aliyun.com/pypi/packages/41/a4/ee0bdba1d1e98db21166381559d0061d752bbf66af2dd1cbbe4c2afdc4fa/snowflake_id-1.0.2-py3-none-any.whl", hash = "sha256:c3142752ed334b9d4632739a704461d13e97aa6fa71b65d5329829b4b5cc058c" },
 ]
 
 [[package]]

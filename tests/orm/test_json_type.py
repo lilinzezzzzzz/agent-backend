@@ -396,7 +396,7 @@ async def test_json_nullable_field(db_session):
                     "typeof(extra_sql_null), json_type(extra_sql_null) "
                     "FROM json_test WHERE id = :id"
                 ),
-                {"id": model1.id},
+                {"id": model1.id.hex},
             )
         ).one()
         assert storage_types == ("text", "null", "null", None)

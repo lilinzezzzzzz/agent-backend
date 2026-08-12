@@ -1,6 +1,7 @@
 """Agent 待确认动作与幂等结果缓存。"""
 
 from hashlib import sha256
+from uuid import UUID
 
 from internal.infra.redis.connection import redis_client
 from pkg.redis import RedisClient
@@ -30,7 +31,7 @@ class AgentActionCache:
         return sha256(idempotency_key.encode("utf-8")).hexdigest()
 
     @classmethod
-    def _idempotency_key(cls, user_id: int, idempotency_key: str) -> str:
+    def _idempotency_key(cls, user_id: UUID, idempotency_key: str) -> str:
         digest = cls._idempotency_digest(idempotency_key)
         return f"agent_action:idempotency:{user_id}:{digest}"
 
@@ -73,7 +74,7 @@ class AgentActionCache:
     async def save_idempotency_result(
         self,
         *,
-        user_id: int,
+        user_id: UUID,
         idempotency_key: str,
         payload: dict[str, object],
         expires_in_seconds: int,
@@ -86,7 +87,7 @@ class AgentActionCache:
         )
 
     async def get_idempotency_result(
-        self, *, user_id: int, idempotency_key: str
+        self, *, user_id: UUID, idempotency_key: str
     ) -> dict[str, object] | None:
         """读取副作用动作的幂等执行结果。"""
         return await self._redis.get_dict(

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from uuid import UUID
+
 from internal.infra.database import get_read_session, get_session
 from internal.models.agent_conversation import (
     AgentMessage,
@@ -16,7 +18,7 @@ class AgentSessionDao(BaseDao[AgentSession]):
     _model_cls: type[AgentSession] = AgentSession
 
     async def get_by_session_id_for_user(
-        self, *, session_id: str, user_id: int
+        self, *, session_id: str, user_id: UUID
     ) -> AgentSession | None:
         """按 session_id 和 user_id 查询未删除会话。"""
         statement = self.select_stmt().where(
@@ -34,7 +36,7 @@ class AgentMessageDao(BaseDao[AgentMessage]):
     async def list_recent_messages(
         self,
         *,
-        user_id: int,
+        user_id: UUID,
         session_id: str,
         limit: int,
         max_chars: int,
@@ -72,7 +74,7 @@ class AgentRunDao(BaseDao[AgentRun]):
     _model_cls: type[AgentRun] = AgentRun
 
     async def get_by_run_id_for_user(
-        self, *, run_id: str, user_id: int
+        self, *, run_id: str, user_id: UUID
     ) -> AgentRun | None:
         """按 run_id 和 user_id 查询未删除运行记录。"""
         statement = self.select_stmt().where(

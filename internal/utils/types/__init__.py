@@ -4,6 +4,7 @@
 """
 
 from enum import StrEnum
+from uuid import UUID
 
 
 class UserStatus(StrEnum):
@@ -48,12 +49,12 @@ class LockKey:
         from internal.utils.types import LockKey
 
         # 生成用户操作锁
-        lock_key = LockKey.user_operation(user_id=123)
-        # 结果："lock:user_op:123"
+        user_id = UUID("019ff4e4-ea48-7af4-8dd0-4b14c87cc02c")
+        lock_key = LockKey.user_operation(user_id=user_id)
     """
 
     @staticmethod
-    def user_operation(user_id: int) -> str:
+    def user_operation(user_id: UUID) -> str:
         """用户操作锁"""
         return f"{CachePrefix.LOCK}:user_op:{user_id}"
 

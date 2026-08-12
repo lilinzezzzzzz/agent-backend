@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from uuid import UUID
 
 from internal.agents.router import AgentRoute
 from internal.cache import AgentActionCache
@@ -19,7 +20,7 @@ class AgentConfirmationContext:
 async def resolve_agent_confirmation_context(
     *,
     action_store: AgentActionCache,
-    user_id: int,
+    user_id: UUID,
     confirmation_token: str,
 ) -> AgentConfirmationContext:
     """读取 pending action，并返回其服务端可信业务路由。"""
@@ -29,7 +30,7 @@ async def resolve_agent_confirmation_context(
     pending = await action_store.get_pending_action(token=confirmation_token)
     if pending is None:
         raise AppException(errors.BadRequest, message="确认 token 无效、已过期或已使用")
-    if pending.get("user_id") != user_id:
+    if pending.get("user_id") != user_id.hex:
         raise AppException(errors.Forbidden, message="确认 token 不属于当前用户")
 
     route = _read_route(pending)
@@ -43,7 +44,9 @@ def _read_route(payload: dict[str, object]) -> AgentRoute:
     try:
         return AgentRoute(raw_route)
     except ValueError as exc:
-        raise AppException(errors.BadRequest, message="确认 token 对应的业务域不受支持") from exc
+        raise AppException(
+            errors.BadRequest, message="确认 token 对应的业务域不受支持"
+        ) from exc
 
 
 def _read_required_str(payload: dict[str, object], key: str) -> str:

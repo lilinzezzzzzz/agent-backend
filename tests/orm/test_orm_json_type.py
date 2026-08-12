@@ -4,6 +4,7 @@ import sys
 import types
 from datetime import UTC, datetime
 from unittest.mock import MagicMock
+from uuid import UUID
 
 import pytest
 import pytest_asyncio
@@ -46,26 +47,25 @@ sys.modules["pkg.toolkit.timer"] = mock_timer
 # 1.3 Mock pkg.request_context
 mock_ctx_module = types.ModuleType("pkg.request_context")
 mock_ctx_func = MagicMock()
-mock_ctx_func.return_value = 999
+TEST_USER_ID = UUID("00000000-0000-7000-8000-000000000999")
+mock_ctx_func.return_value = TEST_USER_ID
 mock_ctx_module.get_user_id = mock_ctx_func
 sys.modules["pkg.request_context"] = mock_ctx_module
 
 # 1.4 Mock 其他工具
 mock_logger = MagicMock()
-mock_snowflake = MagicMock()
 _id_counter = 0
 
 
 def mock_gen_id():
     global _id_counter
     _id_counter += 1
-    return _id_counter
+    return UUID(f"00000000-0000-7000-8000-{_id_counter:012x}")
 
 
-mock_snowflake.generate = mock_gen_id
 sys.modules["pkg.logger_tool"] = mock_logger
 sys.modules["pkg.ids"] = types.ModuleType("pkg.ids")
-sys.modules["pkg.ids"].snowflake_id_generator = mock_snowflake
+sys.modules["pkg.ids"].uuid7_unique_id = mock_gen_id
 
 # ==========================================
 # 2. 导入目标代码
@@ -125,7 +125,7 @@ async def db_session():
 @pytest.fixture
 def _context_user():
     if hasattr(database_base.context, "init"):
-        database_base.context.init(user_id=999)
+        database_base.context.init(user_id=TEST_USER_ID)
     yield
     if hasattr(database_base.context, "clear"):
         database_base.context.clear()

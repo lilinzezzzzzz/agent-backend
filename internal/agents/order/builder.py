@@ -1,5 +1,6 @@
 from collections.abc import Mapping
 from typing import Any
+from uuid import UUID
 
 from internal.agents.order.prompt import ORDER_SUPPORT_SYSTEM_PROMPT
 from internal.agents.order.tools import (
@@ -24,7 +25,7 @@ class OrderAgentBuilder:
         llm_client: OpenAIClient,
         order_service: OrderService,
         rag_service: RagService,
-        user_id: int,
+        user_id: UUID,
         max_steps: int,
         session_context: Mapping[str, Any] | None = None,
     ):

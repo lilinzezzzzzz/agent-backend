@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from uuid import UUID
 
 from internal.cache import AgentActionCache, new_agent_action_cache
 from internal.config import settings
@@ -11,9 +12,10 @@ from internal.schemas.order import (
     OrderStatusDTO,
 )
 from pkg import request_context as context
-from pkg.ids import uuid6_unique_str_id
+from pkg.ids import uuid7_unique_str_id
 
 INVOICE_REQUEST_ACTION = "submit_invoice_request"
+DEMO_ORDER_OWNER_ID = UUID("00000000-0000-7000-8000-000000000999")
 
 
 class OrderService:
@@ -31,7 +33,7 @@ class OrderService:
         self._idempotency_seconds = idempotency_seconds
 
     async def get_order_status(
-        self, *, user_id: int, order_id: str
+        self, *, user_id: UUID, order_id: str
     ) -> OrderStatusDTO | None:
         """查询用户有权访问的订单状态。"""
         order = _ORDER_FIXTURES.get(order_id)
@@ -48,7 +50,7 @@ class OrderService:
     async def prepare_invoice_request(
         self,
         *,
-        user_id: int,
+        user_id: UUID,
         order_id: str,
         invoice_title: str,
         tax_no: str | None,
@@ -73,11 +75,11 @@ class OrderService:
         if await self.get_order_status(user_id=user_id, order_id=order_id) is None:
             raise AppException(errors.NotFound, message="订单不存在或无权访问")
 
-        token = uuid6_unique_str_id()
+        token = uuid7_unique_str_id()
         payload: dict[str, object] = {
             "route": "order",
             "action": INVOICE_REQUEST_ACTION,
-            "user_id": user_id,
+            "user_id": user_id.hex,
             "order_id": order_id,
             "invoice_title": invoice_title,
             "tax_no": tax_no,
@@ -108,7 +110,7 @@ class OrderService:
     async def confirm_invoice_request(
         self,
         *,
-        user_id: int,
+        user_id: UUID,
         confirmation_token: str,
         idempotency_key: str,
     ) -> InvoiceRequestDTO:
@@ -175,10 +177,10 @@ class OrderService:
                 tax_no=_read_optional_str(pending, "tax_no"),
                 email=_read_optional_str(pending, "email"),
                 trace_id=context.get_trace_id(),
-                task_id=f"task_{uuid6_unique_str_id()}",
+                task_id=f"task_{uuid7_unique_str_id()}",
             )
             result_payload: dict[str, object] = {
-                "user_id": user_id,
+                "user_id": user_id.hex,
                 "idempotency_key": idempotency_key,
                 "confirmation_token": result.confirmation_token,
                 **result.to_action_result(),
@@ -212,11 +214,11 @@ class OrderService:
 
 
 def _validate_pending_invoice_action(
-    *, pending: Mapping[str, object], user_id: int
+    *, pending: Mapping[str, object], user_id: UUID
 ) -> None:
     if pending.get("action") != INVOICE_REQUEST_ACTION:
         raise AppException(errors.BadRequest, message="确认 token 对应的动作不受支持")
-    if pending.get("user_id") != user_id:
+    if pending.get("user_id") != user_id.hex:
         raise AppException(errors.Forbidden, message="确认 token 不属于当前用户")
 
 
@@ -238,11 +240,11 @@ def _build_invoice_confirmation_summary(
 def _invoice_request_from_payload(
     payload: Mapping[str, object],
     *,
-    expected_user_id: int,
+    expected_user_id: UUID,
     expected_confirmation_token: str,
     expected_idempotency_key: str,
 ) -> InvoiceRequestDTO:
-    if payload.get("user_id") != expected_user_id:
+    if payload.get("user_id") != expected_user_id.hex:
         raise AppException(errors.Forbidden, message="确认结果不属于当前用户")
     confirmation_token = _read_required_str(payload, "confirmation_token")
     if confirmation_token != expected_confirmation_token:
@@ -280,14 +282,14 @@ def _read_optional_str(payload: Mapping[str, object], key: str) -> str | None:
 
 _ORDER_FIXTURES: dict[str, dict[str, object]] = {
     "1001": {
-        "owner_user_id": 999,
+        "owner_user_id": DEMO_ORDER_OWNER_ID,
         "status": "运输中",
         "carrier": "顺丰速运",
         "tracking_no": "SF10010001",
         "eta": "明天 18:00 前",
     },
     "1002": {
-        "owner_user_id": 999,
+        "owner_user_id": DEMO_ORDER_OWNER_ID,
         "status": "已签收",
         "carrier": "京东物流",
         "tracking_no": "JD10020002",

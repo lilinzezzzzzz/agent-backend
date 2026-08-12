@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import cast
+from uuid import UUID
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,11 +17,13 @@ from internal.dao.celery_task import (
 from internal.models.celery_task import CeleryTaskRecord
 from internal.schemas.celery_task import CeleryTaskStatus
 
+TEST_RECORD_ID = UUID("00000000-0000-7000-8000-000000000123")
+
 
 def _record(status: CeleryTaskStatus) -> CeleryTaskRecord:
     now = datetime(2026, 7, 7, 8, 0, 0)
     return CeleryTaskRecord(
-        id=123,
+        id=TEST_RECORD_ID,
         task_name="task.name",
         trace_id="trace-1",
         scope="user:1",
@@ -37,7 +40,7 @@ def _record(status: CeleryTaskStatus) -> CeleryTaskRecord:
 
 class _Result:
     def __init__(
-        self, *, record: CeleryTaskRecord | None = None, ids: list[int] | None = None
+        self, *, record: CeleryTaskRecord | None = None, ids: list[UUID] | None = None
     ) -> None:
         self.record = record
         self.ids = ids or []
@@ -48,7 +51,7 @@ class _Result:
     def scalars(self) -> "_Result":
         return self
 
-    def all(self) -> list[int]:
+    def all(self) -> list[UUID]:
         return self.ids
 
 
@@ -62,7 +65,7 @@ class _Bind:
 
 class _Session:
     def __init__(
-        self, *, record: CeleryTaskRecord | None = None, ids: list[int] | None = None
+        self, *, record: CeleryTaskRecord | None = None, ids: list[UUID] | None = None
     ) -> None:
         self.record = record
         self.ids = ids
@@ -131,7 +134,7 @@ async def test_request_cancellation_transitions_with_one_utc_time(
     session = _Session(record=record)
     dao = CeleryTaskDao(session_provider=_provider(session))  # type: ignore[arg-type]
 
-    actual = await dao.request_cancellation(record_id=123, scope="user:1")
+    actual = await dao.request_cancellation(record_id=TEST_RECORD_ID, scope="user:1")
 
     assert actual is record
     assert record.status == expected.value
@@ -167,7 +170,7 @@ async def test_request_cancellation_does_not_retime_idempotent_or_terminal_state
     session = _Session(record=record)
     dao = CeleryTaskDao(session_provider=_provider(session))  # type: ignore[arg-type]
 
-    actual = await dao.request_cancellation(record_id=123, scope="user:1")
+    actual = await dao.request_cancellation(record_id=TEST_RECORD_ID, scope="user:1")
 
     assert actual is record
     assert record.status == status.value
@@ -190,7 +193,7 @@ async def test_request_cancellation_rejects_running_when_cancel_disallowed(
     session = _Session(record=record)
     dao = CeleryTaskDao(session_provider=_provider(session))  # type: ignore[arg-type]
 
-    actual = await dao.request_cancellation(record_id=123, scope="user:1")
+    actual = await dao.request_cancellation(record_id=TEST_RECORD_ID, scope="user:1")
 
     assert actual is record
     assert record.status == CeleryTaskStatus.RUNNING.value

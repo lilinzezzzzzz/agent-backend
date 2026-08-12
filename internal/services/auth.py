@@ -2,6 +2,7 @@
 
 import secrets
 from datetime import UTC, datetime
+from uuid import UUID
 
 from internal.cache.auth import AuthCache, new_auth_cache
 from internal.config import settings
@@ -37,7 +38,7 @@ class AuthService:
     @staticmethod
     def _build_user_metadata(user: User) -> dict[str, int | str]:
         return {
-            "id": user.id,
+            "id": user.id.hex,
             "username": user.username,
             "phone": user.phone,
             "created_at": int(datetime.now(UTC).timestamp()),
@@ -92,7 +93,7 @@ class AuthService:
         logger.info(f"User {user.id} registered and logged in successfully")
         return UserLoginDTO(user=self._build_user_dto(user), token=token)
 
-    async def logout(self, *, user_id: int | None, token: str | None) -> None:
+    async def logout(self, *, user_id: UUID | None, token: str | None) -> None:
         """撤销当前用户会话。"""
         if not token:
             raise AppException(errors.Unauthorized, message="缺少认证信息")
@@ -105,7 +106,7 @@ class AuthService:
         else:
             logger.warning(f"Logout failed: token not found, user_id: {user_id}")
 
-    async def get_current_user(self, *, user_id: int | None) -> AuthUserDTO:
+    async def get_current_user(self, *, user_id: UUID | None) -> AuthUserDTO:
         """返回当前认证上下文中的用户业务数据。"""
         if not user_id:
             raise AppException(errors.Unauthorized, message="未认证的用户")
@@ -121,7 +122,7 @@ class AuthService:
                 app_id=settings.WECHAT_APP_ID,
                 app_secret=settings.WECHAT_APP_SECRET.get_secret_value(),
                 grant_type=settings.WECHAT_GRANT_TYPE,
-            )
+            ),
         )
 
         try:
@@ -170,12 +171,14 @@ class AuthService:
                 message="Token verification failed: token not found",
             )
 
-        user_id = user_metadata.get("id")
-        if not user_id:
+        raw_user_id = user_metadata.get("id")
+        try:
+            user_id = UUID(str(raw_user_id))
+        except (TypeError, ValueError, AttributeError):
             raise AppException(
                 errors.Unauthorized,
-                message="Token verification failed: user_id is None",
-            )
+                message="Token verification failed: invalid user_id",
+            ) from None
 
         # 检查有没有在token 列表里
         token_list: list = await self._auth_cache.get_user_token_list(user_id)
@@ -185,7 +188,7 @@ class AuthService:
                 message=f"Token verification failed: token not found in token list, user_id: {user_id}",
             )
 
-        return user_metadata
+        return {**user_metadata, "id": user_id}
 
 
 # 全局单例（懒加载）

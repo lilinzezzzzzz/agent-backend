@@ -1,6 +1,7 @@
 import hashlib
 from contextlib import asynccontextmanager
 from datetime import datetime
+from uuid import UUID
 
 import pytest
 
@@ -9,6 +10,9 @@ from internal.models.celery_task import CeleryTaskRecord
 from internal.schemas.celery_task import CeleryTaskStatus
 from internal.services.celery_task import CeleryTaskService, canonical_task_payload
 from pkg.database.base import ModelMixin
+
+TEST_RECORD_ID = UUID("00000000-0000-7000-8000-000000000123")
+EXISTING_RECORD_ID = UUID("00000000-0000-7000-8000-000000000042")
 
 
 class FakeSession:
@@ -24,7 +28,7 @@ async def _session_provider():
 
 def _record(
     *,
-    record_id: int = 123,
+    record_id: UUID = TEST_RECORD_ID,
     payload_hash: str = "payload",
     status: CeleryTaskStatus = CeleryTaskStatus.SUBMITTING,
     cancel_allowed: bool = True,
@@ -86,7 +90,7 @@ class FakeCeleryTaskDao:
         created = self.existing_payload_hash is None
         return (
             _record(
-                record_id=kwargs["record_id"] if created else 42,
+                record_id=kwargs["record_id"] if created else EXISTING_RECORD_ID,
                 payload_hash=kwargs["payload_hash"]
                 if created
                 else self.existing_payload_hash,
@@ -288,7 +292,7 @@ async def test_submit_once_returns_existing_record_without_republishing() -> Non
         queue="celery_queue",
     )
 
-    assert result.record_id == 42
+    assert result.record_id == EXISTING_RECORD_ID
     assert result.created is False
     assert client.calls == []
 
@@ -354,10 +358,10 @@ async def test_cancel_task_persists_then_best_effort_revokes() -> None:
     client = FakeCeleryClient(revoke_error=ConnectionError())
     service = _new_service(dao, client)
 
-    result = await service.cancel_task(record_id=123, scope="user:1")
+    result = await service.cancel_task(record_id=TEST_RECORD_ID, scope="user:1")
 
     assert result.status is CeleryTaskStatus.CANCELLING
-    assert client.revoke_calls == [("task_123", False)]
+    assert client.revoke_calls == [(f"task_{TEST_RECORD_ID}", False)]
 
 
 @pytest.mark.asyncio
@@ -379,14 +383,16 @@ async def test_cancel_unsafe_task_state_returns_state_conflict(
     )
 
     with pytest.raises(AppException) as exc_info:
-        await service.cancel_task(record_id=123, scope="user:1")
+        await service.cancel_task(record_id=TEST_RECORD_ID, scope="user:1")
 
     assert exc_info.value.error is errors.TaskStateConflict
     assert client.revoke_calls == []
 
 
 @pytest.mark.asyncio
-async def test_cancel_running_task_when_cancel_disallowed_returns_state_conflict() -> None:
+async def test_cancel_running_task_when_cancel_disallowed_returns_state_conflict() -> (
+    None
+):
     client = FakeCeleryClient()
     service = _new_service(
         FakeCeleryTaskDao(
@@ -397,7 +403,7 @@ async def test_cancel_running_task_when_cancel_disallowed_returns_state_conflict
     )
 
     with pytest.raises(AppException) as exc_info:
-        await service.cancel_task(record_id=123, scope="user:1")
+        await service.cancel_task(record_id=TEST_RECORD_ID, scope="user:1")
 
     assert exc_info.value.error is errors.TaskStateConflict
     assert client.revoke_calls == []
@@ -409,7 +415,7 @@ async def test_claim_uses_execution_token_and_combined_deadline() -> None:
     service = _new_service(dao, FakeCeleryClient())
 
     claimed = await service.claim(
-        record_id=123,
+        record_id=TEST_RECORD_ID,
         task_name="task.name",
         scope="user:1",
         execution_token="delivery-token",
@@ -420,7 +426,7 @@ async def test_claim_uses_execution_token_and_combined_deadline() -> None:
     assert claimed is True
     assert dao.claim_calls == [
         {
-            "record_id": 123,
+            "record_id": TEST_RECORD_ID,
             "task_name": "task.name",
             "scope": "user:1",
             "execution_token": "delivery-token",
@@ -435,13 +441,13 @@ async def test_disallow_cancellation_uses_running_token_fence() -> None:
     service = _new_service(dao, FakeCeleryClient())
 
     updated = await service.disallow_cancellation(
-        record_id=123,
+        record_id=TEST_RECORD_ID,
         execution_token="delivery-token",
     )
 
     assert updated is True
     assert dao.disallow_calls == [
-        {"record_id": 123, "execution_token": "delivery-token"}
+        {"record_id": TEST_RECORD_ID, "execution_token": "delivery-token"}
     ]
 
 
@@ -451,7 +457,7 @@ async def test_success_completion_uses_running_token_fence() -> None:
     service = _new_service(dao, FakeCeleryClient())
 
     completed = await service.succeed(
-        record_id=123,
+        record_id=TEST_RECORD_ID,
         execution_token="delivery-token",
     )
 
@@ -469,11 +475,11 @@ async def test_completion_losing_race_to_cancellation_returns_false() -> None:
     service = _new_service(dao, FakeCeleryClient())
 
     completed = await service.succeed(
-        record_id=123,
+        record_id=TEST_RECORD_ID,
         execution_token="delivery-token",
     )
 
     assert completed is False
     assert dao.acknowledge_calls == [
-        {"record_id": 123, "execution_token": "delivery-token"}
+        {"record_id": TEST_RECORD_ID, "execution_token": "delivery-token"}
     ]

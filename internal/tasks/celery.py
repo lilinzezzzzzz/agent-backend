@@ -8,8 +8,8 @@
 注意：所有业务逻辑应放在 services 层，此处只做调度和协调
 """
 
-
 from collections.abc import Mapping
+from uuid import UUID
 
 from internal.infra.celery.application import celery_client
 from internal.infra.celery.execution import run_in_async
@@ -33,7 +33,9 @@ def _resolve_task_trace_id(task: object) -> str:
 # =========================================================
 
 
-@celery_client.app.task(bind=True, name="internal.tasks.celery_tasks.clean_expired_tokens")
+@celery_client.app.task(
+    bind=True, name="internal.tasks.celery_tasks.clean_expired_tokens"
+)
 def clean_expired_tokens(self):
     """
     清理过期 token（独立业务逻辑）
@@ -52,7 +54,9 @@ def clean_expired_tokens(self):
     return run_in_async(_clean_tokens, trace_id=_resolve_task_trace_id(self))
 
 
-@celery_client.app.task(bind=True, name="internal.tasks.celery_tasks.generate_daily_report")
+@celery_client.app.task(
+    bind=True, name="internal.tasks.celery_tasks.generate_daily_report"
+)
 def generate_daily_report(self, report_type: str):
     """
     生成日报表（独立业务逻辑）
@@ -75,8 +79,10 @@ def generate_daily_report(self, report_type: str):
 # =========================================================
 
 
-@celery_client.app.task(bind=True, name="internal.tasks.celery_tasks.send_welcome_email")
-def send_welcome_email(self, user_id: int):
+@celery_client.app.task(
+    bind=True, name="internal.tasks.celery_tasks.send_welcome_email"
+)
+def send_welcome_email(self, user_id: UUID):
     """
     发送欢迎邮件（协调多个 services）
 
@@ -102,7 +108,7 @@ def send_welcome_email(self, user_id: int):
 
 
 @celery_client.app.task(bind=True, name="internal.tasks.celery_tasks.sync_user_data")
-def sync_user_data(self, user_id: int):
+def sync_user_data(self, user_id: UUID):
     """
     同步用户数据到第三方系统（协调多个 services）
     """

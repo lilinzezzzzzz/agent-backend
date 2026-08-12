@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from uuid import UUID
 
 from internal.core import AppException, errors
 from internal.dao.agent_conversation import (
@@ -20,6 +21,9 @@ from internal.services.agents.conversation import (
     DatabaseAgentStorageBackend,
 )
 from internal.schemas.agent import AgentRunResultDTO, AgentStepDTO
+
+TEST_USER_ID = UUID("00000000-0000-7000-8000-000000000999")
+OTHER_USER_ID = UUID("00000000-0000-7000-8000-000000001000")
 
 
 def _new_conversation_service(db_session) -> AgentConversationService:
@@ -42,7 +46,7 @@ async def test_agent_conversation_service_creates_and_completes_run(db_session) 
     service = _new_conversation_service(db_session)
 
     started = await service.start_run(
-        user_id=999,
+        user_id=TEST_USER_ID,
         session_id=None,
         entrypoint="order_support",
         agent_name="order_support",
@@ -51,7 +55,7 @@ async def test_agent_conversation_service_creates_and_completes_run(db_session) 
         trace_id="trace-agent",
     )
     context = await service.load_context(
-        user_id=999,
+        user_id=TEST_USER_ID,
         session_id=started.session_id,
         max_recent_messages=20,
         max_recent_chars=12000,
@@ -76,7 +80,7 @@ async def test_agent_conversation_service_creates_and_completes_run(db_session) 
     )
 
     await service.complete_run(
-        user_id=999,
+        user_id=TEST_USER_ID,
         session_id=started.session_id,
         run_id=started.run_id,
         route="order",
@@ -131,7 +135,7 @@ async def test_agent_conversation_service_creates_and_completes_run(db_session) 
 
     assert context.recent_messages == ()
     assert session is not None
-    assert session.user_id == 999
+    assert session.user_id == TEST_USER_ID
     assert session.creator_type == "user"
     assert session.updater_type == "user"
     assert session.message_count == 2
@@ -152,7 +156,7 @@ async def test_agent_conversation_service_rejects_session_from_another_user(
 ) -> None:
     service = _new_conversation_service(db_session)
     started = await service.start_run(
-        user_id=999,
+        user_id=TEST_USER_ID,
         session_id=None,
         entrypoint="order_support",
         agent_name="order_support",
@@ -163,7 +167,7 @@ async def test_agent_conversation_service_rejects_session_from_another_user(
 
     with pytest.raises(AppException) as exc_info:
         await service.start_run(
-            user_id=1000,
+            user_id=OTHER_USER_ID,
             session_id=started.session_id,
             entrypoint="order_support",
             agent_name="order_support",

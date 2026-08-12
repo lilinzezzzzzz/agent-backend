@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -45,9 +46,7 @@ class RagExternalRunReqSchema(ForbidExtraModel):
     case_id: str = Field(
         ..., description="外部调用方的 case ID", min_length=1, max_length=128
     )
-    subject_user_id: int = Field(
-        ..., description="代表哪个用户解析 allowed scope", ge=0
-    )
+    subject_user_id: UUID = Field(..., description="代表哪个用户解析 allowed scope")
     question: str = Field(
         ..., description="待运行的 RAG 问题", min_length=1, max_length=1000
     )

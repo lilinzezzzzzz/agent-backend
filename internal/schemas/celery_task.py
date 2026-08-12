@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
+from uuid import UUID
 
 from pydantic import BaseModel, Field
 
@@ -48,7 +49,7 @@ class IdempotentSumCreateReqSchema(BaseModel):
 class CeleryTaskDispatchRespSchema(BaseModel):
     """任务登记结果。"""
 
-    record_id: int
+    record_id: UUID
     task_id: str
     status: CeleryTaskStatus
     created: bool
@@ -57,7 +58,7 @@ class CeleryTaskDispatchRespSchema(BaseModel):
 class CeleryTaskDetailSchema(BaseModel):
     """逻辑任务详情。"""
 
-    record_id: int
+    record_id: UUID
     task_id: str
     task_name: str
     queue: str
@@ -79,7 +80,7 @@ class CeleryTaskDetailSchema(BaseModel):
 class CeleryTaskCancelRespSchema(BaseModel):
     """任务取消命令结果。"""
 
-    record_id: int
+    record_id: UUID
     task_id: str
     status: CeleryTaskStatus
 
@@ -88,7 +89,7 @@ class CeleryTaskCancelRespSchema(BaseModel):
 class CeleryTaskDispatchDTO:
     """任务登记结果 DTO。"""
 
-    record_id: int
+    record_id: UUID
     status: CeleryTaskStatus
     created: bool
 
@@ -109,7 +110,7 @@ class CeleryTaskDispatchDTO:
 class CeleryTaskDetailDTO:
     """逻辑任务详情 DTO。"""
 
-    record_id: int
+    record_id: UUID
     task_name: str
     queue: str
     status: CeleryTaskStatus
@@ -156,7 +157,7 @@ class CeleryTaskDetailDTO:
 class CeleryTaskCancelDTO:
     """任务取消命令 DTO。"""
 
-    record_id: int
+    record_id: UUID
     status: CeleryTaskStatus
 
     @property

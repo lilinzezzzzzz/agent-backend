@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from uuid import UUID
 
 import pytest
 import pytest_asyncio
@@ -18,6 +19,8 @@ from internal.schemas.rag import (
 )
 from internal.services.rag import new_rag_service
 from pkg.vectors.contracts import RetrievalMode
+
+TEST_USER_ID = UUID("00000000-0000-7000-8000-000000000999")
 
 
 class FakeRagService:
@@ -121,7 +124,7 @@ async def test_rag_internal_external_run_endpoint_does_not_accept_gold_fields(
         "/v1/internal/rag/external-runs",
         json={
             "case_id": "case_001",
-            "subject_user_id": 999,
+            "subject_user_id": TEST_USER_ID.hex,
             "question": "发票开具后多久通知用户？",
             "requested_domain": "order",
             "requested_kb_ids": [2],
@@ -141,7 +144,7 @@ async def test_rag_internal_external_run_endpoint_wraps_run_data(rag_client) -> 
         "/v1/internal/rag/external-runs",
         json={
             "case_id": "case_001",
-            "subject_user_id": 999,
+            "subject_user_id": TEST_USER_ID.hex,
             "question": "发票开具后多久通知用户？",
             "requested_domain": "order",
             "requested_kb_ids": [2],
@@ -154,4 +157,4 @@ async def test_rag_internal_external_run_endpoint_wraps_run_data(rag_client) -> 
     assert data["case_id"] == "case_001"
     assert "effective_domains" not in data
     assert "effective_kb_ids" not in data
-    assert service.external_run_calls[0]["subject_user_id"] == 999
+    assert service.external_run_calls[0]["subject_user_id"] == TEST_USER_ID

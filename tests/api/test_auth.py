@@ -2,6 +2,7 @@
 
 import pytest
 import pytest_asyncio
+from uuid import UUID
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
@@ -18,21 +19,26 @@ from internal.schemas.user import (
 from internal.schemas.user import AuthUserDTO, UserLoginDTO
 from internal.services.auth import new_auth_service
 
+TEST_USER_ID = UUID("00000000-0000-7000-8000-000000000999")
+LOGIN_USER_ID = UUID("00000000-0000-7000-8000-000000000001")
+REGISTERED_USER_ID = UUID("00000000-0000-7000-8000-000000000002")
+WECHAT_USER_ID = UUID("00000000-0000-7000-8000-000000000003")
+
 
 class FakeAuthService:
     def __init__(self) -> None:
         self.verify_token_calls: list[str] = []
 
-    async def verify_token(self, token: str) -> dict[str, int]:
+    async def verify_token(self, token: str) -> dict[str, str]:
         assert token in {"tk_logout", "tk_me"}
         self.verify_token_calls.append(token)
-        return {"id": 999}
+        return {"id": TEST_USER_ID.hex}
 
     async def login(self, *, username: str, password: str) -> UserLoginDTO:
         assert username == "testuser"
         assert password == "password123"
         return UserLoginDTO(
-            user=AuthUserDTO(id=1, name="testuser", phone="13800138000"),
+            user=AuthUserDTO(id=LOGIN_USER_ID, name="testuser", phone="13800138000"),
             token="tk_login",
         )
 
@@ -43,22 +49,22 @@ class FakeAuthService:
         assert phone == "13800138001"
         assert password == "password123"
         return UserLoginDTO(
-            user=AuthUserDTO(id=2, name="newuser", phone=phone),
+            user=AuthUserDTO(id=REGISTERED_USER_ID, name="newuser", phone=phone),
             token="tk_register",
         )
 
-    async def logout(self, *, user_id: int | None, token: str | None) -> None:
-        assert user_id == 999
+    async def logout(self, *, user_id: UUID | None, token: str | None) -> None:
+        assert user_id == TEST_USER_ID
         assert token == "tk_logout"
 
-    async def get_current_user(self, *, user_id: int | None) -> AuthUserDTO:
-        assert user_id == 999
-        return AuthUserDTO(id=999, name="current", phone="13800138002")
+    async def get_current_user(self, *, user_id: UUID | None) -> AuthUserDTO:
+        assert user_id == TEST_USER_ID
+        return AuthUserDTO(id=TEST_USER_ID, name="current", phone="13800138002")
 
     async def wechat_login(self, *, code: str) -> UserLoginDTO:
         assert code == "wechat_code"
         return UserLoginDTO(
-            user=AuthUserDTO(id=3, name="wechat", phone=""),
+            user=AuthUserDTO(id=WECHAT_USER_ID, name="wechat", phone=""),
             token="tk_wechat",
         )
 
@@ -148,7 +154,11 @@ class TestAuthControllerResponseModels:
             "code": 20000,
             "message": "",
             "data": {
-                "user": {"id": 1, "name": "testuser", "phone": "13800138000"},
+                "user": {
+                    "id": str(LOGIN_USER_ID),
+                    "name": "testuser",
+                    "phone": "13800138000",
+                },
                 "token": "tk_login",
             },
         }
@@ -165,7 +175,11 @@ class TestAuthControllerResponseModels:
         )
 
         assert _response_payload(response)["data"] == {
-            "user": {"id": 2, "name": "newuser", "phone": "13800138001"},
+            "user": {
+                "id": str(REGISTERED_USER_ID),
+                "name": "newuser",
+                "phone": "13800138001",
+            },
             "token": "tk_register",
         }
 
@@ -173,7 +187,7 @@ class TestAuthControllerResponseModels:
     async def test_logout_uses_success_envelope(self):
         response = await auth_controller.logout(
             FakeAuthService(),
-            AuthenticatedPrincipal(user_id=999, token="tk_logout"),
+            AuthenticatedPrincipal(user_id=TEST_USER_ID, token="tk_logout"),
         )
 
         assert _response_payload(response) == {
@@ -187,7 +201,7 @@ class TestAuthControllerResponseModels:
         response = await auth_controller.get_current_user(FakeAuthService())
 
         assert _response_payload(response)["data"] == {
-            "id": 999,
+            "id": str(TEST_USER_ID),
             "name": "current",
             "phone": "13800138002",
         }
@@ -200,6 +214,6 @@ class TestAuthControllerResponseModels:
         )
 
         assert _response_payload(response)["data"] == {
-            "user": {"id": 3, "name": "wechat", "phone": ""},
+            "user": {"id": str(WECHAT_USER_ID), "name": "wechat", "phone": ""},
             "token": "tk_wechat",
         }

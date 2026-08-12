@@ -9,7 +9,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from internal.core import AppException, errors
 from pkg import request_context as context
 from pkg.api_response import error_response
-from pkg.ids import normalize_uuid7_trace_id, uuid6_unique_str_id
+from pkg.ids import normalize_uuid7_trace_id, uuid7_unique_str_id
 from pkg.logger import logger
 from pkg.toolkit.exc import format_exception_traceback
 from pkg.toolkit.middleware import BaseMiddlewareContext
@@ -43,7 +43,7 @@ class _RequestContext(BaseMiddlewareContext):
         self._client_host = client_host
         self._query_string = query_string
         self._start_time = time.perf_counter()
-        self._trace_id = uuid6_unique_str_id()
+        self._trace_id = uuid7_unique_str_id()
         self._receive = receive
         self._response_started = False
         self._process_time: float | None = None

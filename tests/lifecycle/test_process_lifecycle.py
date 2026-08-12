@@ -17,7 +17,6 @@ async def test_fastapi_shutdown_waits_for_enqueued_logs(
     monkeypatch.setattr(app_module, "init_async_db", MagicMock())
     monkeypatch.setattr(app_module, "init_async_redis", MagicMock())
     monkeypatch.setattr(app_module, "init_signature_auth_handler", MagicMock())
-    monkeypatch.setattr(app_module, "init_snowflake_id_generator", MagicMock())
     monkeypatch.setattr(app_module, "init_background_task_manager", AsyncMock())
     monkeypatch.setattr(app_module, "close_async_db", AsyncMock())
     monkeypatch.setattr(app_module, "close_async_redis", AsyncMock())

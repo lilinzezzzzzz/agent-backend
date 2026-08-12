@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from time import monotonic
 from typing import Any
+from uuid import UUID
 
 from pydantic import BaseModel
 
@@ -62,7 +63,7 @@ class AgentAuditContext:
     """单次 Agent Service 调用的审计上下文。"""
 
     agent_name: str
-    user_id: int
+    user_id: UUID
     user_input: str
     max_steps: int
     trace_id: str | None = None
@@ -75,7 +76,7 @@ class AgentAuditContext:
         cls,
         *,
         agent_name: str,
-        user_id: int,
+        user_id: UUID,
         user_input: str,
         max_steps: int,
     ) -> AgentAuditContext:
@@ -107,7 +108,7 @@ class AgentAuditService:
         self,
         *,
         agent_name: str,
-        user_id: int,
+        user_id: UUID,
         trace_id: str | None,
         user_input: str,
         max_steps: int,

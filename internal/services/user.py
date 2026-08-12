@@ -1,4 +1,5 @@
 import hashlib
+from uuid import UUID
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -215,7 +216,7 @@ class UserService:
 
     async def _get_active_user(
         self,
-        user_id: int,
+        user_id: UUID,
         *,
         session: AsyncSession,
     ) -> User | None:
@@ -226,7 +227,7 @@ class UserService:
         )
         return await self._user_dao.fetch_one(statement, session=session)
 
-    async def _get_active_user_from_primary(self, user_id: int) -> User | None:
+    async def _get_active_user_from_primary(self, user_id: UUID) -> User | None:
         statement = self._user_dao.select_stmt().where(
             self._user_dao.model_cls.id == user_id
         )

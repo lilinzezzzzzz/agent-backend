@@ -61,7 +61,6 @@ dependencies = [
     "oss2>=2.19.1",
     "boto3>=1.42.59",
     "boto3-stubs>=1.42.59",
-    "uuid6>=2025.0.1",
     "pyyaml>=6.0.3",
     "aiosqlite>=0.22.1",
     "pymilvus>=2.6.10",

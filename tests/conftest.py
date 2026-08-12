@@ -26,7 +26,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import pytest_asyncio
-import uuid6
 from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
 from redis.asyncio import ConnectionPool, Redis
@@ -181,7 +180,7 @@ def mock_gen_id() -> uuid.UUID:
 
 mock_ids_module = types.ModuleType("pkg.ids")
 mock_ids_module.uuid7_unique_id = MagicMock(side_effect=mock_gen_id)
-mock_ids_module.uuid7_unique_str_id = MagicMock(side_effect=lambda: uuid6.uuid7().hex)
+mock_ids_module.uuid7_unique_str_id = MagicMock(side_effect=lambda: mock_gen_id().hex)
 
 
 def _normalize_uuid7_trace_id(value: str | None) -> str | None:

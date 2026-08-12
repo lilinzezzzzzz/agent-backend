@@ -97,14 +97,14 @@ uv sync
 
 ```toml
 [project]
-requires-python = ">=3.12,<3.13"
+requires-python = ">=3.14,<3.15"
 ```
 
 开发环境可以用 uv 安装对应版本：
 
 ```bash
 uv python list          # 查看可安装版本
-uv venv .venv --python 3.12
+uv venv .venv --python 3.14
 ```
 
 如果是 CI 环境，也应显式使用相同的 Python 版本。
@@ -278,7 +278,7 @@ uv venv
  
 # 使用指定解释器路径创建虚拟环境
 uv venv <环境名> --python <解释器路径或者版本>
-uv venv .venv --python 3.12.9
+uv venv .venv --python 3.14.7
 
 # 激活虚拟环境
 source .venv/bin/activate

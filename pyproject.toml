@@ -3,7 +3,7 @@ name = "agent-backend"
 version = "0.1.0"
 description = "Agent backend infrastructure based on FastAPI"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.14,<3.15"
 
 # 生产运行时依赖：只保留真正业务需要 import 的模块
 dependencies = [

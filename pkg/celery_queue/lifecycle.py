@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 from collections.abc import Callable, Coroutine
 from typing import Any
 
@@ -21,7 +22,7 @@ def register_worker_hooks(
         )
         def _wrapper_startup(**kwargs: Any) -> None:
             try:
-                if asyncio.iscoroutinefunction(on_startup):
+                if inspect.iscoroutinefunction(on_startup):
                     asyncio.run(on_startup())
                 else:
                     on_startup()
@@ -38,7 +39,7 @@ def register_worker_hooks(
         def _wrapper_shutdown(**kwargs: Any) -> None:
             logger.info("Executing registered worker shutdown hook...")
             try:
-                if asyncio.iscoroutinefunction(on_shutdown):
+                if inspect.iscoroutinefunction(on_shutdown):
                     # 必须同步等待，避免 Worker 退出时中断资源清理。
                     asyncio.run(on_shutdown())
                 else:

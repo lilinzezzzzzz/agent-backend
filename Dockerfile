@@ -1,4 +1,4 @@
-FROM python:3.12.13-slim-trixie AS builder
+FROM python:3.14.6-slim-trixie AS builder
 
 # 基础环境变量
 ENV TZ=Etc/UTC \
@@ -11,7 +11,7 @@ ENV TZ=Etc/UTC \
 WORKDIR /app
 
 # 安装 uv
-COPY --from=ghcr.io/astral-sh/uv:0.11.16 /uv /uvx /bin/
+COPY --from=ghcr.io/astral-sh/uv:0.12.3 /uv /uvx /bin/
 
 # uv 虚拟环境配置
 # UV_INDEX_URL: 使用阿里云 PyPI 镜像源加速包下载
@@ -29,7 +29,7 @@ COPY pyproject.toml uv.lock ./
 # 此时 VIRTUAL_ENV 已经生效，uv 会自动把包安装到 /app/.venv 中
 RUN uv sync --frozen --no-cache --no-default-groups
 
-FROM python:3.12.13-slim-trixie AS runtime
+FROM python:3.14.6-slim-trixie AS runtime
 
 # 基础环境变量
 ENV TZ=Etc/UTC \

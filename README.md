@@ -6,7 +6,7 @@ README 只记录当前仓库可直接核对的能力；更细的设计约束和�
 
 ## 技术栈
 
-- Python `3.12+`
+- Python `3.14.x`
 - `uv`
 - FastAPI + Starlette
 - Pydantic v2 + `pydantic-settings`
@@ -34,7 +34,7 @@ README 只记录当前仓库可直接核对的能力；更细的设计约束和�
 
 ## 环境要求
 
-- Python `3.12+`
+- Python `3.14.x`
 - `uv`
 - Redis
 - PostgreSQL（当前依赖默认包含 `asyncpg`，仓库配置示例也默认使用 PostgreSQL）

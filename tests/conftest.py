@@ -12,7 +12,7 @@ Pytest 配置文件 (conftest.py)
 5. 配置 pytest-asyncio 后端
 """
 
-import asyncio
+import inspect
 import os
 import sys
 import types
@@ -244,7 +244,7 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     """
     for item in items:
         # 为所有 async 测试函数自动添加 asyncio marker
-        if isinstance(item, pytest.Function) and asyncio.iscoroutinefunction(
+        if isinstance(item, pytest.Function) and inspect.iscoroutinefunction(
             item.function
         ):
             item.add_marker(pytest.mark.asyncio)
@@ -293,14 +293,6 @@ def restore_default_module_mocks(request: pytest.FixtureRequest):
 # ==========================================
 # 5. 异步测试配置
 # ==========================================
-
-
-@pytest.fixture(scope="session")
-def event_loop_policy():
-    """配置事件循环策略"""
-    import asyncio
-
-    return asyncio.DefaultEventLoopPolicy()
 
 
 @pytest.fixture
@@ -660,7 +652,7 @@ def cleanup_after_test():
         from internal.config import reset_settings
 
         reset_settings()
-    except (ImportError, TypeError):
+    except ImportError, TypeError:
         pass
 
     # 重置数据库连接
@@ -668,7 +660,7 @@ def cleanup_after_test():
         from internal.infra.database import reset_async_db
 
         reset_async_db()
-    except (ImportError, TypeError):
+    except ImportError, TypeError:
         pass
 
     # 重置 Redis 连接
@@ -676,5 +668,5 @@ def cleanup_after_test():
         from internal.infra.redis import reset_async_redis
 
         reset_async_redis()
-    except (ImportError, TypeError):
+    except ImportError, TypeError:
         pass

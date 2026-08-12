@@ -1,4 +1,4 @@
-from collections.abc import Callable, Coroutine
+from collections.abc import Callable, Coroutine, Mapping
 from functools import partial
 from typing import Any
 
@@ -27,7 +27,7 @@ def get_coroutine_name(coro: Coroutine[Any, Any, Any]) -> str:
 
     frame = getattr(coro, "cr_frame", None)
     frame_locals = getattr(frame, "f_locals", None)
-    if isinstance(frame_locals, dict):
+    if isinstance(frame_locals, Mapping):
         bound_self = frame_locals.get("self")
         if bound_self is not None:
             return format_callable_name(func_name, bound_owner=bound_self)

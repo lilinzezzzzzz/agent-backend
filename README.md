@@ -346,8 +346,11 @@ docker run --rm -p 8000:8000 \
   -e APP_ENV=local \
   -v "$PWD/.secrets:/app/.secrets:ro" \
   -v "$PWD/configs/.env.local:/app/configs/.env.local:ro" \
-  agent-backend
+  agent-backend \
+  uvicorn entrypoints.main:app --host 0.0.0.0 --port 8000
 ```
+
+镜像不声明默认启动命令，`docker run` 需显式传入 Uvicorn 命令；生产部署由 compose.yaml 的 `api.command` 提供。
 
 如果容器内无法访问宿主机服务，需要把 `DB_HOST`、`REDIS_HOST` 等配置改成容器网络可解析的地址。
 

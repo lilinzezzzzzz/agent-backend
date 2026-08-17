@@ -1,4 +1,5 @@
 import contextlib
+from collections.abc import Generator
 from contextvars import ContextVar
 from enum import StrEnum
 from typing import Any
@@ -92,6 +93,17 @@ def set_val(key: ContextKeyType, value: Any):
 
 def get_val(key: ContextKeyType, default: Any = None):
     return _ctx_manager.get(key, default)
+
+
+@contextlib.contextmanager
+def scoped_values(**kwargs: Any) -> Generator[None]:
+    """在当前执行上下文内临时覆盖值，退出时精确恢复原状态。"""
+    current = _ctx_manager.all().copy()
+    token = _request_context_var.set({**current, **kwargs})
+    try:
+        yield
+    finally:
+        _request_context_var.reset(token)
 
 
 def set_user_id(user_id: UUID):

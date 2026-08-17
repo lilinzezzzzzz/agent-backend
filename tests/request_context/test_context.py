@@ -21,6 +21,7 @@ from pkg.request_context import (  # noqa: E402
     get_trace_id,
     get_user_id,
     init,
+    scoped_values,
     set_trace_id,
     set_user_id,
     set_val,
@@ -103,6 +104,54 @@ def test_set_without_init_raises_error():
     finally:
         # 4. 恢复现场
         pkg.request_context._request_context_var = old_var
+
+
+def test_scoped_values_restores_context_after_exit():
+    init(trace_id="outer-trace", retained="outer-value")
+
+    with scoped_values(trace_id="inner-trace", temporary="inner-value"):
+        assert request_context_module._ctx_manager.all() == {
+            "trace_id": "inner-trace",
+            "retained": "outer-value",
+            "temporary": "inner-value",
+        }
+        set_val("retained", "changed-inside-scope")
+
+    assert request_context_module._ctx_manager.all() == {
+        "trace_id": "outer-trace",
+        "retained": "outer-value",
+    }
+
+
+def test_scoped_values_restores_nested_context_after_exception():
+    init(trace_id="outer-trace")
+
+    with scoped_values(trace_id="middle-trace"):
+        with pytest.raises(RuntimeError, match="scope failed"):
+            with scoped_values(trace_id="inner-trace"):
+                raise RuntimeError("scope failed")
+
+        assert get_trace_id() == "middle-trace"
+
+    assert get_trace_id() == "outer-trace"
+
+
+def test_scoped_values_restores_uninitialized_state():
+    from contextvars import ContextVar
+
+    old_var = request_context_module._request_context_var
+    request_context_module._request_context_var = ContextVar("uninitialized_test_ctx")
+
+    try:
+        with scoped_values(temporary="inner-value"):
+            assert request_context_module._ctx_manager.all() == {
+                "temporary": "inner-value"
+            }
+
+        with pytest.raises(RuntimeError, match="Request Context not initialized"):
+            set_val("after_scope", "value")
+    finally:
+        request_context_module._request_context_var = old_var
 
 
 @pytest.mark.asyncio

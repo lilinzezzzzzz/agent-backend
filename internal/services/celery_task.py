@@ -1,6 +1,7 @@
 import hashlib
 import json
 from collections.abc import Mapping, Sequence
+from functools import cache
 from typing import Any
 from uuid import UUID
 
@@ -334,19 +335,14 @@ class CeleryTaskService:
         )
 
 
-_celery_task_service: CeleryTaskService | None = None
-
-
+@cache
 def new_celery_task_service() -> CeleryTaskService:
     """获取 CeleryTaskService 单例。"""
-    global _celery_task_service
-    if _celery_task_service is None:
-        from internal.infra.celery.application import celery_client
+    from internal.infra.celery.application import celery_client
 
-        dao = new_celery_task_dao()
-        _celery_task_service = CeleryTaskService(
-            dao=dao,
-            session_provider=dao.session_provider,
-            celery_client=celery_client,
-        )
-    return _celery_task_service
+    dao = new_celery_task_dao()
+    return CeleryTaskService(
+        dao=dao,
+        session_provider=dao.session_provider,
+        celery_client=celery_client,
+    )

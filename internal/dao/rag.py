@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from functools import cache
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,11 +33,6 @@ class RagMetadataDao:
         return {}
 
 
-_rag_metadata_dao: RagMetadataDao | None = None
-
-
+@cache
 def new_rag_metadata_dao() -> RagMetadataDao:
-    global _rag_metadata_dao
-    if _rag_metadata_dao is None:
-        _rag_metadata_dao = RagMetadataDao()
-    return _rag_metadata_dao
+    return RagMetadataDao()

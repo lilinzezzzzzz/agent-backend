@@ -1,3 +1,5 @@
+from functools import cache
+
 from internal.infra.database import get_read_session, get_session
 from internal.models.user import User
 from pkg.database.dao import BaseDao
@@ -20,15 +22,9 @@ class UserDao(BaseDao[User]):
         return await self.get_by_phone(phone) is not None
 
 
-# 全局单例（懒加载）
-_user_dao: UserDao | None = None
-
-
+@cache
 def new_user_dao() -> UserDao:
-    global _user_dao
-    if _user_dao is None:
-        _user_dao = UserDao(
-            session_provider=get_session,
-            read_session_provider=get_read_session,
-        )
-    return _user_dao
+    return UserDao(
+        session_provider=get_session,
+        read_session_provider=get_read_session,
+    )

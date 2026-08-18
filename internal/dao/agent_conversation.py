@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from functools import cache
 from uuid import UUID
 
 from internal.infra.database import get_read_session, get_session
@@ -90,47 +91,33 @@ class AgentRunStepDao(BaseDao[AgentRunStep]):
     _model_cls: type[AgentRunStep] = AgentRunStep
 
 
-_agent_session_dao: AgentSessionDao | None = None
-_agent_message_dao: AgentMessageDao | None = None
-_agent_run_dao: AgentRunDao | None = None
-_agent_run_step_dao: AgentRunStepDao | None = None
-
-
+@cache
 def new_agent_session_dao() -> AgentSessionDao:
     """依赖注入：获取 AgentSessionDao 单例。"""
-    global _agent_session_dao
-    if _agent_session_dao is None:
-        _agent_session_dao = AgentSessionDao(
-            session_provider=get_session, read_session_provider=get_read_session
-        )
-    return _agent_session_dao
+    return AgentSessionDao(
+        session_provider=get_session, read_session_provider=get_read_session
+    )
 
 
+@cache
 def new_agent_message_dao() -> AgentMessageDao:
     """依赖注入：获取 AgentMessageDao 单例。"""
-    global _agent_message_dao
-    if _agent_message_dao is None:
-        _agent_message_dao = AgentMessageDao(
-            session_provider=get_session, read_session_provider=get_read_session
-        )
-    return _agent_message_dao
+    return AgentMessageDao(
+        session_provider=get_session, read_session_provider=get_read_session
+    )
 
 
+@cache
 def new_agent_run_dao() -> AgentRunDao:
     """依赖注入：获取 AgentRunDao 单例。"""
-    global _agent_run_dao
-    if _agent_run_dao is None:
-        _agent_run_dao = AgentRunDao(
-            session_provider=get_session, read_session_provider=get_read_session
-        )
-    return _agent_run_dao
+    return AgentRunDao(
+        session_provider=get_session, read_session_provider=get_read_session
+    )
 
 
+@cache
 def new_agent_run_step_dao() -> AgentRunStepDao:
     """依赖注入：获取 AgentRunStepDao 单例。"""
-    global _agent_run_step_dao
-    if _agent_run_step_dao is None:
-        _agent_run_step_dao = AgentRunStepDao(
-            session_provider=get_session, read_session_provider=get_read_session
-        )
-    return _agent_run_step_dao
+    return AgentRunStepDao(
+        session_provider=get_session, read_session_provider=get_read_session
+    )

@@ -1,5 +1,6 @@
 """Auth 业务缓存：用户会话 token 与元数据"""
 
+from functools import cache
 from uuid import UUID
 
 from internal.infra.redis.connection import redis_client
@@ -92,13 +93,7 @@ class AuthCache:
         return deleted
 
 
-# 全局单例（懒加载）
-_auth_cache: AuthCache | None = None
-
-
+@cache
 def new_auth_cache() -> AuthCache:
     """依赖注入：获取 AuthCache 单例"""
-    global _auth_cache
-    if _auth_cache is None:
-        _auth_cache = AuthCache(redis_cli=redis_client)
-    return _auth_cache
+    return AuthCache(redis_cli=redis_client)

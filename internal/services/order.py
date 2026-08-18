@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from functools import cache
 from uuid import UUID
 
 from internal.cache import AgentActionCache, new_agent_action_cache
@@ -298,16 +299,11 @@ _ORDER_FIXTURES: dict[str, dict[str, object]] = {
 }
 
 
-_order_service: OrderService | None = None
-
-
+@cache
 def new_order_service() -> OrderService:
     """依赖注入：获取 OrderService 单例。"""
-    global _order_service
-    if _order_service is None:
-        _order_service = OrderService(
-            action_store=new_agent_action_cache(),
-            confirmation_seconds=settings.AGENT_ACTION_CONFIRMATION_SECONDS,
-            idempotency_seconds=settings.AGENT_ACTION_IDEMPOTENCY_SECONDS,
-        )
-    return _order_service
+    return OrderService(
+        action_store=new_agent_action_cache(),
+        confirmation_seconds=settings.AGENT_ACTION_CONFIRMATION_SECONDS,
+        idempotency_seconds=settings.AGENT_ACTION_IDEMPOTENCY_SECONDS,
+    )

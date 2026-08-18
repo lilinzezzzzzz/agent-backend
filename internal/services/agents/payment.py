@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from functools import cache
 from uuid import UUID
 
 from internal.agents.payment import PaymentAgentBuilder
@@ -239,17 +240,12 @@ class PaymentAgentService:
             )
 
 
-_payment_agent_service: PaymentAgentService | None = None
-
-
+@cache
 def new_payment_agent_service() -> PaymentAgentService:
     """依赖注入：获取 PaymentAgentService 单例。"""
-    global _payment_agent_service
-    if _payment_agent_service is None:
-        _payment_agent_service = PaymentAgentService(
-            llm_client=new_default_llm_client(),
-            rag_service=new_rag_service(),
-            audit_service=new_agent_audit_service(),
-            conversation_service=new_agent_conversation_service(),
-        )
-    return _payment_agent_service
+    return PaymentAgentService(
+        llm_client=new_default_llm_client(),
+        rag_service=new_rag_service(),
+        audit_service=new_agent_audit_service(),
+        conversation_service=new_agent_conversation_service(),
+    )

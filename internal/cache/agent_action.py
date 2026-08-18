@@ -1,6 +1,7 @@
 """Agent 待确认动作与幂等结果缓存。"""
 
 from hashlib import sha256
+from functools import cache
 from uuid import UUID
 
 from internal.infra.redis.connection import redis_client
@@ -110,12 +111,7 @@ class AgentActionCache:
         )
 
 
-_agent_action_cache: AgentActionCache | None = None
-
-
+@cache
 def new_agent_action_cache() -> AgentActionCache:
     """依赖注入：获取 AgentActionCache 单例。"""
-    global _agent_action_cache
-    if _agent_action_cache is None:
-        _agent_action_cache = AgentActionCache(redis_cli=redis_client)
-    return _agent_action_cache
+    return AgentActionCache(redis_cli=redis_client)

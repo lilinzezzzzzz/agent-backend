@@ -6,6 +6,7 @@
 import os
 import sys
 from collections.abc import Mapping
+from functools import cache
 from pathlib import Path
 from typing import Any, Literal, cast
 
@@ -676,18 +677,10 @@ def load_config() -> Settings:
         raise
 
 
-# 全局配置实例（私有）
-_settings_instance: Settings | None = None
-
-
+@cache
 def get_settings() -> Settings:
-    """
-    获取配置实例（线程安全的单例模式）
-    """
-    global _settings_instance
-    if _settings_instance is None:
-        _settings_instance = load_config()
-    return _settings_instance
+    """获取进程级配置实例。"""
+    return load_config()
 
 
 def init_settings() -> Settings:
@@ -695,18 +688,14 @@ def init_settings() -> Settings:
     初始化并返回配置实例
     在应用启动时调用此函数
     """
-    global _settings_instance
-    if _settings_instance is None:
-        _settings_instance = load_config()
-    return _settings_instance
+    return get_settings()
 
 
-def reset_settings():
+def reset_settings() -> None:
     """
     重置配置实例（主要用于测试）
     """
-    global _settings_instance
-    _settings_instance = None
+    get_settings.cache_clear()
 
 
 # 使用 lazy_proxy 创建延迟加载的配置实例

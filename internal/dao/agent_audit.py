@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from functools import cache
+
 from internal.infra.database import get_read_session, get_session
 from internal.models.agent_audit import AgentAudit
 from pkg.database.dao import BaseDao
@@ -16,15 +18,10 @@ class AgentAuditDao(BaseDao[AgentAudit]):
         return await self.fetch_first(statement)
 
 
-_agent_audit_dao: AgentAuditDao | None = None
-
-
+@cache
 def new_agent_audit_dao() -> AgentAuditDao:
     """依赖注入：获取 AgentAuditDao 单例。"""
-    global _agent_audit_dao
-    if _agent_audit_dao is None:
-        _agent_audit_dao = AgentAuditDao(
-            session_provider=get_session,
-            read_session_provider=get_read_session,
-        )
-    return _agent_audit_dao
+    return AgentAuditDao(
+        session_provider=get_session,
+        read_session_provider=get_read_session,
+    )

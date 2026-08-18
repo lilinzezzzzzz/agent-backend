@@ -1,5 +1,7 @@
 """Endpoint guard 规则缓存访问。"""
 
+from functools import cache
+
 from internal.infra.redis.connection import redis_client
 from pkg.redis import RedisClient
 
@@ -21,12 +23,7 @@ class EndpointGuardCache:
         return await self._redis.set_value(key, payload, ex=ex)
 
 
-_endpoint_guard_cache: EndpointGuardCache | None = None
-
-
+@cache
 def new_endpoint_guard_cache() -> EndpointGuardCache:
     """依赖注入：获取 EndpointGuardCache 单例。"""
-    global _endpoint_guard_cache
-    if _endpoint_guard_cache is None:
-        _endpoint_guard_cache = EndpointGuardCache(redis_cli=redis_client)
-    return _endpoint_guard_cache
+    return EndpointGuardCache(redis_cli=redis_client)

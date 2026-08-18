@@ -17,6 +17,22 @@ from internal.config import (
 )
 
 
+def test_get_settings_caches_until_reset(monkeypatch: pytest.MonkeyPatch) -> None:
+    first = MagicMock(spec=Settings)
+    second = MagicMock(spec=Settings)
+    load_config = MagicMock(side_effect=[first, second])
+    monkeypatch.setattr(config_module, "load_config", load_config)
+
+    assert config_module.get_settings() is first
+    assert config_module.init_settings() is first
+    load_config.assert_called_once_with()
+
+    config_module.reset_settings()
+
+    assert config_module.get_settings() is second
+    assert load_config.call_count == 2
+
+
 def _write_env_file(path: Path, values: dict[str, str]) -> None:
     path.write_text(
         "\n".join(f"{key}={value}" for key, value in values.items()) + "\n",

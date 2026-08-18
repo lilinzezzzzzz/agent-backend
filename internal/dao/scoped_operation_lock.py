@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from functools import cache
+
 from sqlalchemy import Select, select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -155,15 +157,10 @@ class ScopedOperationLockDao(BaseDao[ScopedOperationLock]):
         return error_code in _MYSQL_LOCK_UNAVAILABLE_ERROR_CODES
 
 
-_scoped_operation_lock_dao: ScopedOperationLockDao | None = None
-
-
+@cache
 def new_scoped_operation_lock_dao() -> ScopedOperationLockDao:
     """获取 ScopedOperationLockDao 单例。"""
-    global _scoped_operation_lock_dao
-    if _scoped_operation_lock_dao is None:
-        _scoped_operation_lock_dao = ScopedOperationLockDao(
-            session_provider=get_session,
-            read_session_provider=get_read_session,
-        )
-    return _scoped_operation_lock_dao
+    return ScopedOperationLockDao(
+        session_provider=get_session,
+        read_session_provider=get_read_session,
+    )

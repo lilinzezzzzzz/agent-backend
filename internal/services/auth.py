@@ -2,6 +2,7 @@
 
 import secrets
 from datetime import UTC, datetime
+from functools import cache
 from uuid import UUID
 
 from internal.cache.auth import AuthCache, new_auth_cache
@@ -174,7 +175,7 @@ class AuthService:
         raw_user_id = user_metadata.get("id")
         try:
             user_id = UUID(str(raw_user_id))
-        except (TypeError, ValueError, AttributeError):
+        except TypeError, ValueError, AttributeError:
             raise AppException(
                 errors.Unauthorized,
                 message="Token verification failed: invalid user_id",
@@ -191,16 +192,10 @@ class AuthService:
         return {**user_metadata, "id": user_id}
 
 
-# 全局单例（懒加载）
-_auth_service: AuthService | None = None
-
-
+@cache
 def new_auth_service() -> AuthService:
     """依赖注入：获取 AuthService 单例"""
-    global _auth_service
-    if _auth_service is None:
-        _auth_service = AuthService(
-            auth_cache=new_auth_cache(),
-            user_service=new_user_service(),
-        )
-    return _auth_service
+    return AuthService(
+        auth_cache=new_auth_cache(),
+        user_service=new_user_service(),
+    )

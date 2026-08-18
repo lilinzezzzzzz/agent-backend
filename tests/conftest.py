@@ -647,11 +647,11 @@ def cleanup_after_test():
     """
     yield
 
-    # 重置配置
+    # 重置配置与 dependency factory 缓存
     try:
-        from internal.config import reset_settings
+        from internal.factory_cache import reset_factory_caches
 
-        reset_settings()
+        reset_factory_caches()
     except ImportError, TypeError:
         pass
 

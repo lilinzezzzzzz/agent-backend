@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from functools import cache
 from uuid import UUID
 
 from sqlalchemy import select
@@ -345,22 +346,17 @@ class DatabaseAgentStorageBackend:
         await _execute_storage_transaction(self._run_dao, _tx)
 
 
-_agent_conversation_service: AgentConversationService | None = None
-
-
+@cache
 def new_agent_conversation_service() -> AgentConversationService:
     """依赖注入：获取 AgentConversationService 单例。"""
-    global _agent_conversation_service
-    if _agent_conversation_service is None:
-        _agent_conversation_service = AgentConversationService(
-            storage_backend=DatabaseAgentStorageBackend(
-                session_dao=new_agent_session_dao(),
-                message_dao=new_agent_message_dao(),
-                run_dao=new_agent_run_dao(),
-                run_step_dao=new_agent_run_step_dao(),
-            )
+    return AgentConversationService(
+        storage_backend=DatabaseAgentStorageBackend(
+            session_dao=new_agent_session_dao(),
+            message_dao=new_agent_message_dao(),
+            run_dao=new_agent_run_dao(),
+            run_step_dao=new_agent_run_step_dao(),
         )
-    return _agent_conversation_service
+    )
 
 
 async def _execute_storage_transaction(

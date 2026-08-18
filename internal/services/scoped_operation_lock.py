@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
+from functools import cache
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -90,14 +91,7 @@ class ScopedOperationLockService:
             )
 
 
-_scoped_operation_lock_service: ScopedOperationLockService | None = None
-
-
+@cache
 def new_scoped_operation_lock_service() -> ScopedOperationLockService:
     """获取 ScopedOperationLockService 单例。"""
-    global _scoped_operation_lock_service
-    if _scoped_operation_lock_service is None:
-        _scoped_operation_lock_service = ScopedOperationLockService(
-            dao=new_scoped_operation_lock_dao(),
-        )
-    return _scoped_operation_lock_service
+    return ScopedOperationLockService(dao=new_scoped_operation_lock_dao())

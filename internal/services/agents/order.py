@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from functools import cache
 from uuid import UUID
 
 from internal.agents.order import OrderAgentBuilder
@@ -320,18 +321,13 @@ class OrderAgentService:
             )
 
 
-_order_agent_service: OrderAgentService | None = None
-
-
+@cache
 def new_order_agent_service() -> OrderAgentService:
     """依赖注入：获取 OrderAgentService 单例。"""
-    global _order_agent_service
-    if _order_agent_service is None:
-        _order_agent_service = OrderAgentService(
-            llm_client=new_default_llm_client(),
-            order_service=new_order_service(),
-            rag_service=new_rag_service(),
-            audit_service=new_agent_audit_service(),
-            conversation_service=new_agent_conversation_service(),
-        )
-    return _order_agent_service
+    return OrderAgentService(
+        llm_client=new_default_llm_client(),
+        order_service=new_order_service(),
+        rag_service=new_rag_service(),
+        audit_service=new_agent_audit_service(),
+        conversation_service=new_agent_conversation_service(),
+    )

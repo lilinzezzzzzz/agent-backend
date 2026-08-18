@@ -1,3 +1,4 @@
+from functools import cache
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -46,14 +47,9 @@ class ExternalIdentityDao(BaseDao[ExternalIdentity]):
         return await self.fetch_all(statement)
 
 
-_external_identity_dao: ExternalIdentityDao | None = None
-
-
+@cache
 def new_external_identity_dao() -> ExternalIdentityDao:
-    global _external_identity_dao
-    if _external_identity_dao is None:
-        _external_identity_dao = ExternalIdentityDao(
-            session_provider=get_session,
-            read_session_provider=get_read_session,
-        )
-    return _external_identity_dao
+    return ExternalIdentityDao(
+        session_provider=get_session,
+        read_session_provider=get_read_session,
+    )

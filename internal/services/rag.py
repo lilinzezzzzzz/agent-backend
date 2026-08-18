@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+from functools import cache
 from typing import Any
 from uuid import UUID
 
@@ -620,19 +621,14 @@ class _ResolvedRagScope(BaseModel):
     effective_kb_ids: list[int]
 
 
-_rag_service: RagService | None = None
-
-
+@cache
 def new_rag_service() -> RagService:
     """依赖注入：获取 RagService 单例。"""
-    global _rag_service
-    if _rag_service is None:
-        from internal.infra.embedding import new_default_embedder
-        from internal.infra.llm import new_default_llm_client
+    from internal.infra.embedding import new_default_embedder
+    from internal.infra.llm import new_default_llm_client
 
-        _rag_service = RagService(
-            llm_client=new_default_llm_client(),
-            embedder=new_default_embedder(),
-            metadata_dao=new_rag_metadata_dao(),
-        )
-    return _rag_service
+    return RagService(
+        llm_client=new_default_llm_client(),
+        embedder=new_default_embedder(),
+        metadata_dao=new_rag_metadata_dao(),
+    )

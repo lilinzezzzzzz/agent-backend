@@ -1,4 +1,5 @@
 from datetime import timedelta
+from functools import cache
 from uuid import UUID
 
 from sqlalchemy import func, select, text, update
@@ -517,14 +518,7 @@ class CeleryTaskDao:
             )
 
 
-_celery_task_dao: CeleryTaskDao | None = None
-
-
+@cache
 def new_celery_task_dao() -> CeleryTaskDao:
     """获取 CeleryTaskDao 单例。"""
-    global _celery_task_dao
-    if _celery_task_dao is None:
-        _celery_task_dao = CeleryTaskDao(
-            session_provider=get_session,
-        )
-    return _celery_task_dao
+    return CeleryTaskDao(session_provider=get_session)

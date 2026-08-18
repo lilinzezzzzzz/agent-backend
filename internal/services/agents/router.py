@@ -1,4 +1,5 @@
 from collections.abc import AsyncIterator
+from functools import cache
 from uuid import UUID
 
 from internal.agents.router import AgentRoute, HybridAgentRouter
@@ -388,22 +389,17 @@ class AgentRouterService:
             )
 
 
-_agent_router_service: AgentRouterService | None = None
-
-
+@cache
 def new_agent_router_service() -> AgentRouterService:
     """依赖注入：获取 AgentRouterService 单例。"""
-    global _agent_router_service
-    if _agent_router_service is None:
-        _agent_router_service = AgentRouterService(
-            llm_client=new_default_llm_client(),
-            order_agent_service=new_order_agent_service(),
-            payment_agent_service=new_payment_agent_service(),
-            audit_service=new_agent_audit_service(),
-            action_store=new_agent_action_cache(),
-            conversation_service=new_agent_conversation_service(),
-        )
-    return _agent_router_service
+    return AgentRouterService(
+        llm_client=new_default_llm_client(),
+        order_agent_service=new_order_agent_service(),
+        payment_agent_service=new_payment_agent_service(),
+        audit_service=new_agent_audit_service(),
+        action_store=new_agent_action_cache(),
+        conversation_service=new_agent_conversation_service(),
+    )
 
 
 def _event_run_id(event: AgentStreamEventDTO) -> str | None:

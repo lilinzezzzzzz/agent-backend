@@ -1,4 +1,5 @@
 import hashlib
+from functools import cache
 from uuid import UUID
 
 from sqlalchemy.exc import IntegrityError
@@ -256,16 +257,10 @@ class UserService:
                 raise ValueError(f"{name} exceeds {max_length} characters")
 
 
-# 全局单例（懒加载）
-_user_service: UserService | None = None
-
-
+@cache
 def new_user_service() -> UserService:
     """依赖注入：获取 UserService 单例"""
-    global _user_service
-    if _user_service is None:
-        _user_service = UserService(
-            dao=new_user_dao(),
-            external_identity_dao=new_external_identity_dao(),
-        )
-    return _user_service
+    return UserService(
+        dao=new_user_dao(),
+        external_identity_dao=new_external_identity_dao(),
+    )

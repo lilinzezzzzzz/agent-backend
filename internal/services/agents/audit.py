@@ -4,6 +4,7 @@ import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
+from functools import cache
 from time import monotonic
 from typing import Any
 from uuid import UUID
@@ -449,12 +450,7 @@ def _is_background_task_manager_unavailable(exc: RuntimeError) -> bool:
     return "not initialized" in message or "not started" in message
 
 
-_agent_audit_service: AgentAuditService | None = None
-
-
+@cache
 def new_agent_audit_service() -> AgentAuditService:
     """依赖注入：获取 AgentAuditService 单例。"""
-    global _agent_audit_service
-    if _agent_audit_service is None:
-        _agent_audit_service = AgentAuditService(audit_dao=new_agent_audit_dao())
-    return _agent_audit_service
+    return AgentAuditService(audit_dao=new_agent_audit_dao())

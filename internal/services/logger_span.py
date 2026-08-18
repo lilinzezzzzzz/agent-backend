@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from functools import cache
+
 import anyio
 from opentelemetry import trace
 
@@ -147,13 +149,7 @@ class LoggerSpanService:
             _maybe_raise(_STEP_CACHE_WRITE, fail_at)
 
 
-_logger_span_service: LoggerSpanService | None = None
-
-
+@cache
 def new_logger_span_service() -> LoggerSpanService:
     """依赖注入：获取 LoggerSpanService 单例。"""
-
-    global _logger_span_service
-    if _logger_span_service is None:
-        _logger_span_service = LoggerSpanService()
-    return _logger_span_service
+    return LoggerSpanService()

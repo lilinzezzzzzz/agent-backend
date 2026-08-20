@@ -9,15 +9,13 @@ from collections.abc import Mapping
 from functools import cache
 from pathlib import Path
 from typing import Any, Literal, cast
+from urllib.parse import quote, urlunsplit
 
 from dotenv import dotenv_values
 from loguru import logger
 from pydantic import (
     AnyHttpUrl,
-    MySQLDsn,
     PositiveInt,
-    PostgresDsn,
-    RedisDsn,
     SecretStr,
     field_validator,
     model_validator,
@@ -27,6 +25,7 @@ from pydantic_settings import (
     PydanticBaseSettingsSource,
     SettingsConfigDict,
 )
+from sqlalchemy.engine import URL
 
 from internal import BASE_DIR
 from pkg.crypter.aes import aes_decrypt
@@ -39,7 +38,7 @@ from pkg.toolkit.string import mask_string
 # =========================================================
 
 # 支持的数据库类型
-DBType = Literal["mysql", "postgresql", "oracle"]
+DBType = Literal["mysql", "postgresql"]
 EndpointGuardSource = Literal["settings", "redis", "settings+redis"]
 EmbeddingProvider = Literal["openai_compatible"]
 AppEnv = Literal["local", "dev", "test", "prod"]
@@ -49,7 +48,6 @@ APP_ENV_VALUES = {"local", "dev", "test", "prod"}
 DB_DRIVER_MAP: dict[str, str] = {
     "mysql": "mysql+aiomysql",
     "postgresql": "postgresql+asyncpg",
-    "oracle": "oracle+oracledb",
 }
 
 SENSITIVE_CONFIG_KEYWORDS = (
@@ -79,6 +77,14 @@ SECRET_FILE_KEYS = frozenset(
     }
 )
 CONFIG_ECHO_MIN_PARTIAL_SECRET_LENGTH = 8
+
+
+def _build_redis_url(*, host: str, port: int, password: str, db: int) -> str:
+    """构造可供 redis-py 和 Celery 使用的 Redis URL。"""
+    url_host = host if ":" not in host or host.startswith("[") else f"[{host}]"
+    credentials = f":{quote(password, safe='')}@" if password else ""
+    netloc = f"{credentials}{url_host}:{port}"
+    return urlunsplit(("redis", netloc, f"/{db}", "", ""))
 
 
 class Settings(BaseSettings):
@@ -149,13 +155,12 @@ class Settings(BaseSettings):
     RAG_MAX_CONTEXT_CHARS: PositiveInt
 
     # --- Database ---
-    DB_TYPE: DBType  # 数据库类型: mysql, postgresql, oracle (必填)
+    DB_TYPE: DBType  # 数据库类型: mysql, postgresql (必填)
     DB_HOST: str
     DB_PORT: int
     DB_USERNAME: str
     DB_PASSWORD: SecretStr
     DB_DATABASE: str
-    DB_SERVICE_NAME: str | None = None  # Oracle 专用: Service Name
     DB_ECHO: bool  # 是否输出 SQL 日志
 
     # --- Database Read Replica (可选，不配置则不启用读写分离) ---
@@ -164,7 +169,6 @@ class Settings(BaseSettings):
     DB_READ_USERNAME: str | None = None
     DB_READ_PASSWORD: SecretStr | None = None
     DB_READ_DATABASE: str | None = None
-    DB_READ_SERVICE_NAME: str | None = None  # Oracle 专用
 
     # --- Redis ---
     REDIS_HOST: str
@@ -249,13 +253,6 @@ class Settings(BaseSettings):
         return self
 
     @model_validator(mode="after")
-    def validate_oracle_service_name(self) -> "Settings":
-        """Oracle 主库必须显式配置 service name。"""
-        if self.DB_TYPE == "oracle" and not self.DB_SERVICE_NAME:
-            raise ValueError("DB_SERVICE_NAME is required when DB_TYPE=oracle")
-        return self
-
-    @model_validator(mode="after")
     def decrypt_sensitive_fields(self) -> "Settings":
         """解密敏感字段"""
         fields_to_decrypt = ["DB_PASSWORD", "DB_READ_PASSWORD", "REDIS_PASSWORD"]
@@ -332,36 +329,24 @@ class Settings(BaseSettings):
         password = self.DB_PASSWORD.get_secret_value()
 
         if self.DB_TYPE == "mysql":
-            return str(
-                MySQLDsn.build(
-                    scheme=driver,
-                    username=self.DB_USERNAME,
-                    password=password,
-                    host=self.DB_HOST,
-                    port=self.DB_PORT,
-                    path=self.DB_DATABASE,
-                    query="charset=utf8mb4",
-                )
-            )
+            return URL.create(
+                drivername=driver,
+                username=self.DB_USERNAME,
+                password=password,
+                host=self.DB_HOST,
+                port=self.DB_PORT,
+                database=self.DB_DATABASE,
+                query={"charset": "utf8mb4"},
+            ).render_as_string(hide_password=False)
         elif self.DB_TYPE == "postgresql":
-            return str(
-                PostgresDsn.build(
-                    scheme=driver,
-                    username=self.DB_USERNAME,
-                    password=password,
-                    host=self.DB_HOST,
-                    port=self.DB_PORT,
-                    path=self.DB_DATABASE,
-                )
-            )
-        elif self.DB_TYPE == "oracle":
-            # Oracle 连接格式: oracle+oracledb://user:pass@host:port/?service_name=xxx
-            if password:
-                from urllib.parse import quote_plus
-
-                password = quote_plus(password)
-                return f"{driver}://{self.DB_USERNAME}:{password}@{self.DB_HOST}:{self.DB_PORT}/?service_name={self.DB_SERVICE_NAME}"
-            return f"{driver}://{self.DB_USERNAME}@{self.DB_HOST}:{self.DB_PORT}/?service_name={self.DB_SERVICE_NAME}"
+            return URL.create(
+                drivername=driver,
+                username=self.DB_USERNAME,
+                password=password,
+                host=self.DB_HOST,
+                port=self.DB_PORT,
+                database=self.DB_DATABASE,
+            ).render_as_string(hide_password=False)
         else:
             raise ValueError(f"Unsupported database type: {self.DB_TYPE}")
 
@@ -389,53 +374,36 @@ class Settings(BaseSettings):
             else self.DB_PASSWORD.get_secret_value()
         )
         database = self.DB_READ_DATABASE or self.DB_DATABASE
-        service_name = self.DB_READ_SERVICE_NAME or self.DB_SERVICE_NAME
 
         if self.DB_TYPE == "mysql":
-            return str(
-                MySQLDsn.build(
-                    scheme=driver,
-                    username=username,
-                    password=password,
-                    host=host,
-                    port=port,
-                    path=database,
-                    query="charset=utf8mb4",
-                )
-            )
+            return URL.create(
+                drivername=driver,
+                username=username,
+                password=password,
+                host=host,
+                port=port,
+                database=database,
+                query={"charset": "utf8mb4"},
+            ).render_as_string(hide_password=False)
         elif self.DB_TYPE == "postgresql":
-            return str(
-                PostgresDsn.build(
-                    scheme=driver,
-                    username=username,
-                    password=password,
-                    host=host,
-                    port=port,
-                    path=database,
-                )
-            )
-        elif self.DB_TYPE == "oracle":
-            if password:
-                from urllib.parse import quote_plus
-
-                password = quote_plus(password)
-                return f"{driver}://{username}:{password}@{host}:{port}/?service_name={service_name}"
-            return f"{driver}://{username}@{host}:{port}/?service_name={service_name}"
+            return URL.create(
+                drivername=driver,
+                username=username,
+                password=password,
+                host=host,
+                port=port,
+                database=database,
+            ).render_as_string(hide_password=False)
         else:
             raise ValueError(f"Unsupported database type: {self.DB_TYPE}")
 
     @property
     def redis_url(self) -> str:
-        password = self.REDIS_PASSWORD.get_secret_value()
-        return str(
-            RedisDsn.build(
-                scheme="redis",
-                username=None,
-                password=password if password else None,
-                host=self.REDIS_HOST,
-                port=self.REDIS_PORT,
-                path=f"{self.REDIS_DB}",
-            )
+        return _build_redis_url(
+            host=self.REDIS_HOST,
+            port=self.REDIS_PORT,
+            password=self.REDIS_PASSWORD.get_secret_value(),
+            db=self.REDIS_DB,
         )
 
 

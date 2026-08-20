@@ -3,8 +3,9 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-from pydantic import ValidationError
 from dotenv import dotenv_values
+from pydantic import ValidationError
+from redis.asyncio import ConnectionPool
 
 import internal.config as config_module
 from internal.config import (
@@ -321,9 +322,7 @@ def test_settings_defaults_are_limited_to_conditional_fields() -> None:
         "DB_READ_HOST",
         "DB_READ_PASSWORD",
         "DB_READ_PORT",
-        "DB_READ_SERVICE_NAME",
         "DB_READ_USERNAME",
-        "DB_SERVICE_NAME",
         "LOG_BASE_DIR",
         "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
     }
@@ -481,7 +480,88 @@ def test_milvus_database_name_cannot_be_empty(tmp_path: Path) -> None:
         _new_settings(env_path, secrets_path)
 
 
-def test_oracle_database_requires_service_name(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("db_type", "port", "driver", "query"),
+    [
+        ("mysql", "3306", "mysql+aiomysql", "?charset=utf8mb4"),
+        ("postgresql", "5432", "postgresql+asyncpg", ""),
+    ],
+)
+def test_sqlalchemy_database_urls_use_sqlalchemy_escaping(
+    tmp_path: Path,
+    db_type: str,
+    port: str,
+    driver: str,
+    query: str,
+) -> None:
+    env_path = tmp_path / ".env.test"
+    secrets_path = tmp_path / ".secrets"
+    env_values = _base_env_values()
+    env_values.update(
+        {
+            "DB_TYPE": db_type,
+            "DB_HOST": "primary-db.example",
+            "DB_PORT": port,
+            "DB_USERNAME": "primary@example.com",
+            "DB_DATABASE": "primary_db",
+            "DB_READ_HOST": "replica-db.example",
+            "DB_READ_PORT": port,
+            "DB_READ_USERNAME": "reader@example.com",
+            "DB_READ_DATABASE": "replica_db",
+            "CELERY_IDEMPOTENCY_ENABLED": "false",
+        }
+    )
+    secret_values = _secret_values()
+    secret_values.update(
+        {
+            "DB_PASSWORD": "primary@pass:/?[]",
+            "DB_READ_PASSWORD": "reader@pass:/?[]",
+        }
+    )
+    _write_env_file(env_path, env_values)
+    _write_env_file(secrets_path, secret_values)
+
+    settings = _new_settings(env_path, secrets_path)
+
+    assert settings.sqlalchemy_database_uri == (
+        f"{driver}://primary%40example.com:primary%40pass%3A%2F%3F%5B%5D"
+        f"@primary-db.example:{port}/primary_db{query}"
+    )
+    assert settings.sqlalchemy_read_database_uri == (
+        f"{driver}://reader%40example.com:reader%40pass%3A%2F%3F%5B%5D"
+        f"@replica-db.example:{port}/replica_db{query}"
+    )
+
+
+def test_redis_url_escapes_password_and_supports_ipv6(tmp_path: Path) -> None:
+    env_path = tmp_path / ".env.test"
+    secrets_path = tmp_path / ".secrets"
+    env_values = _base_env_values()
+    env_values.update(
+        {
+            "REDIS_HOST": "2001:db8::1",
+            "REDIS_PORT": "6380",
+            "REDIS_DB": "4",
+        }
+    )
+    secret_values = _secret_values()
+    secret_values["REDIS_PASSWORD"] = "redis@pass:/?#[]%"
+    _write_env_file(env_path, env_values)
+    _write_env_file(secrets_path, secret_values)
+
+    settings = _new_settings(env_path, secrets_path)
+
+    assert settings.redis_url == (
+        "redis://:redis%40pass%3A%2F%3F%23%5B%5D%25@[2001:db8::1]:6380/4"
+    )
+    pool = ConnectionPool.from_url(settings.redis_url)
+    assert pool.connection_kwargs["host"] == "2001:db8::1"
+    assert pool.connection_kwargs["port"] == 6380
+    assert pool.connection_kwargs["password"] == "redis@pass:/?#[]%"
+    assert pool.connection_kwargs["db"] == 4
+
+
+def test_oracle_database_type_is_rejected(tmp_path: Path) -> None:
     env_path = tmp_path / ".env.test"
     secrets_path = tmp_path / ".secrets"
     env_values = _base_env_values()
@@ -494,9 +574,7 @@ def test_oracle_database_requires_service_name(tmp_path: Path) -> None:
     _write_env_file(env_path, env_values)
     _write_env_file(secrets_path, _secret_values())
 
-    with pytest.raises(
-        ValidationError, match="DB_SERVICE_NAME is required when DB_TYPE=oracle"
-    ):
+    with pytest.raises(ValidationError, match="DB_TYPE must be one of"):
         _new_settings(env_path, secrets_path)
 
 

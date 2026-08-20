@@ -23,7 +23,7 @@ README 只记录当前仓库可直接核对的能力；更细的设计约束和�
 - 进程入口：`entrypoints/main.py` 导出 FastAPI `app`，`internal.infra.celery.application` 导出 Celery `celery_app`，`internal/app.py` 负责路由、中间件和 lifespan。
 - 配置加载：`APP_ENV` 只在根目录 `.env` 维护；应用据此加载 `configs/.env.{APP_ENV}` 和
   `.secrets`，并严格隔离非敏感配置与凭据字段。
-- 数据库：异步 SQLAlchemy 连接池，支持主库和可选只读副本；配置层支持 PostgreSQL、MySQL、Oracle DSN。
+- 数据库：异步 SQLAlchemy 连接池，支持主库和可选只读副本；配置层支持 PostgreSQL、MySQL DSN。
 - Redis：连接池、业务缓存封装、认证 token metadata、Agent action confirmation / idempotency 缓存。
 - 认证：Token 认证、内部签名认证、匿名路由分组、微信登录接入点。
 - 中间件：请求日志、CORS、Endpoint Guard、统一异常处理、GZip。
@@ -39,7 +39,7 @@ README 只记录当前仓库可直接核对的能力；更细的设计约束和�
 - Redis
 - PostgreSQL（当前依赖默认包含 `asyncpg`，仓库配置示例也默认使用 PostgreSQL）
 
-配置层支持 `mysql`、`postgresql`、`oracle` 三种 `DB_TYPE`，但当前 `pyproject.toml` 默认只包含 PostgreSQL 异步驱动 `asyncpg`。如果切换到 MySQL 或 Oracle，需要先补充对应运行时驱动，例如 `aiomysql` 或 `oracledb`，再同步锁文件和部署环境。
+配置层支持 `mysql`、`postgresql` 两种 `DB_TYPE`，但当前 `pyproject.toml` 默认只包含 PostgreSQL 异步驱动 `asyncpg`。如果切换到 MySQL，需要先补充 `aiomysql` 运行时驱动，再同步锁文件和部署环境。
 
 使用向量集成测试或真实向量检索时，还需要准备对应的 Milvus 后端依赖。
 

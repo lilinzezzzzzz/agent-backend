@@ -7,7 +7,7 @@ from internal.core import AppException, errors
 from internal.infra.llm import client as llm_client_module
 
 
-class FakeOpenAIClient:
+class FakeOpenAIResponsesClient:
     def __init__(
         self, *, base_url: str, model: str, api_key: str, provider: str, timeout: int
     ):
@@ -28,7 +28,7 @@ def test_new_default_llm_client_uses_default_provider_config(
         LLM_DEEPSEEK_API_KEY=SecretStr("test-api-key"),
     )
     monkeypatch.setattr(llm_client_module, "settings", settings)
-    monkeypatch.setattr(llm_client_module, "OpenAIClient", FakeOpenAIClient)
+    monkeypatch.setattr(llm_client_module, "OpenAIResponsesClient", FakeOpenAIResponsesClient)
 
     client = llm_client_module.new_default_llm_client()
 

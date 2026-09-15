@@ -6,7 +6,7 @@ from uuid import UUID
 
 from internal.agents.order import OrderAgentBuilder
 from internal.core import AppException, errors
-from internal.infra.llm import OpenAIClient, new_default_llm_client
+from internal.infra.llm import OpenAIResponsesClient, new_default_llm_client
 from internal.services.agents.audit import (
     AgentAuditContext,
     AgentAuditService,
@@ -37,7 +37,7 @@ class OrderAgentService:
     def __init__(
         self,
         *,
-        llm_client: OpenAIClient,
+        llm_client: OpenAIResponsesClient,
         order_service: OrderService,
         rag_service: RagService,
         audit_service: AgentAuditService,

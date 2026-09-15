@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from internal.config import settings
 from internal.core import AppException, errors
 from internal.dao.rag import RagChunkMetadata, RagMetadataDao, new_rag_metadata_dao
-from internal.infra.llm import OpenAIClient
+from internal.infra.llm import OpenAIResponsesClient
 from internal.rag.repositories.chunk_vector import (
     ChunkVectorRepository,
     new_chunk_repository,
@@ -79,7 +79,7 @@ class RagService:
     def __init__(
         self,
         *,
-        llm_client: OpenAIClient,
+        llm_client: OpenAIResponsesClient,
         embedder: Any,
         metadata_dao: RagMetadataDao,
         scope_resolver: SettingsRagScopeResolver | None = None,
@@ -338,8 +338,8 @@ class RagService:
         evidence: Sequence[RagEvidenceDTO],
     ) -> _RagLLMAnswerModel:
         try:
-            return await self._llm_client.chat_completion_structured(
-                messages=[
+            return await self._llm_client.response_structured(
+                input=[
                     {
                         "role": "system",
                         "content": (
@@ -356,8 +356,8 @@ class RagService:
                 ],
                 response_model=_RagLLMAnswerModel,
                 temperature=0,
-                max_tokens=800,
-                thinking=False,
+                max_output_tokens=800,
+                reasoning={"effort": "none"},
             )
         except Exception as exc:
             logger.warning("rag.answer llm failed: {}", type(exc).__name__)

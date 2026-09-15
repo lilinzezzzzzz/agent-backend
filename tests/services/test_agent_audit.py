@@ -76,7 +76,7 @@ class FakeLLMClient:
     def __init__(self):
         self.calls: list[dict[str, Any]] = []
 
-    async def chat_completion_structured(self, **kwargs: Any) -> LLMActionModel:
+    async def response_structured(self, **kwargs: Any) -> LLMActionModel:
         self.calls.append(kwargs)
         return LLMActionModel(
             type="tool_call",
@@ -128,7 +128,7 @@ async def test_agent_audit_service_redacts_sensitive_payloads() -> None:
         llm_calls=[
             {
                 "request": {
-                    "messages": [{"role": "user", "content": "buyer@example.com"}]
+                    "input": [{"role": "user", "content": "buyer@example.com"}]
                 },
                 "raw_response": {"email": "buyer@example.com", "token": "llm-token"},
             }
@@ -273,12 +273,12 @@ async def test_audited_agent_llm_client_records_structured_calls() -> None:
         audit_context=audit_context,
     )
 
-    action = await audited_client.chat_completion_structured(
-        messages=[{"role": "user", "content": "订单 1001 到哪了？"}],
+    action = await audited_client.response_structured(
+        input=[{"role": "user", "content": "订单 1001 到哪了？"}],
         response_model=LLMActionModel,
         temperature=0,
-        max_tokens=128,
-        thinking=False,
+        max_output_tokens=128,
+        reasoning={"effort": "none"},
     )
 
     assert action.tool == "send_email"
@@ -287,6 +287,59 @@ async def test_audited_agent_llm_client_records_structured_calls() -> None:
     assert call["provider"] == "fake-provider"
     assert call["model"] == "fake-model"
     assert call["response_model"] == "LLMActionModel"
-    assert call["request"]["max_tokens"] == 128
-    assert call["request"]["extra"]["thinking"] is False
+    assert call["request"]["max_output_tokens"] == 128
+    assert call["request"]["extra"]["reasoning"] == {"effort": "none"}
     assert call["parsed_response"]["args"]["email"] == "bu....com"
+
+
+@pytest.mark.asyncio
+async def test_audit_records_responses_usage_and_incomplete_response() -> None:
+    from unittest.mock import AsyncMock
+
+    from openai.types.responses import Response, ResponseUsage
+
+    from pkg.llm import OpenAIResponsesClient, ResponseIncompleteError
+
+    class CustomResponsesClient(OpenAIResponsesClient):
+        pass
+
+    audit_context = AgentAuditContext.start(
+        agent_name="order_support",
+        user_id=TEST_USER_ID,
+        user_input="hello",
+        max_steps=1,
+    )
+    async with CustomResponsesClient(
+        base_url="https://example.test", model="test"
+    ) as client:
+        raw = Response.model_construct(
+            id="resp_test",
+            status="incomplete",
+            error=None,
+            incomplete_details=None,
+            output=[],
+            usage=ResponseUsage.model_validate(
+                {
+                    "input_tokens": 10,
+                    "output_tokens": 2,
+                    "total_tokens": 12,
+                    "input_tokens_details": {"cached_tokens": 1},
+                    "output_tokens_details": {"reasoning_tokens": 0},
+                }
+            ),
+        )
+        client.client.responses.create = AsyncMock(return_value=raw)
+        audited = AuditedAgentLLMClient(llm_client=client, audit_context=audit_context)
+        with pytest.raises(ResponseIncompleteError):
+            await audited.response_structured(
+                input="hello", response_model=LLMActionModel
+            )
+    call = audit_context.llm_calls[0]
+    assert call["request"]["input"] == "hello"
+    assert call["raw_response"]["usage"]["input_tokens"] == 10
+    assert (
+        call["raw_response"]["usage"]["output_tokens_details"]["reasoning_tokens"] == 0
+    )
+    assert call["raw_response"]["status"] == "incomplete"
+    assert call["parsed_response"] is None
+    assert "ResponseIncompleteError" in call["error"]

@@ -9,14 +9,17 @@ from pkg.embeddings.errors import (
     EmbeddingResponseValidationError,
     InvalidEmbeddingDimensionError,
 )
-from pkg.embeddings.openai_compatible import (
-    OpenAICompatibleEmbedder,
-    VECTOR_DIMENSION,
-    create_openai_compatible_embedder,
-)
+
+
+def _build_openai_embedder(**kwargs: Any) -> Embedder:
+    # 实现依赖本包的基础接口；延迟导入避免包初始化时形成循环依赖。
+    from pkg.llm.openai_client.embeddings import create_openai_embedder
+
+    return create_openai_embedder(**kwargs)
+
 
 EMBEDDER_BUILDERS: dict[EmbedderProvider, Callable[..., Embedder]] = {
-    EmbedderProvider.OPENAI_COMPATIBLE: create_openai_compatible_embedder,
+    EmbedderProvider.OPENAI_COMPATIBLE: _build_openai_embedder,
 }
 
 
@@ -37,8 +40,5 @@ __all__ = [
     "Embedder",
     "EmbedderProvider",
     "InvalidEmbeddingDimensionError",
-    "OpenAICompatibleEmbedder",
-    "VECTOR_DIMENSION",
     "create_embedder",
-    "create_openai_compatible_embedder",
 ]

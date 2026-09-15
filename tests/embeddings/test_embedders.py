@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from pkg.llm.openai_client import OpenAIEmbeddingsClient
+
 from pkg.embeddings import (
     EmbedderProvider,
-    OpenAICompatibleEmbedder,
     create_embedder,
 )
 
@@ -15,7 +16,7 @@ def test_openai_compatible_provider_builds_embedder():
         model="bge-m3",
     )
 
-    assert isinstance(embedder, OpenAICompatibleEmbedder)
+    assert isinstance(embedder, OpenAIEmbeddingsClient)
 
 
 def test_openai_compatible_provider_accepts_config_string():
@@ -26,7 +27,7 @@ def test_openai_compatible_provider_accepts_config_string():
         model="bge-m3",
     )
 
-    assert isinstance(embedder, OpenAICompatibleEmbedder)
+    assert isinstance(embedder, OpenAIEmbeddingsClient)
 
 
 def test_create_embedder_does_not_cache_instances():

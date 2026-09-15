@@ -16,12 +16,13 @@ from openai.types.chat import (
 from openai.types.chat.chat_completion_chunk import ChatCompletionChunk
 from pydantic import BaseModel
 
+from pkg.llm.openai_client._base import BaseOpenAIClient
 from pkg.llm.errors import StructuredOutputParseError, StructuredOutputRefusalError
-from pkg.llm.providers import PROVIDER_CAPABILITIES, ProviderCapabilities
+from pkg.llm.providers import CHAT_COMPLETIONS_CAPABILITIES, ChatCompletionsCapabilities
 from pkg.llm.types import StructuredOutputMode, ThinkingMode, ThinkingParamStyle
 
 
-class OpenAIClient:
+class OpenAIChatCompletionsClient(BaseOpenAIClient):
     """Async OpenAI-compatible chat completion client."""
 
     def __init__(
@@ -31,43 +32,16 @@ class OpenAIClient:
         timeout: int = 180,
         api_key: str = "password",
         provider: str | None = None,
-        provider_capabilities: ProviderCapabilities | None = None,
+        provider_capabilities: ChatCompletionsCapabilities | None = None,
+        *,
+        client: openai.AsyncOpenAI | None = None,
     ):
-        self.base_url = base_url
-        self.model = model
-        self.provider = self._normalize_provider(provider) or self._infer_provider(
-            base_url, model
-        )
+        super().__init__(base_url, model, timeout, api_key, provider, client)
         self.provider_capabilities = (
-            provider_capabilities or self._get_provider_capabilities(self.provider)
-        )
-        self.client = openai.AsyncOpenAI(
-            api_key=api_key,
-            base_url=base_url,
-            timeout=timeout,
-        )
-
-    @staticmethod
-    def _normalize_provider(provider: str | None) -> str | None:
-        if not provider:
-            return None
-        return provider.lower().replace("-", "_")
-
-    @classmethod
-    def _infer_provider(cls, base_url: str, model: str) -> str:
-        value = f"{base_url} {model}".lower()
-        if "deepseek" in value:
-            return "deepseek"
-        if "xiaomimimo" in value or "mimo" in value:
-            return "mimo"
-        if "openai" in value:
-            return "openai"
-        return "openai_compatible"
-
-    @classmethod
-    def _get_provider_capabilities(cls, provider: str) -> ProviderCapabilities:
-        return PROVIDER_CAPABILITIES.get(
-            provider, PROVIDER_CAPABILITIES["openai_compatible"]
+            provider_capabilities
+            or CHAT_COMPLETIONS_CAPABILITIES.get(
+                self.provider, CHAT_COMPLETIONS_CAPABILITIES["openai_compatible"]
+            )
         )
 
     @staticmethod

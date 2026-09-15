@@ -74,7 +74,7 @@ class FakeLLMClient:
         self.citations = citations
         self.calls: list[dict[str, Any]] = []
 
-    async def chat_completion_structured(self, **kwargs: Any):
+    async def response_structured(self, **kwargs: Any):
         self.calls.append(kwargs)
         response_model = kwargs["response_model"]
         return response_model(

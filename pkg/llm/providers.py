@@ -4,8 +4,8 @@ from pkg.llm.types import StructuredOutputMode, ThinkingParamStyle
 
 
 @dataclass(frozen=True)
-class ProviderCapabilities:
-    """OpenAI-compatible provider behavior switches."""
+class ChatCompletionsCapabilities:
+    """Chat Completions provider behavior switches."""
 
     name: str
     structured_output_mode: StructuredOutputMode = (
@@ -27,30 +27,30 @@ class ProviderCapabilities:
         )
 
 
-PROVIDER_CAPABILITIES: dict[str, ProviderCapabilities] = {
-    "openai": ProviderCapabilities(
+CHAT_COMPLETIONS_CAPABILITIES: dict[str, ChatCompletionsCapabilities] = {
+    "openai": ChatCompletionsCapabilities(
         name="openai",
         structured_output_mode=StructuredOutputMode.NATIVE,
         thinking_param_style=ThinkingParamStyle.REASONING_EFFORT,
         supports_reasoning_effort=True,
     ),
-    "deepseek": ProviderCapabilities(
+    "deepseek": ChatCompletionsCapabilities(
         name="deepseek",
         structured_output_mode=StructuredOutputMode.JSON_OBJECT,
         thinking_param_style=ThinkingParamStyle.EXTRA_BODY_THINKING,
         supports_reasoning_effort=True,
     ),
-    "mimo": ProviderCapabilities(
+    "mimo": ChatCompletionsCapabilities(
         name="mimo",
         structured_output_mode=StructuredOutputMode.NATIVE_WITH_JSON_OBJECT_FALLBACK,
         thinking_param_style=ThinkingParamStyle.EXTRA_BODY_THINKING,
         supports_reasoning_effort=True,
     ),
-    "xiaomi": ProviderCapabilities(
+    "xiaomi": ChatCompletionsCapabilities(
         name="xiaomi",
         structured_output_mode=StructuredOutputMode.NATIVE_WITH_JSON_OBJECT_FALLBACK,
         thinking_param_style=ThinkingParamStyle.EXTRA_BODY_THINKING,
         supports_reasoning_effort=True,
     ),
-    "openai_compatible": ProviderCapabilities(name="openai_compatible"),
+    "openai_compatible": ChatCompletionsCapabilities(name="openai_compatible"),
 }

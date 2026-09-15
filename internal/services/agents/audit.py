@@ -9,6 +9,7 @@ from time import monotonic
 from typing import Any
 from uuid import UUID
 
+from openai.types.responses import ResponseInputParam
 from pydantic import BaseModel
 
 from internal.dao.agent_audit import AgentAuditDao, new_agent_audit_dao
@@ -17,6 +18,7 @@ from internal.schemas.agent import JsonValue
 from internal.schemas.agent import AgentRunResultDTO
 from internal.utils.background_tasks import background_task_manager
 from pkg.database.audit import AuditActor
+from pkg.llm import OpenAIResponsesClient
 from pkg.logger import logger
 from pkg import request_context as context
 from pkg.toolkit.string import mask_string
@@ -51,7 +53,13 @@ _MASKED_KEY_PARTS = (
     "tax_no",
 )
 _NON_SECRET_TOKEN_KEYS = {
-    "max_tokens",
+    "max_output_tokens",
+    "input_tokens",
+    "output_tokens",
+    "input_tokens_details",
+    "output_tokens_details",
+    "cached_tokens",
+    "reasoning_tokens",
     "max_completion_tokens",
     "completion_tokens",
     "prompt_tokens",
@@ -158,12 +166,12 @@ class AuditedAgentLLMClient:
         self.model = getattr(llm_client, "model", None)
         self.provider = getattr(llm_client, "provider", None)
 
-    async def chat_completion_structured[StructuredOutputT: BaseModel](
+    async def response_structured[StructuredOutputT: BaseModel](
         self,
         *,
-        messages: Sequence[Mapping[str, Any]],
+        input: str | ResponseInputParam,
         response_model: type[StructuredOutputT],
-        max_tokens: int | None = None,
+        max_output_tokens: int | None = None,
         temperature: float | None = None,
         **kwargs: Any,
     ) -> StructuredOutputT:
@@ -181,10 +189,10 @@ class AuditedAgentLLMClient:
             call_kwargs["_audit_hook"] = audit_hook
 
         try:
-            parsed = await self._llm_client.chat_completion_structured(
-                messages=messages,
+            parsed = await self._llm_client.response_structured(
+                input=input,
                 response_model=response_model,
-                max_tokens=max_tokens,
+                max_output_tokens=max_output_tokens,
                 temperature=temperature,
                 **call_kwargs,
             )
@@ -199,8 +207,8 @@ class AuditedAgentLLMClient:
                     "ended_at": ended_at.isoformat(),
                     "elapsed_ms": round((monotonic() - monotonic_started_at) * 1000, 3),
                     "request": _llm_request_payload(
-                        messages=messages,
-                        max_tokens=max_tokens,
+                        input=input,
+                        max_output_tokens=max_output_tokens,
                         temperature=temperature,
                         kwargs=kwargs,
                     ),
@@ -221,8 +229,8 @@ class AuditedAgentLLMClient:
                 "ended_at": ended_at.isoformat(),
                 "elapsed_ms": round((monotonic() - monotonic_started_at) * 1000, 3),
                 "request": _llm_request_payload(
-                    messages=messages,
-                    max_tokens=max_tokens,
+                    input=input,
+                    max_output_tokens=max_output_tokens,
                     temperature=temperature,
                     kwargs=kwargs,
                 ),
@@ -362,14 +370,14 @@ def _step_to_audit_payload(step: Any) -> dict[str, JsonValue]:
 
 def _llm_request_payload(
     *,
-    messages: Sequence[Mapping[str, Any]],
-    max_tokens: int | None,
+    input: str | ResponseInputParam,
+    max_output_tokens: int | None,
     temperature: float | None,
     kwargs: Mapping[str, Any],
 ) -> dict[str, Any]:
     return {
-        "messages": list(messages),
-        "max_tokens": max_tokens,
+        "input": input if isinstance(input, str) else list(input),
+        "max_output_tokens": max_output_tokens,
         "temperature": temperature,
         "extra": dict(kwargs),
     }
@@ -442,7 +450,7 @@ def _redact_text(value: str) -> str:
 
 
 def _supports_openai_audit_hook(llm_client: Any) -> bool:
-    return llm_client.__class__.__name__ == "OpenAIClient"
+    return isinstance(llm_client, OpenAIResponsesClient)
 
 
 def _is_background_task_manager_unavailable(exc: RuntimeError) -> bool:

@@ -40,27 +40,27 @@ class LLMReactActionMaker:
         llm_client: Any,
         system_prompt: str,
         session_context: Mapping[str, Any] | None = None,
-        max_tokens: int | None = 800,
+        max_output_tokens: int | None = 800,
         temperature: float | None = 0,
-        extra_completion_kwargs: Mapping[str, Any] | None = None,
+        extra_response_kwargs: Mapping[str, Any] | None = None,
     ):
         self._llm_client = llm_client
         self._system_prompt = system_prompt
         self._session_context = dict(session_context or {})
-        self._max_tokens = max_tokens
+        self._max_output_tokens = max_output_tokens
         self._temperature = temperature
-        self._extra_completion_kwargs = dict(extra_completion_kwargs or {})
+        self._extra_response_kwargs = dict(extra_response_kwargs or {})
 
     async def make_next_action(
         self, context: AgentActionContext
     ) -> AgentToolCall | AgentFinal:
         """调用 LLM，并把结构化输出转换为下一步 Agent 动作。"""
-        action = await self._llm_client.chat_completion_structured(
-            messages=self._build_action_messages(context=context),
+        action = await self._llm_client.response_structured(
+            input=self._build_action_messages(context=context),
             response_model=LLMActionModel,
             temperature=self._temperature,
-            max_tokens=self._max_tokens,
-            **self._extra_completion_kwargs,
+            max_output_tokens=self._max_output_tokens,
+            **self._extra_response_kwargs,
         )
         return parse_agent_action(action.model_dump(exclude_none=True))
 

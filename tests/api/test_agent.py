@@ -242,7 +242,7 @@ class FakeLLMClient:
         self._actions = actions
         self.calls: list[dict[str, Any]] = []
 
-    async def chat_completion_structured(self, **kwargs: Any) -> Any:
+    async def response_structured(self, **kwargs: Any) -> Any:
         self.calls.append(kwargs)
         return self._actions.pop(0)
 

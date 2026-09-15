@@ -11,7 +11,7 @@ class FakeLLMClient:
         self._actions = actions
         self.calls: list[dict[str, Any]] = []
 
-    async def chat_completion_structured(self, **kwargs: Any) -> LLMActionModel:
+    async def response_structured(self, **kwargs: Any) -> LLMActionModel:
         self.calls.append(kwargs)
         return self._actions.pop(0)
 
@@ -46,9 +46,9 @@ async def test_llm_react_action_maker_builds_messages_and_parses_actions() -> No
     action_maker = LLMReactActionMaker(
         llm_client=llm_client,
         system_prompt="你是订单助手。",
-        max_tokens=256,
+        max_output_tokens=256,
         temperature=0,
-        extra_completion_kwargs={"thinking": False},
+        extra_response_kwargs={"reasoning": {"effort": "none"}},
     )
     agent = ReActAgent(
         action_maker=action_maker,
@@ -61,20 +61,20 @@ async def test_llm_react_action_maker_builds_messages_and_parses_actions() -> No
     assert result.final_answer == "订单 1001 正在运输中。"
     assert len(llm_client.calls) == 2
     assert llm_client.calls[0]["response_model"] is LLMActionModel
-    assert llm_client.calls[0]["max_tokens"] == 256
+    assert llm_client.calls[0]["max_output_tokens"] == 256
     assert llm_client.calls[0]["temperature"] == 0
-    assert llm_client.calls[0]["thinking"] is False
-    assert llm_client.calls[0]["messages"][0] == {
+    assert llm_client.calls[0]["reasoning"] == {"effort": "none"}
+    assert llm_client.calls[0]["input"][0] == {
         "role": "system",
         "content": "你是订单助手。",
     }
 
-    first_payload = orjson_loads(llm_client.calls[0]["messages"][1]["content"])
+    first_payload = orjson_loads(llm_client.calls[0]["input"][1]["content"])
     assert first_payload["question"] == "订单 1001 到哪了？"
     assert first_payload["available_tools"][0]["name"] == "get_order_status"
     assert first_payload["previous_steps"] == []
 
-    second_payload = orjson_loads(llm_client.calls[1]["messages"][1]["content"])
+    second_payload = orjson_loads(llm_client.calls[1]["input"][1]["content"])
     assert second_payload["previous_steps"] == [
         {
             "index": 0,

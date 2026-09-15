@@ -10,7 +10,7 @@ from internal.agents.order.tools import (
     build_prepare_invoice_request_tool,
     build_search_order_knowledge_tool,
 )
-from internal.infra.llm import OpenAIClient
+from internal.infra.llm import OpenAIResponsesClient
 from internal.services.order import OrderService
 from internal.services.rag import RagService
 from pkg.agents import LLMReactActionMaker, ReActAgent, StructuredTool
@@ -22,7 +22,7 @@ class OrderAgentBuilder:
     def __init__(
         self,
         *,
-        llm_client: OpenAIClient,
+        llm_client: OpenAIResponsesClient,
         order_service: OrderService,
         rag_service: RagService,
         user_id: UUID,
@@ -43,7 +43,7 @@ class OrderAgentBuilder:
                 llm_client=self._llm_client,
                 system_prompt=ORDER_SUPPORT_SYSTEM_PROMPT,
                 session_context=self._session_context,
-                extra_completion_kwargs={"thinking": False},
+                extra_response_kwargs={"reasoning": {"effort": "none"}},
             ),
             tools=self.build_tools(),
             max_steps=self._max_steps,

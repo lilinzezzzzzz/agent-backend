@@ -8,7 +8,7 @@ from internal.agents.payment.tools import (
     build_get_supported_payment_methods_tool,
     build_search_payment_knowledge_tool,
 )
-from internal.infra.llm import OpenAIClient
+from internal.infra.llm import OpenAIResponsesClient
 from internal.services.rag import RagService
 from pkg.agents import LLMReactActionMaker, ReActAgent, StructuredTool
 
@@ -19,7 +19,7 @@ class PaymentAgentBuilder:
     def __init__(
         self,
         *,
-        llm_client: OpenAIClient,
+        llm_client: OpenAIResponsesClient,
         rag_service: RagService,
         user_id: UUID,
         max_steps: int,
@@ -38,7 +38,7 @@ class PaymentAgentBuilder:
                 llm_client=self._llm_client,
                 system_prompt=PAYMENT_SUPPORT_SYSTEM_PROMPT,
                 session_context=self._session_context,
-                extra_completion_kwargs={"thinking": False},
+                extra_response_kwargs={"reasoning": {"effort": "none"}},
             ),
             tools=self.build_tools(),
             max_steps=self._max_steps,

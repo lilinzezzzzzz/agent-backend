@@ -15,7 +15,7 @@ README 只记录当前仓库可直接核对的能力；更细的设计约束和�
 - Celery + Beat
 - anyio
 - Loguru
-- OpenAI-compatible LLM client
+- OpenAI Responses API LLM client（另提供可选 Chat Completions 客户端）
 - 向量后端：`pymilvus`
 
 ## 当前能力
@@ -116,6 +116,7 @@ EMBEDDING_API_KEY=
   [`docs/logging/log_rotation.md`](docs/logging/log_rotation.md#输出目标的选择原则)。
 - 启用 `LOG_WRITE_TO_FILE=true` 的长期运行环境必须同时配置外部日志轮转；部署方案见 `docs/logging/log_rotation.md`。
 - `LLM_*` 用于 Chat / Agent 推理模型；`EMBEDDING_*` 用于向量模型，两者不要共用配置。
+- 当前 Router、Agent、RAG 统一使用 `OpenAIResponsesClient`，请求 `/responses`；配置的服务和模型必须支持 Responses API。客户端用法及输出策略见 [LLM 客户端](pkg/llm/README.md)。
 - `EMBEDDING_PROVIDER` 当前支持 `openai_compatible`，可接 OpenAI-compatible `/embeddings` 协议的 BGE、vLLM、Xinference、TEI 或自建向量服务。
 - `EMBEDDING_DIMENSION` 必须与向量模型输出维度和向量 collection schema 保持一致。
 - `ENDPOINT_GUARD_RULES` 是 JSON 数组字符串，可按 method、path、match type 禁用或拒绝指定 endpoint。

@@ -16,8 +16,8 @@ from pydantic import AliasChoices, BaseModel, Field
 
 from internal.config import detect_app_env
 from pkg.llm import (
-    OpenAIClient,
-    ProviderCapabilities,
+    OpenAIChatCompletionsClient,
+    ChatCompletionsCapabilities,
     StructuredOutputMode,
     StructuredOutputRefusalError,
     ThinkingMode,
@@ -118,8 +118,8 @@ def llm_provider_config() -> LLMProviderConfig:
 
 
 @pytest.fixture(scope="module")
-def llm_client(llm_provider_config: LLMProviderConfig) -> OpenAIClient:
-    return OpenAIClient(
+def llm_client(llm_provider_config: LLMProviderConfig) -> OpenAIChatCompletionsClient:
+    return OpenAIChatCompletionsClient(
         base_url=llm_provider_config.base_url,
         model=llm_provider_config.model,
         api_key=llm_provider_config.api_key,
@@ -129,8 +129,8 @@ def llm_client(llm_provider_config: LLMProviderConfig) -> OpenAIClient:
 
 
 @pytest.fixture
-def mock_client() -> OpenAIClient:
-    return OpenAIClient(
+def mock_client() -> OpenAIChatCompletionsClient:
+    return OpenAIChatCompletionsClient(
         base_url="https://example.test/v1",
         model="test-model",
         api_key="test-api-key",
@@ -139,7 +139,7 @@ def mock_client() -> OpenAIClient:
 
 def test_get_completion_params_applies_deepseek_thinking_control():
     """测试 DeepSeek 思考控制会转换为 extra_body.thinking 和 reasoning_effort"""
-    client = OpenAIClient(
+    client = OpenAIChatCompletionsClient(
         base_url="https://api.deepseek.com",
         model="deepseek-v4-flash",
         api_key="test-api-key",
@@ -163,7 +163,7 @@ def test_get_completion_params_applies_deepseek_thinking_control():
 
 def test_get_completion_params_disables_deepseek_thinking_without_effort():
     """测试关闭思考时不会继续传递 reasoning_effort"""
-    client = OpenAIClient(
+    client = OpenAIChatCompletionsClient(
         base_url="https://api.deepseek.com",
         model="deepseek-v4-flash",
         api_key="test-api-key",
@@ -183,7 +183,7 @@ def test_get_completion_params_disables_deepseek_thinking_without_effort():
 
 def test_get_completion_params_uses_openai_reasoning_effort_without_extra_body():
     """测试 OpenAI 风格模型只使用顶层 reasoning_effort"""
-    client = OpenAIClient(
+    client = OpenAIChatCompletionsClient(
         base_url="https://api.openai.com/v1",
         model="gpt-5-mini",
         api_key="test-api-key",
@@ -203,7 +203,7 @@ def test_get_completion_params_uses_openai_reasoning_effort_without_extra_body()
 
 def test_get_completion_params_accepts_thinking_mode_enum_and_string():
     """测试思考模式既支持枚举，也兼容字符串输入"""
-    client = OpenAIClient(
+    client = OpenAIChatCompletionsClient(
         base_url="https://api.deepseek.com",
         model="deepseek-v4-flash",
         api_key="test-api-key",
@@ -226,7 +226,9 @@ def test_get_completion_params_accepts_thinking_mode_enum_and_string():
 
 
 @pytest.mark.asyncio
-async def test_chat_completion_structured_success(mock_client: OpenAIClient):
+async def test_chat_completion_structured_success(
+    mock_client: OpenAIChatCompletionsClient,
+):
     """测试结构化输出成功解析为指定 Pydantic 模型"""
     parsed = SummaryModel(title="OpenAI", tags=["llm", "structured-output"])
     completion = SimpleNamespace(
@@ -263,7 +265,9 @@ async def test_chat_completion_structured_success(mock_client: OpenAIClient):
 
 
 @pytest.mark.asyncio
-async def test_chat_completion_structured_refusal(mock_client: OpenAIClient):
+async def test_chat_completion_structured_refusal(
+    mock_client: OpenAIChatCompletionsClient,
+):
     """测试结构化输出 refusal 会返回可判断的错误信息"""
     completion = SimpleNamespace(
         id="chatcmpl_mock_refusal",
@@ -286,7 +290,9 @@ async def test_chat_completion_structured_refusal(mock_client: OpenAIClient):
 
 
 @pytest.mark.asyncio
-async def test_chat_completion_structured_error_handling(mock_client: OpenAIClient):
+async def test_chat_completion_structured_error_handling(
+    mock_client: OpenAIChatCompletionsClient,
+):
     """测试结构化输出方法复用消息校验错误处理"""
     parse_mock = AsyncMock()
     mock_client.client.chat.completions.parse = parse_mock
@@ -303,11 +309,11 @@ async def test_chat_completion_structured_error_handling(mock_client: OpenAIClie
 @pytest.mark.asyncio
 async def test_chat_completion_structured_falls_back_to_json_object():
     """测试 Structured Outputs 不可用时退回 JSON mode 并用 Pydantic 校验"""
-    client = OpenAIClient(
+    client = OpenAIChatCompletionsClient(
         base_url="https://example.test/v1",
         model="test-model",
         api_key="test-api-key",
-        provider_capabilities=ProviderCapabilities(
+        provider_capabilities=ChatCompletionsCapabilities(
             name="test",
             structured_output_mode=StructuredOutputMode.NATIVE_WITH_JSON_OBJECT_FALLBACK,
         ),
@@ -349,7 +355,9 @@ async def test_chat_completion_structured_falls_back_to_json_object():
 
 
 @pytest.mark.asyncio
-async def test_chat_completion_stream_skips_empty_choices(mock_client: OpenAIClient):
+async def test_chat_completion_stream_skips_empty_choices(
+    mock_client: OpenAIChatCompletionsClient,
+):
     """测试流式响应会跳过兼容服务返回的空 choices chunk"""
     empty_chunk = ChatCompletionChunk.model_construct(
         id="chunk_empty",
@@ -387,7 +395,9 @@ async def test_chat_completion_stream_skips_empty_choices(mock_client: OpenAICli
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_openai_compatible_chat_completion(llm_client: OpenAIClient):
+async def test_openai_compatible_chat_completion(
+    llm_client: OpenAIChatCompletionsClient,
+):
     """使用根目录 .secrets 和对应 .env 调用默认 OpenAI-compatible provider 非流式接口"""
     response = await llm_client.chat_completion(
         messages=[
@@ -408,7 +418,7 @@ async def test_openai_compatible_chat_completion(llm_client: OpenAIClient):
 @pytest.mark.asyncio
 async def test_deepseek_chat_completion_with_thinking_control(
     llm_provider_config: LLMProviderConfig,
-    llm_client: OpenAIClient,
+    llm_client: OpenAIChatCompletionsClient,
 ):
     """使用 DeepSeek 官方思考控制参数关闭思考模式"""
     if llm_provider_config.provider != "deepseek":
@@ -430,7 +440,9 @@ async def test_deepseek_chat_completion_with_thinking_control(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_openai_compatible_chat_completion_stream(llm_client: OpenAIClient):
+async def test_openai_compatible_chat_completion_stream(
+    llm_client: OpenAIChatCompletionsClient,
+):
     """使用根目录 .secrets 和对应 .env 调用默认 OpenAI-compatible provider 流式接口"""
     chunks: list[str] = []
     async for chunk in llm_client.chat_completion_stream(
@@ -451,7 +463,9 @@ async def test_openai_compatible_chat_completion_stream(llm_client: OpenAIClient
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_openai_compatible_chat_completion_structured(llm_client: OpenAIClient):
+async def test_openai_compatible_chat_completion_structured(
+    llm_client: OpenAIChatCompletionsClient,
+):
     """优先使用 Structured Outputs 调用默认 OpenAI-compatible provider 并解析为 Pydantic 模型"""
     response = await llm_client.chat_completion_structured(
         messages=[

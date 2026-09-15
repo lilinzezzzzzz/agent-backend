@@ -3,7 +3,7 @@ from typing import Any
 
 import pytest
 
-from pkg.llm import OpenAIClient
+from pkg.llm import OpenAIChatCompletionsClient
 
 # --- 测试配置 ---
 BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
@@ -15,11 +15,11 @@ pytestmark = pytest.mark.integration
 
 # 使用 pytest.fixture 来创建 client 实例，供所有测试用例使用
 @pytest.fixture(scope="module")
-def client() -> OpenAIClient:
-    """提供一个 OpenAIClient 实例"""
+def client() -> OpenAIChatCompletionsClient:
+    """提供一个 OpenAIChatCompletionsClient 实例"""
     if not API_KEY:
         pytest.skip("未配置 ALIYUN_API_KEY")
-    return OpenAIClient(base_url=BASE_URL, model=MODEL, api_key=API_KEY)
+    return OpenAIChatCompletionsClient(base_url=BASE_URL, model=MODEL, api_key=API_KEY)
 
 
 # 通用的用户消息列表
@@ -29,7 +29,7 @@ MESSAGES: list[dict[str, Any]] = [
 
 
 @pytest.mark.asyncio
-async def test_chat_completion_success(client: OpenAIClient):
+async def test_chat_completion_success(client: OpenAIChatCompletionsClient):
     """测试非流式 chat_completion 方法的成功调用"""
     print(f"\n--- Testing chat_completion with model: {client.model} ---")
 
@@ -47,7 +47,7 @@ async def test_chat_completion_success(client: OpenAIClient):
 
 
 @pytest.mark.asyncio
-async def test_chat_completion_stream_success(client: OpenAIClient):
+async def test_chat_completion_stream_success(client: OpenAIChatCompletionsClient):
     """测试流式 chat_completion_stream 方法的成功调用"""
     print(f"\n--- Testing chat_completion_stream with model: {client.model} ---")
 
@@ -77,7 +77,7 @@ async def test_chat_completion_stream_success(client: OpenAIClient):
 
 
 @pytest.mark.asyncio
-async def test_chat_completion_error_handling(client: OpenAIClient):
+async def test_chat_completion_error_handling(client: OpenAIChatCompletionsClient):
     """测试 chat_completion 方法的错误处理 (例如：无效的消息结构)"""
     print("\n--- Testing chat_completion Error Handling ---")
 
@@ -89,7 +89,7 @@ async def test_chat_completion_error_handling(client: OpenAIClient):
 
 
 @pytest.mark.asyncio
-async def test_chat_completion_with_empty_messages(client: OpenAIClient):
+async def test_chat_completion_with_empty_messages(client: OpenAIChatCompletionsClient):
     """测试空消息列表"""
     print("\n--- Testing chat_completion with Empty Messages ---")
 

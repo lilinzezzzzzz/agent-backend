@@ -1,6 +1,6 @@
-from internal.infra.llm.client import OpenAIClient, new_default_llm_client
+from internal.infra.llm.client import OpenAIResponsesClient, new_default_llm_client
 
 __all__ = [
-    "OpenAIClient",
+    "OpenAIResponsesClient",
     "new_default_llm_client",
 ]

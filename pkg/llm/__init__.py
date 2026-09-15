@@ -1,17 +1,27 @@
 from pkg.llm.errors import (
     OpenAIClientError,
+    ResponseFailedError,
+    ResponseIncompleteError,
     StructuredOutputParseError,
     StructuredOutputRefusalError,
 )
-from pkg.llm.openai_compatible import OpenAIClient
-from pkg.llm.providers import PROVIDER_CAPABILITIES, ProviderCapabilities
+from pkg.llm.openai_client import (
+    OpenAIChatCompletionsClient,
+    OpenAIResponsesClient,
+    OpenAIEmbeddingsClient,
+)
+from pkg.llm.providers import CHAT_COMPLETIONS_CAPABILITIES, ChatCompletionsCapabilities
 from pkg.llm.types import StructuredOutputMode, ThinkingMode, ThinkingParamStyle
 
 __all__ = [
-    "PROVIDER_CAPABILITIES",
-    "OpenAIClient",
+    "CHAT_COMPLETIONS_CAPABILITIES",
+    "OpenAIChatCompletionsClient",
+    "OpenAIResponsesClient",
+    "OpenAIEmbeddingsClient",
     "OpenAIClientError",
-    "ProviderCapabilities",
+    "ResponseFailedError",
+    "ResponseIncompleteError",
+    "ChatCompletionsCapabilities",
     "StructuredOutputMode",
     "StructuredOutputParseError",
     "StructuredOutputRefusalError",

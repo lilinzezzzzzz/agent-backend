@@ -34,6 +34,7 @@ _SSE_HEADERS = {
     "X-Accel-Buffering": "no",
 }
 
+
 @router.post(
     "/chat",
     response_model=BaseResponse[AgentChatRespSchema],

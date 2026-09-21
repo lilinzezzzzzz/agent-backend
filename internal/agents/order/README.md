@@ -37,6 +37,15 @@ calculate_refund_amount     # 使用整数分精确计算退款金额
 prepare_invoice_request     # 只生成服务端待确认动作，不执行真实开票提交
 ```
 
+每个工具必须通过 `StructuredTool.replay_policy` 显式声明恢复策略，未声明的一律按
+`non_replayable` 处理：
+
+| 工具 | replay_policy | 说明 |
+| --- | --- | --- |
+| `get_order_status`、`get_return_policy`、`search_order_knowledge` | `replay_safe` | 只读查询或纯计算，恢复时允许重新调用 |
+| `calculate_refund_amount` | `replay_safe` | 纯计算，无外部副作用 |
+| `prepare_invoice_request` | `non_replayable` | 写入随机 Redis pending token；崩溃在写入与落库之间时无法确认下游状态 |
+
 工具边界要求：
 
 - 订单事实、业务规则、知识库内容、精确金额计算和开票申请都必须先调用工具。

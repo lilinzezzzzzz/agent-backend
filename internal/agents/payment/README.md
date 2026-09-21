@@ -34,6 +34,9 @@ search_payment_knowledge       # 检索付款失败、扣款异常、账单和�
 calculate_payment_total        # 使用整数分精确计算应付金额
 ```
 
+以上工具都是只读或纯计算，全部显式声明 `replay_policy=ToolReplayPolicy.REPLAY_SAFE`；
+支付 Agent 当前不引入任何有外部副作用的工具，因此不存在 `non_replayable` 声明。
+
 工具边界要求：
 
 - 支付规则、渠道能力、知识库内容和精确金额计算都必须先调用工具。

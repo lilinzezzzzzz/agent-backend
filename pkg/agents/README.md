@@ -152,12 +152,17 @@ submit_business_action
 - `LLMActionModel`：LLM structured output 的动作 schema
 - `AgentToolCall`：请求调用一个结构化工具
 - `AgentFinal`：返回最终答案并结束运行
-- `StructuredTool`：声明工具名、描述、参数 schema 和 handler
+- `StructuredTool`：声明工具名、描述、参数 schema、handler 和 `replay_policy`
 - `AgentRunState` / `AgentStepRecord`：记录动作、action_result、错误和耗时
 - `run()`：一次性执行完整 ReAct 循环并返回 `AgentRunResult`
 - `run_events()`：以异步事件流返回 `run_started`、`step_completed` 和
   `run_completed`，适合上层 API 包装为 SSE 或消息推送
 - `max_steps`：限制最大动作步数，避免无限循环
+- `AgentCheckpoint` / `encode_checkpoint()` / `decode_checkpoint()`：版本化执行现场
+  编解码；拒绝不可序列化状态、未知版本、步骤不连续或阶段自相矛盾的载荷
+- `ToolReplayPolicy`：显式声明工具在崩溃/打断后的重放策略，未声明按 `non_replayable` 处理
+- `AgentRunRuntime`：受管理执行的持久化与权限检查协议；传入 `runtime` 时执行器在每个安全点
+  提交 checkpoint，`resume_events()` 只接受已校验的 `AgentCheckpoint`
 
 当前实现只负责通用执行循环，不直接依赖具体 LLM Provider、数据库、消息队列或业务
 Service。具体业务 Agent 的 prompt、builder、tools、路由和副作用确认流程应放在

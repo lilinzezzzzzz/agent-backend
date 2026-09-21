@@ -31,6 +31,21 @@ class GlobalErrors:
         40901,
         {"zh": "任务状态不允许执行该操作", "en": "Task State Conflict"},
     )
+    AgentRunStateConflict = AppError(
+        40902,
+        {"zh": "Agent 运行状态不允许执行该操作", "en": "Agent Run State Conflict"},
+    )
+    AgentDefinitionIncompatible = AppError(
+        40903,
+        {
+            "zh": "Agent 定义版本不兼容，无法恢复",
+            "en": "Agent Definition Incompatible",
+        },
+    )
+    AgentResumeUnsafe = AppError(
+        40904,
+        {"zh": "执行现场无法安全恢复", "en": "Agent Resume Unsafe"},
+    )
     StreamTimeout = AppError(40800, {"zh": "流超时", "en": "Stream Timeout"})
 
     # 服务端错误 (50000 - 59999)

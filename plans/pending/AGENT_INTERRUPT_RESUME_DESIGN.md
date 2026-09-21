@@ -1,6 +1,8 @@
 # Agent 打断与原 run 恢复技术设计
 
-状态：待实施。本轮仅落地技术设计，不表示接口、存储或测试已经实现。
+状态：已实施，待补充集成验证。核心执行协议、存储、受管理接口和配置均已落地，并有可运行测试；
+PostgreSQL 并发 / 多实例、真实客户端断连与部署 shutdown 预算尚未在对应环境验证，因此计划仍留在
+`pending/`。本文档前面的章节是设计基线，实施进度、证据与未验证条件见第 9、10 节。
 
 ## 1. 目标与范围
 
@@ -248,16 +250,65 @@ checkpoint 可能含问题、工具结果与短期 token，按业务数据限制
 
 ## 9. 实施顺序与验收
 
-以下全部为待办，测试名称是拟新增用例，不表示已经存在或通过。
-
-- [ ] 定义运行状态、checkpoint codec、工具恢复策略和 runtime 协议；旧的无 runtime runner 测试继续通过。
-- [ ] 为 ReAct 增加安全点与 resume；用内存 runtime 验证步骤 0 不重做、pending action 不重生成、总步数不重置。
-- [ ] 扩展现有 Model/DAO/存储后端及 PostgreSQL 基线 DDL；实现原子 step/checkpoint/terminal 写入。
-- [ ] 实现 lease、fence 和 request_key；并发 resume 仅一个获执行权，旧 token 不能提交结果。
-- [ ] 实现共享 execution Service 和三种 entrypoint，冻结路由/上下文；同时覆盖订单与支付，不复制循环。
-- [ ] 新增 create/get/interrupt/resume/resume-stream 接口、schema 与 SSE 适配，保持旧接口 contract。
+- [x] 定义运行状态、checkpoint codec、工具恢复策略和 runtime 协议；旧的无 runtime runner 测试继续通过。
+  - `pkg/agents/state.py`（阶段、工具恢复策略、版本化 JSON codec、稳定工具调用标识）、
+    `pkg/agents/runtime.py`（`AgentRunRuntime` 协议、控制状态与提交结果）、
+    `pkg/agents/react.py`（`StructuredTool.replay_policy`、安全点、`resume_events()`）；
+  - `tests/agents/test_agent_state.py`；`tests/agents/test_react.py` 与 `tests/agents/test_llm_action.py` 未修改且继续通过。
+- [x] 为 ReAct 增加安全点与 resume；用内存 runtime 验证步骤 0 不重做、pending action 不重生成、总步数不重置。
+  - `tests/agents/test_react_runtime.py`（内存 runtime：步骤 0 不重做、`before_tool` 现场不重新调用模型、
+    `max_steps` 不重置、`final_ready` 直接完成终态、lease 失效停止、非重放工具拒绝恢复）。
+- [x] 扩展现有 Model/DAO/存储后端及 PostgreSQL 基线 DDL；实现原子 step/checkpoint/terminal 写入。
+  - `internal/models/agent_conversation.py`、`internal/dao/agent_conversation.py`、
+    `internal/services/agents/conversation.py`、`ddl/postgresql/init.sql`；
+  - `tests/services/test_agent_managed_run.py`（步骤与现场同事务提交、终态唯一 assistant 消息、
+    `complete_run` 复用已提交步骤）、`tests/orm/test_postgresql_ddl.py`。
+- [x] 实现 lease、fence 和 request_key；并发 resume 仅一个获执行权，旧 token 不能提交结果。
+  - 逻辑已在 SQLite 上验证：同 key 复用原 attempt、不同 key 冲突、旧 token / 旧 revision 提交被拒绝、
+    过期 lease 由下一次 claim 原子接管；**PostgreSQL 多实例并发未验证**（见第 10 节）。
+- [x] 实现共享 execution Service 和三种 entrypoint，冻结路由/上下文；同时覆盖订单与支付，不复制循环。
+  - `internal/services/agents/execution.py`、`internal/agents/registry.py`；
+  - `tests/services/test_agent_execution.py`（order / payment / chat 三种入口、冻结会话上下文、
+    unsupported 降级、重复 resume 幂等）。
+- [x] 新增 create/get/interrupt/resume/resume-stream 接口、schema 与 SSE 适配，保持旧接口 contract。
+  - `internal/controllers/api/agent.py`、`internal/schemas/agent.py`、`internal/services/agents/stream.py`；
+  - `tests/api/test_agent_runs.py`；`tests/api/test_agent.py` 未修改且继续通过。
 - [ ] 完成取消、慢客户端、工具超时、shutdown 和异常恢复测试；确认不可安全重放时拒绝恢复。
-- [ ] 更新配置与业务使用文档，记录真实验证命令及结果后再将计划迁往 completed。
+  - 已覆盖：不可安全重放拒绝恢复（`recovery_required` / `AgentResumeUnsafe`）、取消与慢消费转换成
+    持久化打断意图、确认 token 过期拒绝恢复、执行请求取消后的收尾路径；外层取消时当前工具在预算内
+    有界完成并提交步骤，或预算到期被显式取消并落库 `recovery_required`；模型调用前打断与模型异常
+    分别落库 `interrupted` / `failed`；流式 claim 失败输出稳定 SSE `error` 事件。
+  - 未覆盖：真实客户端断连（依赖 ASGI 层取消或 finalize 响应生成器）、部署 shutdown 预算、
+    工具实际超时与 SDK 取消行为。测试环境的 SQLite 单连接无法模拟并发取消下的提交，这一项必须
+    在 PostgreSQL + 真实网关环境补测。
+- [x] 更新配置与业务使用文档，记录真实验证命令及结果后再将计划迁往 completed。
+  - `docs/agent/managed_run_lifecycle.md`、`docs/README.md`、`README.md`、`pkg/agents/README.md`、
+    `internal/agents/order/README.md`、`internal/agents/payment/README.md`、`configs/.env.*`。
+  - 迁移到 `completed/` 仍取决于上一条的集成验证。
+
+### 9.1 本轮验证命令与结果
+
+```bash
+# 纯执行器与 codec 测试
+.venv/bin/python -m pytest tests/agents -q
+# -> 37 passed
+
+# 存储、Service 与 API 测试
+.venv/bin/python -m pytest tests/services/test_agent_managed_run.py \
+    tests/services/test_agent_execution.py tests/api/test_agent_runs.py -q
+# -> 24 + 21 + 13 passed
+
+# 全量非集成回归（含旧 Agent 接口与确认流程）
+.venv/bin/python -m pytest tests -q -m "not integration"
+# -> 704 passed, 21 deselected
+
+# 静态检查
+.venv/bin/python -m ruff check internal pkg tests
+# -> 仅剩既有 pkg/vectors/backends/milvus/backend.py 未使用导入，与本次改动无关
+```
+
+上述结果来自本地 `APP_ENV=local` 的 SQLite / fake LLM 环境；没有运行真实模型、PostgreSQL、
+Redis、Milvus 或真实客户端断连实验。
 
 关键验证矩阵：
 
@@ -290,5 +341,68 @@ checkpoint 可能含问题、工具结果与短期 token，按业务数据限制
 保留 checkpoint/attempt 数据。旧版本服务不应尝试恢复新 run；恢复能力需由支持对应 definition/schema version 的版本提供。
 不通过删除表或改回状态字段完成回滚。
 
-本轮仅进行了代码现状核对及文档检查，没有运行模型、数据库、断连或多实例实验。
-工具实际超时、部署 shutdown 预算、数据库性能以及 SDK 取消行为均需实施阶段按上述矩阵验证。
+本轮已落地实现并运行了纯执行器、SQLite 存储、Service 与 API 测试，但没有运行真实模型、
+PostgreSQL、Redis、真实客户端断连或多实例实验。工具实际超时、部署 shutdown 预算、数据库性能
+以及 SDK 取消行为仍需按第 9 节矩阵验证。
+
+实施阶段补充的观测能力：
+
+- 暂停时记录一行 `managed run paused by interrupt: run_id/phase/source/wait_ms`，用于统计
+  "打断受理 → 实际暂停"的耗时分布。原因只记录归类标签，不落客户端自由文本。
+  该日志是判断是否需要引入进程内/分布式加速通知的依据，且写入失败不影响已提交的暂停。
+  回归用例：`test_interrupt_pause_logs_wait_time_without_client_text`、
+  `test_interrupt_pause_logs_system_reason_verbatim`、`test_normal_commit_does_not_log_interrupt_pause`。
+
+实施阶段修正的问题：
+
+- 安全点的打断状态检查原先经 DAO 的 `read_session_provider` 读取，在生产配置 `DB_READ_HOST`
+  时会读只读副本，复制延迟会让打断晚一个周期生效。已让 `read_managed_control_state`
+  显式复用主库连接，并让 run 与 attempt 两次读取落在同一快照上；`AgentRunDao.get_by_run_id_for_user`
+  与 `AgentRunAttemptDao.latest_attempt` 增加可选 `session` 参数。
+  回归用例 `tests/services/test_agent_managed_run.py::test_control_state_reads_primary_not_read_replica`
+  与 `::test_control_state_reports_lease_loss_from_primary` 用主库/副本分离的两个引擎锁定该行为，
+  已确认在恢复旧实现时失败。
+- 查询路径原先直接经 `read_session_provider` 读取，在配置读写分离时会返回副本上的旧状态：新建 run
+  可能尚未复制而返回 NotFound，已有 run 可能返回 `status=running` 而 `result.status=completed`。
+  已把过期现场收敛与状态读取合并进 `load_managed_run` 的单个主库行锁事务，`GET` 与
+  `create` / `resume` 的写后响应因此都读主库。回归用例
+  `::test_primary_load_works_before_any_replication`、`::test_get_reconciles_expired_executor_and_fences_old_token`。
+- 通用异常处理、续租失败分支和 attempt 收尾分支原先直接调用 `logger.warning`。日志自身不可用时
+  （例如未初始化）会抛出次生异常，让「异常 → run 状态」映射被跳过，调用方拿到 `ExceptionGroup`
+  而不是稳定错误码，run 也会停在 `interrupted` 而不是 `failed`。这三处改为 `_log_warning()`：
+  观测失败只丢弃该条记录，不改变已定的执行结果。回归用例
+  `tests/services/test_agent_execution.py::test_provider_failure_persists_terminal_status`。
+- 请求取消原先只让消费者等待与最终收尾进入 shield：外层 `CancelScope` 会直接取消正在执行的工具，
+  现场停在 `tool_in_flight` 且未提交步骤；收尾预算也没有约束生产者任务。现在生产者在自己的
+  `CancelScope(shield=True)` 内执行，取消先转成打断意图；收尾预算的大部分用于等待当前工具有界结束，
+  到期后显式取消执行任务，并按阶段落库 `recovery_required`（工具在飞行中）或 `interrupted`。
+  回归用例 `::test_outer_scope_cancellation_has_bounded_safe_tool_cleanup` 覆盖“工具在预算内完成”
+  与“预算到期被取消”两条路径。
+- 部分停止路径原先只释放 lease 而不转换 run 状态：模型调用前收到打断会停在 `interrupt_requested`，
+  模型异常会停在 `running`，且 `resumable=false`。现在安全点检测到打断时在同一提交内转为
+  `interrupted`；attempt 收尾在持有 lease 时用同一事务写入 `interrupted` / `failed` /
+  `recovery_required` 并释放 lease。回归用例 `::test_interrupt_before_model_persists_paused_state`、
+  `::test_provider_failure_persists_terminal_status`。
+- 暂停现场原先一律回退到旧 checkpoint：模型已生成、尚未执行的 tool action 会在打断时丢失，恢复需要
+  重新推理；统一入口的路由结果同样会丢失。现在只有 `tool_in_flight` 提交才回退到上一个安全现场
+  （工具尚未开始），其余边界把新现场（含 `pending_action` / route / agent_name）作为暂停现场。
+  回归用例 `::test_interrupt_during_model_preserves_generated_action`、
+  `::test_interrupt_during_routing_preserves_route`。
+- 流式恢复的 claim 原先在异步生成器内执行且不转换异常：状态冲突时先发出 HTTP 200，再以
+  `ExceptionGroup` 断开流，没有任何 `error` 事件。现在 `resume_run_stream` 捕获 `AppException`
+  并输出稳定错误码的 SSE `error` 事件。回归用例
+  `tests/api/test_agent_runs.py::test_stream_claim_failure_is_a_structured_sse_error`。
+- 创建幂等原先只做“先查后插”：并发同键请求都会查不到再插入，唯一冲突以 `IntegrityError` 冒泡。
+  现在识别创建唯一键冲突后从主库读取获胜记录并比较摘要：同输入返回已有 run，不同输入返回幂等冲突，
+  失败方事务完全回滚。回归用例
+  `tests/services/test_agent_managed_run.py::test_create_unique_race_returns_winner_or_payload_conflict`、
+  `::test_only_create_unique_constraint_is_recoverable`。
+
+实施阶段确认的环境限制：
+
+- 测试用 SQLite（`sqlite+aiosqlite:///:memory:`）共用单个连接，无法在多个 task 并发提交时
+  复现 PostgreSQL 的行锁与 fencing 语义；并发 claim / 旧 token 提交必须用隔离 PostgreSQL 测试库验证。
+- 受管理 SSE 路径的“断连转打断”依赖 ASGI 层取消响应生成器：当取消落在生成器内部 await 上时收尾
+  确定执行；仅关闭生成器（`aclose()`）时 CPython 的 async generator finalization 是异步调度的，
+  收尾可能延后。收尾失败时 run 保持 `running`，由 lease 到期后的下一次查询或 claim 按设计 §5.3 接管，
+  不会破坏已提交的 checkpoint。

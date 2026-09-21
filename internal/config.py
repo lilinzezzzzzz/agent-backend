@@ -149,6 +149,14 @@ class Settings(BaseSettings):
     AGENT_ACTION_CONFIRMATION_SECONDS: PositiveInt
     AGENT_ACTION_IDEMPOTENCY_SECONDS: PositiveInt
 
+    # --- Agent 受管理运行（打断 / 恢复） ---
+    AGENT_LEASE_SECONDS: PositiveInt
+    AGENT_CONTROL_POLL_SECONDS: PositiveInt
+    AGENT_CANCEL_GRACE_SECONDS: PositiveInt
+    AGENT_STREAM_BUFFER_SIZE: PositiveInt
+    AGENT_CHECKPOINT_MAX_BYTES: PositiveInt
+    AGENT_LLM_TIMEOUT_SECONDS: PositiveInt
+
     # --- RAG ---
     RAG_ALLOWED_DOMAINS: list[str]
     RAG_ALLOWED_KB_IDS: list[int]
@@ -286,6 +294,24 @@ class Settings(BaseSettings):
                 "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT is required when "
                 "OTEL_TRACING_ENABLED=true"
             )
+        return self
+
+    @model_validator(mode="after")
+    def validate_agent_managed_run(self) -> "Settings":
+        """校验受管理 Agent 运行的心跳、取消收尾与 checkpoint 上限。"""
+        if self.AGENT_CONTROL_POLL_SECONDS >= self.AGENT_LEASE_SECONDS:
+            raise ValueError(
+                "AGENT_CONTROL_POLL_SECONDS must be less than AGENT_LEASE_SECONDS"
+            )
+        if self.AGENT_CANCEL_GRACE_SECONDS <= self.AGENT_LLM_TIMEOUT_SECONDS:
+            raise ValueError(
+                "AGENT_CANCEL_GRACE_SECONDS must cover AGENT_LLM_TIMEOUT_SECONDS "
+                "plus the checkpoint commit budget"
+            )
+        if self.AGENT_CANCEL_GRACE_SECONDS > 300:
+            raise ValueError("AGENT_CANCEL_GRACE_SECONDS cannot exceed 300")
+        if self.AGENT_CHECKPOINT_MAX_BYTES > 16 * 1024 * 1024:
+            raise ValueError("AGENT_CHECKPOINT_MAX_BYTES cannot exceed 16 MiB")
         return self
 
     @model_validator(mode="after")

@@ -24,12 +24,14 @@ class PaymentAgentBuilder:
         user_id: UUID,
         max_steps: int,
         session_context: Mapping[str, Any] | None = None,
+        definition_version: str = "v1",
     ):
         self._llm_client = llm_client
         self._rag_service = rag_service
         self._user_id = user_id
         self._max_steps = max_steps
         self._session_context = dict(session_context or {})
+        self._definition_version = definition_version
 
     def build(self) -> ReActAgent:
         """创建可运行的支付支持 ReActAgent。"""
@@ -43,6 +45,7 @@ class PaymentAgentBuilder:
             tools=self.build_tools(),
             max_steps=self._max_steps,
             capture_tool_errors=False,
+            definition_version=self._definition_version,
         )
 
     def build_tools(self) -> list[StructuredTool]:

@@ -33,5 +33,5 @@ def new_default_llm_client() -> OpenAIResponsesClient:
         model=model,
         api_key=api_key,
         provider=provider,
-        timeout=60,
+        timeout=settings.AGENT_LLM_TIMEOUT_SECONDS,
     )

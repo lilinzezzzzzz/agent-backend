@@ -8,6 +8,8 @@ from internal.models.agent_audit import AgentAudit
 from internal.models.agent_conversation import (
     AgentMessage,
     AgentRun,
+    AgentRunAttempt,
+    AgentRunCheckpoint,
     AgentRunStep,
     AgentSession,
 )
@@ -24,6 +26,8 @@ MODEL_TABLES = tuple(
             AgentAudit.__table__,
             AgentMessage.__table__,
             AgentRun.__table__,
+            AgentRunAttempt.__table__,
+            AgentRunCheckpoint.__table__,
             AgentRunStep.__table__,
             AgentSession.__table__,
             CeleryTaskRecord.__table__,

@@ -65,41 +65,96 @@ CREATE INDEX idx_agent_message_user_created
     ON agent_message (user_id, created_at, id);
 
 CREATE TABLE agent_run (
-    run_id VARCHAR(64) NOT NULL,
-    session_id VARCHAR(64) NOT NULL,
-    user_id UUID NOT NULL,
-    entrypoint VARCHAR(32) NOT NULL,
-    agent_name VARCHAR(64) NOT NULL,
-    route VARCHAR(32),
-    status VARCHAR(32) NOT NULL,
-    max_steps INTEGER NOT NULL,
-    trace_id VARCHAR(128),
-    started_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
-    ended_at TIMESTAMP WITHOUT TIME ZONE,
-    elapsed_ms FLOAT NOT NULL,
-    error_code VARCHAR(64),
-    error_message TEXT,
-    metadata JSONB,
-    id UUID NOT NULL,
-    creator_id UUID,
-    creator_type VARCHAR(32) NOT NULL,
-    updater_id UUID,
-    updater_type VARCHAR(32),
-    updated_at TIMESTAMP WITHOUT TIME ZONE,
-    created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
-    deleted_at TIMESTAMP WITHOUT TIME ZONE,
-    PRIMARY KEY (id),
-    CONSTRAINT uq_agent_run_run_id UNIQUE (run_id)
+	run_id VARCHAR(64) NOT NULL,
+	session_id VARCHAR(64) NOT NULL,
+	user_id UUID NOT NULL,
+	entrypoint VARCHAR(32) NOT NULL,
+	agent_name VARCHAR(64) NOT NULL,
+	route VARCHAR(32),
+	status VARCHAR(32) NOT NULL,
+	max_steps INTEGER NOT NULL,
+	trace_id VARCHAR(128),
+	started_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+	ended_at TIMESTAMP WITHOUT TIME ZONE,
+	elapsed_ms FLOAT NOT NULL,
+	error_code VARCHAR(64),
+	error_message TEXT,
+	execution_version VARCHAR(32),
+	checkpoint_revision INTEGER,
+	lease_token VARCHAR(64),
+	lease_expires_at TIMESTAMP WITHOUT TIME ZONE,
+	interrupt_requested_at TIMESTAMP WITHOUT TIME ZONE,
+	interrupted_at TIMESTAMP WITHOUT TIME ZONE,
+	interrupt_reason VARCHAR(200),
+	create_request_key VARCHAR(128),
+	create_request_digest VARCHAR(64),
+	metadata JSONB,
+	id UUID NOT NULL,
+	creator_id UUID,
+	creator_type VARCHAR(32) NOT NULL,
+	updater_id UUID,
+	updater_type VARCHAR(32),
+	updated_at TIMESTAMP WITHOUT TIME ZONE,
+	created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+	deleted_at TIMESTAMP WITHOUT TIME ZONE,
+	PRIMARY KEY (id),
+	CONSTRAINT uq_agent_run_run_id UNIQUE (run_id),
+	CONSTRAINT uq_agent_run_user_create_key UNIQUE (user_id, create_request_key)
 );
 
-CREATE INDEX idx_agent_run_agent_status
-    ON agent_run (agent_name, status);
-CREATE INDEX idx_agent_run_session_created
-    ON agent_run (session_id, created_at, id);
-CREATE INDEX idx_agent_run_trace_id
-    ON agent_run (trace_id);
-CREATE INDEX idx_agent_run_user_created
-    ON agent_run (user_id, created_at, id);
+CREATE INDEX idx_agent_run_agent_status ON agent_run (agent_name, status);
+CREATE INDEX idx_agent_run_session_created ON agent_run (session_id, created_at, id);
+CREATE INDEX idx_agent_run_trace_id ON agent_run (trace_id);
+CREATE INDEX idx_agent_run_user_created ON agent_run (user_id, created_at, id);
+
+CREATE TABLE agent_run_attempt (
+	run_id VARCHAR(64) NOT NULL,
+	user_id UUID NOT NULL,
+	attempt_no INTEGER NOT NULL,
+	request_key VARCHAR(128) NOT NULL,
+	request_digest VARCHAR(64) NOT NULL,
+	status VARCHAR(32) NOT NULL,
+	trace_id VARCHAR(128),
+	started_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+	ended_at TIMESTAMP WITHOUT TIME ZONE,
+	elapsed_ms FLOAT NOT NULL,
+	id UUID NOT NULL,
+	creator_id UUID,
+	creator_type VARCHAR(32) NOT NULL,
+	updater_id UUID,
+	updater_type VARCHAR(32),
+	updated_at TIMESTAMP WITHOUT TIME ZONE,
+	created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+	deleted_at TIMESTAMP WITHOUT TIME ZONE,
+	PRIMARY KEY (id),
+	CONSTRAINT uq_agent_run_attempt_no UNIQUE (run_id, attempt_no),
+	CONSTRAINT uq_agent_run_attempt_request_key UNIQUE (run_id, request_key)
+);
+
+
+
+CREATE TABLE agent_run_checkpoint (
+	run_id VARCHAR(64) NOT NULL,
+	session_id VARCHAR(64) NOT NULL,
+	user_id UUID NOT NULL,
+	schema_version INTEGER NOT NULL,
+	revision INTEGER NOT NULL,
+	phase VARCHAR(32) NOT NULL,
+	next_step_index INTEGER NOT NULL,
+	payload JSONB NOT NULL,
+	id UUID NOT NULL,
+	creator_id UUID,
+	creator_type VARCHAR(32) NOT NULL,
+	updater_id UUID,
+	updater_type VARCHAR(32),
+	updated_at TIMESTAMP WITHOUT TIME ZONE,
+	created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+	deleted_at TIMESTAMP WITHOUT TIME ZONE,
+	PRIMARY KEY (id),
+	CONSTRAINT uq_agent_run_checkpoint_run_id UNIQUE (run_id)
+);
+
+CREATE INDEX idx_agent_run_checkpoint_user_created ON agent_run_checkpoint (user_id, created_at, id);
 
 CREATE TABLE agent_run_step (
     run_id VARCHAR(64) NOT NULL,

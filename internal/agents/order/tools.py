@@ -6,7 +6,7 @@ from uuid import UUID
 
 from internal.services.order import OrderService
 from internal.services.rag import RagService
-from pkg.agents import StructuredTool
+from pkg.agents import StructuredTool, ToolReplayPolicy
 from pkg.vectors.contracts import RetrievalMode
 
 
@@ -34,6 +34,7 @@ def build_get_order_status_tool(
             "required": ["order_id"],
         },
         handler=get_order_status,
+        replay_policy=ToolReplayPolicy.REPLAY_SAFE,
     )
 
 
@@ -52,6 +53,7 @@ def build_get_return_policy_tool() -> StructuredTool:
             },
         },
         handler=_get_return_policy,
+        replay_policy=ToolReplayPolicy.REPLAY_SAFE,
     )
 
 
@@ -92,6 +94,7 @@ def build_search_order_knowledge_tool(
             "required": ["query"],
         },
         handler=search_order_knowledge,
+        replay_policy=ToolReplayPolicy.REPLAY_SAFE,
     )
 
 
@@ -127,6 +130,7 @@ def build_calculate_refund_amount_tool() -> StructuredTool:
             "required": ["unit_price_cents", "quantity"],
         },
         handler=_calculate_refund_amount,
+        replay_policy=ToolReplayPolicy.REPLAY_SAFE,
     )
 
 
@@ -183,6 +187,9 @@ def build_prepare_invoice_request_tool(
             "required": ["order_id"],
         },
         handler=prepare_invoice_request,
+        # 该工具会写入随机 Redis pending token；崩溃在 token 写入与结果落库之间时
+        # 无法确认下游状态，因此不允许自动重放。
+        replay_policy=ToolReplayPolicy.NON_REPLAYABLE,
     )
 
 
@@ -209,7 +216,7 @@ async def _search_order_knowledge(
 
     try:
         top_k = int(args.get("top_k") or 3)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return {"ok": False, "error": "top_k must be an integer"}
     top_k = max(1, min(top_k, 5))
 

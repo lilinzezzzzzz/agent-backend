@@ -11,6 +11,8 @@ from internal.config import reset_settings
 from internal.dao.agent_audit import new_agent_audit_dao
 from internal.dao.agent_conversation import (
     new_agent_message_dao,
+    new_agent_run_attempt_dao,
+    new_agent_run_checkpoint_dao,
     new_agent_run_dao,
     new_agent_run_step_dao,
     new_agent_session_dao,
@@ -23,7 +25,9 @@ from internal.dao.user import new_user_dao
 from internal.services.agents import (
     new_agent_audit_service,
     new_agent_conversation_service,
+    new_agent_execution_service,
     new_agent_router_service,
+    new_database_agent_storage_backend,
     new_order_agent_service,
     new_payment_agent_service,
 )
@@ -52,6 +56,8 @@ _CACHED_FACTORIES: tuple[_CachedFactory, ...] = (
     new_agent_message_dao,
     new_agent_run_dao,
     new_agent_run_step_dao,
+    new_agent_run_checkpoint_dao,
+    new_agent_run_attempt_dao,
     new_celery_task_dao,
     new_external_identity_dao,
     new_rag_metadata_dao,
@@ -59,6 +65,7 @@ _CACHED_FACTORIES: tuple[_CachedFactory, ...] = (
     new_user_dao,
     new_agent_audit_service,
     new_agent_conversation_service,
+    new_database_agent_storage_backend,
     new_auth_service,
     new_celery_task_service,
     new_logger_span_service,
@@ -69,6 +76,7 @@ _CACHED_FACTORIES: tuple[_CachedFactory, ...] = (
     new_order_agent_service,
     new_payment_agent_service,
     new_agent_router_service,
+    new_agent_execution_service,
 )
 
 

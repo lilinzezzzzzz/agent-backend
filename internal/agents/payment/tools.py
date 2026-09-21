@@ -5,7 +5,7 @@ from typing import Any
 from uuid import UUID
 
 from internal.services.rag import RagService
-from pkg.agents import StructuredTool
+from pkg.agents import StructuredTool, ToolReplayPolicy
 from pkg.vectors.contracts import RetrievalMode
 
 
@@ -19,6 +19,7 @@ def build_get_supported_payment_methods_tool() -> StructuredTool:
             "properties": {},
         },
         handler=_get_supported_payment_methods,
+        replay_policy=ToolReplayPolicy.REPLAY_SAFE,
     )
 
 
@@ -59,6 +60,7 @@ def build_search_payment_knowledge_tool(
             "required": ["query"],
         },
         handler=search_payment_knowledge,
+        replay_policy=ToolReplayPolicy.REPLAY_SAFE,
     )
 
 
@@ -89,6 +91,7 @@ def build_calculate_payment_total_tool() -> StructuredTool:
             "required": ["item_amount_cents"],
         },
         handler=_calculate_payment_total,
+        replay_policy=ToolReplayPolicy.REPLAY_SAFE,
     )
 
 
@@ -117,7 +120,7 @@ async def _search_payment_knowledge(
 
     try:
         top_k = int(args.get("top_k") or 3)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return {"ok": False, "error": "top_k must be an integer"}
     top_k = max(1, min(top_k, 5))
 

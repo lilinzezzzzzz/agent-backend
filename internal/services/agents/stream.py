@@ -4,12 +4,64 @@ from collections.abc import Iterable
 
 from internal.core import AppException, errors
 from internal.schemas.agent import (
+    AgentRunEventContextDTO,
     AgentRunResultDTO,
     AgentStepDTO,
     AgentStreamEventDTO,
 )
 from pkg.agents import AgentRunEvent, AgentRunEventType
 from pkg.api_response import AppError
+
+
+def managed_stream_event_from_run_event(
+    event: AgentRunEvent, *, context: AgentRunEventContextDTO
+) -> AgentStreamEventDTO:
+    """把受管理运行的通用事件转换为带运行上下文的业务流式事件。
+
+    受管理路径的事件都会带上 run_id、session_id、attempt_no 和 checkpoint_revision；
+    暂停以 `run_interrupted` 结束本次流，不会发送 `run_completed`。
+    """
+    if event.type is AgentRunEventType.RUN_STARTED:
+        stream_event = AgentStreamEventDTO.run_started(
+            run_id=event.run_id,
+            status=event.status.value,
+            route=context.route,
+        )
+    elif event.type is AgentRunEventType.RUN_RESUMED:
+        stream_event = AgentStreamEventDTO.run_resumed(
+            run_id=event.run_id,
+            status=event.status.value,
+            route=context.route,
+        )
+    elif event.type is AgentRunEventType.STEP_COMPLETED:
+        if event.step is None:
+            raise RuntimeError("step_completed event missing step")
+        stream_event = AgentStreamEventDTO.step_completed(
+            run_id=event.run_id,
+            step=AgentStepDTO.from_step_record(event.step),
+            route=context.route,
+        )
+    elif event.type is AgentRunEventType.RUN_INTERRUPTED:
+        stream_event = AgentStreamEventDTO.run_interrupted(
+            run_id=event.run_id,
+            status=event.status.value,
+            stop_reason=event.stop_reason,
+            route=context.route,
+        )
+    elif event.type is AgentRunEventType.RUN_COMPLETED:
+        if event.result is None:
+            raise RuntimeError("run_completed event missing result")
+        stream_event = AgentStreamEventDTO.run_completed(
+            result=AgentRunResultDTO.from_agent_result(
+                event.result,
+                session_id=context.session_id,
+            ),
+            route=context.route,
+        )
+    else:  # pragma: no cover - 防御分支
+        raise RuntimeError(f"unsupported agent run event: {event.type}")
+
+    return stream_event.with_context(context)
 
 
 def stream_event_from_run_event(event: AgentRunEvent) -> AgentStreamEventDTO:

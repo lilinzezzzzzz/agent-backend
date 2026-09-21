@@ -27,7 +27,7 @@ README 只记录当前仓库可直接核对的能力；更细的设计约束和�
 - Redis：连接池、业务缓存封装、认证 token metadata、Agent action confirmation / idempotency 缓存。
 - 认证：Token 认证、内部签名认证、匿名路由分组、微信登录接入点。
 - 中间件：请求日志、CORS、Endpoint Guard、统一异常处理、GZip。
-- Agent：通用结构化 ReAct / Tool Calling 执行循环，统一 Router Agent，订单售后 Agent，支付支持 Agent。
+- Agent：通用结构化 ReAct / Tool Calling 执行循环，统一 Router Agent，订单售后 Agent，支付支持 Agent；受管理 run 支持 checkpoint 持久化、协作式打断与原 run 恢复（见 [受管理运行使用说明](docs/agent/managed_run_lifecycle.md)）。
 - Celery：Worker、Beat、任务路由和示例任务骨架。
 - 向量检索：通用 repository / backend 抽象，包含 Milvus backend。
 - 基础包：日志、数据库、OSS / S3、第三方登录、加解密、通用 toolkit。

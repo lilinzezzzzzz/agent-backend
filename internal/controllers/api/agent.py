@@ -1,13 +1,17 @@
 from collections.abc import AsyncIterable, AsyncIterator
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+import anyio
+from fastapi import APIRouter, Depends, Path
 from fastapi.responses import StreamingResponse
 
+from internal.config import settings
 from internal.services.agents import (
+    AgentExecutionService,
     AgentRouterService,
     OrderAgentService,
     PaymentAgentService,
+    new_agent_execution_service,
     new_agent_router_service,
     new_order_agent_service,
     new_payment_agent_service,
@@ -20,7 +24,15 @@ from internal.schemas.agent import (
     AgentOrderSupportRespSchema,
     AgentPaymentSupportReqSchema,
     AgentPaymentSupportRespSchema,
+    AgentRunCreateReqSchema,
+    AgentRunCreateRespSchema,
+    AgentRunDetailRespSchema,
+    AgentRunInterruptReqSchema,
+    AgentRunInterruptRespSchema,
+    AgentRunResumeReqSchema,
+    AgentRunResumeRespSchema,
     AgentStreamEventDTO,
+    run_view_to_schema,
 )
 from internal.utils.stream import stream_with_chunk_control
 from pkg.api_response import ResponsePayload, success_response, wrap_sse_event
@@ -33,6 +45,8 @@ _SSE_HEADERS = {
     "Cache-Control": "no-cache",
     "X-Accel-Buffering": "no",
 }
+_MANAGED_SSE_BUFFER_SIZE = 32
+_SSE_HEARTBEAT_COMMENT = ": heartbeat\n\n"
 
 
 @router.post(
@@ -334,3 +348,272 @@ async def _serialize_agent_events(
 ) -> AsyncIterator[str]:
     async for event in events:
         yield wrap_sse_event(event.event.value, event.data)
+
+
+# =============================================================================
+# 受管理 run：创建、查询、打断、恢复
+# =============================================================================
+
+
+@router.post(
+    "/runs/create",
+    response_model=BaseResponse[AgentRunCreateRespSchema],
+    summary="创建受管理 Agent 运行",
+)
+async def create_managed_run(
+    req: AgentRunCreateReqSchema,
+    execution_service: Annotated[
+        AgentExecutionService,
+        Depends(new_agent_execution_service),
+    ],
+) -> ResponsePayload:
+    """创建受管理 run 并冻结执行现场。
+
+    业务摘要:
+        只创建会话、用户消息和初始 checkpoint，返回处于 `ready` 的 run/session ID，
+        让客户端在模型调用前就拿到可打断的 run_id。
+
+    权限边界:
+        需要有效的用户 token（`/v1` 前缀默认认证）；传入 `session_id` 时 Service 校验会话归属。
+
+    业务边界:
+        不调用模型、不执行工具；`request_key` 同键不同输入返回冲突，同键同输入返回已有 run。
+        该接口不替代现有聊天接口，旧接口语义保持不变。
+
+    Args:
+        req: 入口、问题、可选 session_id、最大步数与必填创建幂等键。
+        execution_service: 通过依赖注入获取的 `AgentExecutionService` 实例。
+
+    Returns:
+        `BaseResponse[AgentRunCreateRespSchema]`：ready 状态的 run_id 与 session_id。
+    """
+    result = await execution_service.create_run(
+        user_id=get_user_id(),
+        entrypoint=req.entrypoint.value,
+        question=req.question,
+        session_id=req.session_id,
+        max_steps=req.max_steps,
+        request_key=req.request_key,
+    )
+    return success_response(data=result.to_schema())
+
+
+@router.get(
+    "/runs/{run_id}",
+    response_model=BaseResponse[AgentRunDetailRespSchema],
+    summary="查询受管理 Agent 运行状态",
+)
+async def get_managed_run(
+    run_id: Annotated[str, Path(description="运行 ID", min_length=1, max_length=64)],
+    execution_service: Annotated[
+        AgentExecutionService,
+        Depends(new_agent_execution_service),
+    ],
+) -> ResponsePayload:
+    """查询受管理 run 已提交的进度。
+
+    业务摘要:
+        返回状态、阶段、checkpoint 版本、attempt、完成步骤数、可恢复性、停止原因和
+        本用户可见的最终回答；不暴露原始 checkpoint。
+
+    权限边界:
+        需要有效的用户 token；查询带用户归属，其他用户的 run 统一返回 NotFound 防止枚举。
+
+    业务边界:
+        返回已提交进度，不用于重建遗漏的 SSE 事件；运行中 lease 过期的现场由查询或
+        resume 触发一次原子废止与判定。
+
+    Args:
+        run_id: 运行 ID。
+        execution_service: 通过依赖注入获取的 `AgentExecutionService` 实例。
+
+    Returns:
+        `BaseResponse[AgentRunDetailRespSchema]`：裁剪后的运行状态视图。
+    """
+    view = await execution_service.get_run(user_id=get_user_id(), run_id=run_id)
+    return success_response(data=run_view_to_schema(view))
+
+
+@router.post(
+    "/runs/{run_id}/interrupt",
+    response_model=BaseResponse[AgentRunInterruptRespSchema],
+    summary="打断受管理 Agent 运行",
+)
+async def interrupt_managed_run(
+    req: AgentRunInterruptReqSchema,
+    run_id: Annotated[str, Path(description="运行 ID", min_length=1, max_length=64)],
+    execution_service: Annotated[
+        AgentExecutionService,
+        Depends(new_agent_execution_service),
+    ],
+) -> ResponsePayload:
+    """提交打断意图。
+
+    业务摘要:
+        把打断请求持久化到 run 行；执行者会在下一个安全点暂停，因此响应返回
+        `interrupt_requested` 表示已受理，客户端继续查询状态。
+
+    权限边界:
+        需要有效的用户 token；请求带用户归属，其他用户的 run 统一 NotFound。
+
+    业务边界:
+        重复打断返回当前状态；终态或 `ready` 返回状态冲突。工具默认不可被主动取消，
+        执行者会等待其有界执行结束后保存结果再暂停。
+
+    Args:
+        req: 可选的有界打断原因。
+        run_id: 运行 ID。
+        execution_service: 通过依赖注入获取的 `AgentExecutionService` 实例。
+
+    Returns:
+        `BaseResponse[AgentRunInterruptRespSchema]`：服务端实际状态与是否已受理。
+    """
+    result = await execution_service.interrupt_run(
+        user_id=get_user_id(),
+        run_id=run_id,
+        reason=req.reason,
+    )
+    return success_response(data=result.to_schema())
+
+
+@router.post(
+    "/runs/{run_id}/resume",
+    response_model=BaseResponse[AgentRunResumeRespSchema],
+    summary="恢复受管理 Agent 运行",
+)
+async def resume_managed_run(
+    req: AgentRunResumeReqSchema,
+    run_id: Annotated[str, Path(description="运行 ID", min_length=1, max_length=64)],
+    execution_service: Annotated[
+        AgentExecutionService,
+        Depends(new_agent_execution_service),
+    ],
+) -> ResponsePayload:
+    """从 ready/interrupted 恢复同一个 run。
+
+    业务摘要:
+        按已提交 checkpoint 继续执行到暂停或终态，不重新路由、不重建历史、不重做已提交步骤。
+
+    权限边界:
+        需要有效的用户 token；恢复重新校验用户归属，不因 checkpoint 绕过权限变化。
+
+    业务边界:
+        不接受 question、max_steps、工具参数或替换上下文；重复 request_key 只返回原 attempt
+        的当前状态或已保存结果，不创建第二个执行者。版本不兼容或现场无法安全重放时返回
+        明确的冲突错误，不自动改配置。
+
+    Args:
+        req: 本次执行尝试的幂等键。
+        run_id: 运行 ID。
+        execution_service: 通过依赖注入获取的 `AgentExecutionService` 实例。
+
+    Returns:
+        `BaseResponse[AgentRunResumeRespSchema]`：run 状态与本次执行结果。
+    """
+    result = await execution_service.resume_run(
+        user_id=get_user_id(),
+        run_id=run_id,
+        request_key=req.request_key,
+    )
+    return success_response(data=result.to_schema())
+
+
+@router.post(
+    "/runs/{run_id}/resume/stream",
+    response_class=StreamingResponse,
+    summary="流式恢复受管理 Agent 运行",
+)
+async def resume_managed_run_stream(
+    req: AgentRunResumeReqSchema,
+    run_id: Annotated[str, Path(description="运行 ID", min_length=1, max_length=64)],
+    execution_service: Annotated[
+        AgentExecutionService,
+        Depends(new_agent_execution_service),
+    ],
+) -> StreamingResponse:
+    """以 SSE 流式恢复受管理 run。
+
+    业务摘要:
+        执行并返回 `route`、`run_resumed`、`step_completed`、`run_interrupted`、
+        `run_status`、`run_completed` 和 `error` 事件；等待工具期间发送 SSE 注释心跳。
+
+    权限边界:
+        需要有效的用户 token；恢复重新校验用户归属和工具资源权限。
+
+    业务边界:
+        响应为 `text/event-stream`，不使用 `BaseResponse[T]` 信封；重复 request_key 只输出当前
+        状态后关闭，不接管或重放原流。客户端断连或慢消费会转换为打断意图，不继续启动下一步骤，
+        也不等待向已断开的客户端发送 `run_interrupted`。不支持 Last-Event-ID 或历史事件回放。
+
+    Args:
+        req: 本次执行尝试的幂等键。
+        run_id: 运行 ID。
+        execution_service: 通过依赖注入获取的 `AgentExecutionService` 实例。
+
+    Returns:
+        `StreamingResponse`：受管理运行事件流，含等待工具期间的 SSE 注释心跳。
+    """
+    return _managed_streaming_response(
+        execution_service.resume_run_stream(
+            user_id=get_user_id(),
+            run_id=run_id,
+            request_key=req.request_key,
+        )
+    )
+
+
+def _managed_streaming_response(
+    events: AsyncIterable[AgentStreamEventDTO],
+) -> StreamingResponse:
+    """构造受管理运行的事件流响应。
+
+    受管理路径不使用旧的单 chunk 超时包装：执行器已通过 heartbeat/control 轮询和带期限的
+    shield 管理等待与收尾，这里只负责发送心跳注释和有界事件转发。
+    """
+    return StreamingResponse(
+        _serialize_managed_events(
+            events,
+            heartbeat_seconds=float(settings.AGENT_CONTROL_POLL_SECONDS),
+        ),
+        media_type=_SSE_MEDIA_TYPE,
+        headers=_SSE_HEADERS,
+    )
+
+
+async def _serialize_managed_events(
+    events: AsyncIterable[AgentStreamEventDTO],
+    *,
+    heartbeat_seconds: float,
+) -> AsyncIterator[str]:
+    """转发事件；等待期间发送 SSE 注释心跳，慢客户端不会无限积压事件。
+
+    事件先进入有界通道，因此上游执行者不会因为客户端消费过慢而持有无界缓冲。
+    """
+    send_stream, receive_stream = anyio.create_memory_object_stream[
+        AgentStreamEventDTO
+    ](_MANAGED_SSE_BUFFER_SIZE)
+    async with anyio.create_task_group() as task_group:
+        task_group.start_soon(_pump_managed_events, events, send_stream)
+        while True:
+            with anyio.move_on_after(heartbeat_seconds) as scope:
+                try:
+                    item = await receive_stream.receive()
+                except anyio.EndOfStream:
+                    return
+            if scope.cancelled_caught:
+                yield _SSE_HEARTBEAT_COMMENT
+                continue
+            yield wrap_sse_event(item.event.value, item.data)
+
+
+async def _pump_managed_events(
+    events: AsyncIterable[AgentStreamEventDTO],
+    send_stream: anyio.abc.ObjectSendStream[AgentStreamEventDTO],
+) -> None:
+    """把 Service 事件推入有界通道；通道关闭时结束转发。"""
+    async with send_stream:
+        async for event in events:
+            try:
+                await send_stream.send(event)
+            except anyio.ClosedResourceError:
+                return

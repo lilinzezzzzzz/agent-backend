@@ -6,6 +6,8 @@ from uuid import UUID
 from internal.core import AppException, errors
 from internal.dao.agent_conversation import (
     AgentMessageDao,
+    AgentRunAttemptDao,
+    AgentRunCheckpointDao,
     AgentRunDao,
     AgentRunStepDao,
     AgentSessionDao,
@@ -37,6 +39,8 @@ def _new_conversation_service(db_session) -> AgentConversationService:
             message_dao=message_dao,
             run_dao=run_dao,
             run_step_dao=run_step_dao,
+            checkpoint_dao=AgentRunCheckpointDao(session_provider=db_session),
+            attempt_dao=AgentRunAttemptDao(session_provider=db_session),
         )
     )
 

@@ -26,9 +26,12 @@ def test_new_default_llm_client_uses_default_provider_config(
         LLM_DEEPSEEK_BASE_URL="https://api.deepseek.com",
         LLM_DEEPSEEK_MODEL="deepseek-chat",
         LLM_DEEPSEEK_API_KEY=SecretStr("test-api-key"),
+        AGENT_LLM_TIMEOUT_SECONDS=60,
     )
     monkeypatch.setattr(llm_client_module, "settings", settings)
-    monkeypatch.setattr(llm_client_module, "OpenAIResponsesClient", FakeOpenAIResponsesClient)
+    monkeypatch.setattr(
+        llm_client_module, "OpenAIResponsesClient", FakeOpenAIResponsesClient
+    )
 
     client = llm_client_module.new_default_llm_client()
 

@@ -170,3 +170,41 @@ def escape_like_pattern(text: str, escape_char: str = "\\") -> str:
         .replace("%", f"{escape_char}%")
         .replace("_", f"{escape_char}_")
     )
+
+
+# 按「字段: 值」逐行呈现的消息（如告警、通知）中，未转义的换行可让不可信输入
+# 伪造字段行；把控制字符统一转义为可见形式后，信息保留但文本无法越行。
+# \x85、\u2028、\u2029 不在 C0 控制区内，但 str.splitlines() 同样视作换行边界。
+_CONTROL_CHAR_PATTERN = re.compile(r"[\x00-\x1f\x7f\x85\u2028\u2029]")
+_CONTROL_CHAR_ESCAPES = {"\t": "\\t", "\n": "\\n", "\r": "\\r"}
+
+
+def _escape_control_char(match: re.Match[str]) -> str:
+    char = match.group()
+    escaped = _CONTROL_CHAR_ESCAPES.get(char)
+    if escaped is not None:
+        return escaped
+    codepoint = ord(char)
+    if codepoint > 0xFF:
+        return f"\\u{codepoint:04x}"
+    return f"\\x{codepoint:02x}"
+
+
+def escape_control_chars(value: str) -> str:
+    r"""把字符串中的控制字符转义为可见形式。
+
+    面向按「字段: 值」逐行呈现的告警或单行日志字段：不可信文本中的换行会让
+    调用方伪造字段行，转义后信息保留但无法越行。结果仅用于展示，不保证可逆
+    （反斜杠本身不转义）。
+
+    Args:
+        value: 可能携带外部输入或异常内容的文本。
+
+    Returns:
+        控制字符转义后的文本；适合插入按行解析的告警或单行日志字段。
+
+    Examples:
+        >>> escape_control_chars("line1\nline2")
+        'line1\\nline2'
+    """
+    return _CONTROL_CHAR_PATTERN.sub(_escape_control_char, value)

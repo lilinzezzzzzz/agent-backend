@@ -133,7 +133,9 @@ backend = MilvusBackend(
 - `uri`: Milvus 地址
 - `token`: 认证 token，可为空
 - `db_name`: Milvus 数据库名，可为空
-- `timeout`: SDK 级超时
+- `timeout`: 秒数，同时传给客户端初始化与各次 SDK/RPC 调用（包括恢复重试）；未设置时沿用 SDK 默认行为。
+  应用侧由 `MILVUS_TIMEOUT_SECONDS` 提供。它不是整个检索流程的总期限：collection 检查、加载、查询和重试
+  可能分别消耗超时时间。
 - `default_search_params`: dense search 的默认参数
 
 ### 3.2 定义 collection

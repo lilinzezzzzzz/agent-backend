@@ -145,8 +145,12 @@ uv run uvicorn entrypoints.main:app --host 0.0.0.0 --port 8000
 Worker：
 
 ```bash
-uv run celery -A internal.infra.celery.application:celery_app worker -l info -Q default,celery_queue,cron_queue,celery_maintenance_queue
+uv run celery -A internal.infra.celery.application:celery_app worker -l info --pool prefork
 ```
+
+未指定 `-Q/--queues` 时，Worker 消费应用 `task_queues` 中的全部队列。队列列表从
+`internal/tasks/scheduler.py` 的默认队列、任务路由和 Beat 投递配置派生并去重，维护队列名称来自
+环境配置中的 `CELERY_RECONCILER_QUEUE`。修改维护队列后需重启相关 Worker 和 Beat，使投递与订阅一致。
 
 初始化 PostgreSQL 时执行 `ddl/postgresql/init.sql`，该脚本根据 `internal/models` 创建脚手架所需的全部表、
 约束和索引。API 先登记 `SUBMITTING` 记录，再调用 `CeleryClient.submit()`；Worker 可从
@@ -182,7 +186,15 @@ uv run celery -A internal.infra.celery.application:celery_app beat -l info
 
 - `CELERY_LOG_LEVEL`
 - `CELERY_CONCURRENCY`
-- `CELERY_QUEUES`
+- `CELERY_QUEUES`：显式覆盖订阅队列；未设置或为空时使用应用配置。
+
+脚本末尾的命令行参数继续传给 Celery，显式 `-Q/--queues` 优先于 `CELERY_QUEUES`。例如：
+
+```bash
+./entrypoints/run_celery_worker.sh --queues=custom_maintenance --max-tasks-per-child=1000
+```
+
+为专用 Worker 指定队列时，需确保其他 Worker 覆盖剩余业务和维护队列；上述示例中的队列名应与环境配置一致。
 
 ## API 与认证
 
@@ -401,6 +413,7 @@ sudo journalctl CONTAINER_TAG=agent-backend-prod-api --since "1 day ago" --no-pa
 ## 相关文档
 
 - `docs/README.md`
+- [AnyIO 线程任务超时与取消语义](pkg/concurrency/README.md)
 - `pkg/agents/README.md`
 - `pkg/vectors/backends/milvus/README.md`
 

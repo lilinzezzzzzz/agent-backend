@@ -19,6 +19,8 @@ from internal.tasks.constants import (
 # 任务模块配置
 # =========================================================
 
+CELERY_DEFAULT_QUEUE = "default"
+
 # 需要加载的任务模块 (Python 模块路径)
 CELERY_INCLUDE_MODULES = [
     "internal.tasks.celery",
@@ -79,3 +81,15 @@ if settings.CELERY_RECONCILER_BEAT_ENABLED:
             },
         }
     )
+
+
+def get_worker_queue_names() -> tuple[str, ...]:
+    """从默认队列、任务路由和 Beat 投递配置派生 Worker 默认订阅。"""
+    queue_names = [CELERY_DEFAULT_QUEUE]
+    for route in CELERY_TASK_ROUTES.values():
+        queue_names.append(route["queue"])
+    for entry in STATIC_BEAT_SCHEDULE.values():
+        queue = entry.get("options", {}).get("queue")
+        if queue:
+            queue_names.append(queue)
+    return tuple(dict.fromkeys(queue_names))

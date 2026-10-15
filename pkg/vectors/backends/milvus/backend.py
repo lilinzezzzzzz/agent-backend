@@ -38,7 +38,6 @@ from .codec import (
 from .schema import (
     build_index_params,
     build_schema,
-    map_metric_type,
     validate_collection_description,
 )
 from .types import (
@@ -130,6 +129,10 @@ class MilvusBackend(BaseVectorBackend):
         return await anyio_run_in_thread(_run_operation)
 
     async def _call_client_method(self, method_name: str, /, **kwargs: object) -> object:
+        # SDK 构造时的 timeout 不会自动成为后续 RPC 的默认超时。
+        if self._timeout is not None:
+            kwargs.setdefault("timeout", self._timeout)
+
         def _run_method(client: MilvusClient) -> object:
             method = getattr(client, method_name)
             return method(**kwargs)

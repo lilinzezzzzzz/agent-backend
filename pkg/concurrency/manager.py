@@ -2,6 +2,8 @@ import random
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from functools import partial
+from math import inf
+from threading import Lock
 from typing import Any, Literal
 
 import anyio
@@ -45,6 +47,8 @@ class AnyioTaskHandler:
     def __init__(self) -> None:
         self._global_limiter = CapacityLimiter(GLOBAL_MAX_DEFAULT)
         self._thread_limiter = CapacityLimiter(THREAD_MAX_DEFAULT)
+        # 实际线程额度由工作函数持有；等待者取消不能提前归还它。
+        self._thread_wait_limiter = CapacityLimiter(inf)
         self._process_limiter = CapacityLimiter(PROCESS_MAX_DEFAULT)
 
         self._tg: TaskGroup | None = None
@@ -143,11 +147,14 @@ class AnyioTaskHandler:
         logger.info(f"Task {func_name} started in {backend}.")
         bound = partial(sync_func, *args, **kwargs)
 
+        if backend == "thread":
+            wait_timeout = timeout if timeout is not None and timeout > 0 else None
+            # 外部 AnyIO 取消与本次调用自己的期限分开处理。
+            with CancelScope(shield=not cancellable):
+                with fail_after(wait_timeout):
+                    return await self._run_thread_with_capacity(bound)
+
         async def _run() -> Any:
-            if backend == "thread":
-                return await anyio_run_in_thread(
-                    bound, abandon_on_cancel=cancellable, limiter=self._thread_limiter
-                )
             return await anyio_run_in_process(
                 bound, cancellable=cancellable, limiter=self._process_limiter
             )
@@ -156,6 +163,47 @@ class AnyioTaskHandler:
             with fail_after(timeout):
                 return await _run()
         return await _run()
+
+    async def _run_thread_with_capacity(self, func: Callable[[], Any]) -> Any:
+        """即使等待者超时，仍将额度保留到实际工作结束。"""
+        borrower = object()
+        await self._thread_limiter.acquire_on_behalf_of(borrower)
+        state_lock = Lock()
+        started = False
+        cancelled_before_start = False
+
+        def run() -> Any:
+            nonlocal started
+            with state_lock:
+                if cancelled_before_start:
+                    return None
+                started = True
+            try:
+                return func()
+            finally:
+                try:
+                    anyio.from_thread.run_sync(
+                        self._thread_limiter.release_on_behalf_of, borrower
+                    )
+                except anyio.RunFinishedError:
+                    # 事件循环已退出，绑定该循环的额度也不再被使用。
+                    pass
+
+        try:
+            return await anyio_run_in_thread(
+                run,
+                abandon_on_cancel=True,
+                limiter=self._thread_wait_limiter,
+            )
+        except BaseException:
+            with state_lock:
+                release_capacity = not started
+                if release_capacity:
+                    # 已排入线程队列但尚未启动的工作也不能在超时后执行。
+                    cancelled_before_start = True
+            if release_capacity:
+                self._thread_limiter.release_on_behalf_of(borrower)
+            raise
 
     async def add_task(
         self,
@@ -279,7 +327,12 @@ class AnyioTaskHandler:
         timeout: float | None = None,
         cancellable: bool = False,
     ) -> Any:
-        """在线程中执行同步函数。"""
+        """在线程中执行同步函数，正数 timeout 限制额度排队与执行的等待时间。
+
+        None 或非正数表示不设本次期限。超时抛 TimeoutError，与 cancellable 无关。
+        cancellable=False 屏蔽外部 AnyIO 取消；True 允许取消等待并向上传播。
+        超时或取消都不能终止已开始的线程；线程继续占用额度直至完成，其结果被丢弃。
+        """
         return await self._execute_sync(
             sync_func,
             args_tuple or (),
@@ -317,7 +370,11 @@ class AnyioTaskHandler:
         timeout: float | None = None,
         cancellable: bool = False,
     ) -> list[Any]:
-        """在线程中批量执行同步函数。"""
+        """按输入顺序返回线程任务结果，单项超时或普通异常对应 None。
+
+        每项取得全局额度后，timeout 开始覆盖线程额度排队和执行等待。
+        超时与取消语义同 run_in_thread；外部取消向上传播，不返回部分成功列表。
+        """
         return await self._run_batch_sync(
             sync_func, args_tuple_list, kwargs_dict_list, timeout, cancellable, "thread"
         )
@@ -368,35 +425,16 @@ class AnyioTaskHandler:
         async def _worker(
             idx: int, a: tuple[Any, ...], k: dict[str, Any] | None
         ) -> None:
-            bound = partial(sync_func, *(a or ()), **(k or {}))
-
             async with self._global_limiter:
                 try:
-
-                    async def _run() -> Any:
-                        if backend == "thread":
-                            return await anyio_run_in_thread(
-                                bound,
-                                abandon_on_cancel=cancellable,
-                                limiter=self._thread_limiter,
-                            )
-                        return await anyio_run_in_process(
-                            bound,
-                            cancellable=cancellable,
-                            limiter=self._process_limiter,
-                        )
-
-                    if timeout and timeout > 0:
-                        with fail_after(timeout):
-                            res = await _run()
-                    else:
-                        res = await _run()
-
-                    results[idx] = res
+                    results[idx] = await self._execute_sync(
+                        sync_func, a or (), k or {}, timeout, cancellable, backend
+                    )
                 except TimeoutError:
                     logger.error(f"{backend}-{idx} ({func_name}) timed out.")
                 except get_cancelled_exc_class():
                     logger.debug(f"{backend}-{idx} ({func_name}) cancelled.")
+                    raise
                 except Exception as e:
                     logger.error(f"{backend}-{idx} ({func_name}) failed: {e}")
 

@@ -9,7 +9,7 @@
 # 环境变量：
 #   CELERY_LOG_LEVEL   日志级别，默认 info
 #   CELERY_CONCURRENCY 并发数，默认 4
-#   CELERY_QUEUES      队列列表，默认 default,celery_queue,cron_queue
+#   CELERY_QUEUES      显式覆盖订阅队列；未设置或为空时使用 Celery app 的 task_queues
 
 set -e
 
@@ -19,7 +19,10 @@ cd "$(dirname "$0")/.."
 # 默认配置
 LOG_LEVEL=${CELERY_LOG_LEVEL:-info}
 CONCURRENCY=${CELERY_CONCURRENCY:-4}
-QUEUES=${CELERY_QUEUES:-default,celery_queue,cron_queue}
+QUEUE_ARGS=()
+if [[ -n "${CELERY_QUEUES:-}" ]]; then
+    QUEUE_ARGS=(-Q "$CELERY_QUEUES")
+fi
 
 # 检查 uv 是否可用。Celery 通过 uv run 在项目环境中启动。
 if ! command -v uv &> /dev/null; then
@@ -32,6 +35,6 @@ fi
 exec uv run celery -A internal.infra.celery.application:celery_app worker \
     -l "$LOG_LEVEL" \
     -c "$CONCURRENCY" \
-    -Q "$QUEUES" \
     --pool prefork \
+    "${QUEUE_ARGS[@]}" \
     "$@"

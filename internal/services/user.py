@@ -12,6 +12,7 @@ from internal.dao.external_identity import (
 from internal.dao.user import UserDao, new_user_dao
 from internal.models.user import User
 from internal.utils.password import PasswordHandler
+from pkg.concurrency import anyio_run_in_thread
 from pkg.database.audit import AuditActor
 from pkg.toolkit.timer import utc_now_naive
 
@@ -48,7 +49,11 @@ class UserService:
         if not user.password_hash:
             return False
 
-        return PasswordHandler.verify_password(password, user.password_hash)
+        return await anyio_run_in_thread(
+            PasswordHandler.verify_password,
+            password,
+            user.password_hash,
+        )
 
     async def create_user(
         self, username: str, account: str, phone: str, password: str
@@ -69,8 +74,11 @@ class UserService:
         if await self._user_dao.is_phone_exist(phone):
             raise ValueError(f"手机号 {phone} 已被注册")
 
-        # 加密密码
-        password_hash = PasswordHandler.hash_password(password)
+        # bcrypt 在工作线程执行，避免阻塞事件循环。
+        password_hash = await anyio_run_in_thread(
+            PasswordHandler.hash_password,
+            password,
+        )
 
         # 创建用户
         user = self._user_dao.create(

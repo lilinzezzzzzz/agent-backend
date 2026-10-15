@@ -1,10 +1,8 @@
 """仅支持 ``async with`` 的 OpenTelemetry Span 门面。"""
 
 import re
-from collections.abc import Mapping
-from contextlib import AbstractContextManager
-from types import TracebackType
-from typing import Literal
+from collections.abc import AsyncGenerator, Mapping
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 
 from opentelemetry.trace import (
     INVALID_SPAN_CONTEXT,
@@ -35,71 +33,26 @@ def _validate_span_name(span_name: str) -> str:
     return normalized
 
 
-class _AsyncSpanContext:
-    """根据 tracing runtime 状态创建真实 Span 或 non-recording Span。"""
+@asynccontextmanager
+async def _span_scope(
+    span_name: str,
+    *,
+    span_kind: SpanKind,
+    attributes: Mapping[str, AttributeValue] | None,
+) -> AsyncGenerator[Span, None]:
+    if not is_tracing_enabled():
+        yield _NOOP_SPAN
+        return
 
-    __slots__ = ("_attributes", "_entered", "_scope", "_span_kind", "_span_name")
-
-    def __init__(
-        self,
-        *,
-        span_name: str,
-        span_kind: SpanKind,
-        attributes: Mapping[str, AttributeValue] | None,
-    ) -> None:
-        self._span_name = span_name
-        self._span_kind = span_kind
-        self._attributes = attributes
-        self._scope: AbstractContextManager[Span] | None = None
-        self._entered = False
-
-    def __enter__(self) -> Span:
-        raise TypeError("span_context() supports only 'async with' usage")
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        tb: TracebackType | None,
-    ) -> bool:
-        raise TypeError("span_context() supports only 'async with' usage")
-
-    async def __aenter__(self) -> Span:
-        if self._entered:
-            raise RuntimeError("span_context() cannot be entered more than once")
-        self._entered = True
-
-        if not is_tracing_enabled():
-            return _NOOP_SPAN
-
-        scope = get_tracer().start_as_current_span(
-            self._span_name,
-            kind=self._span_kind,
-            attributes=self._attributes,
-            record_exception=True,
-            set_status_on_exception=True,
-            end_on_exit=True,
-        )
-        self._scope = scope
-        try:
-            return scope.__enter__()
-        except BaseException:
-            self._scope = None
-            self._entered = False
-            raise
-
-    async def __aexit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        tb: TracebackType | None,
-    ) -> Literal[False]:
-        scope = self._scope
-        self._scope = None
-        self._entered = False
-        if scope is not None:
-            scope.__exit__(exc_type, exc, tb)
-        return False
+    with get_tracer().start_as_current_span(
+        span_name,
+        kind=span_kind,
+        attributes=attributes,
+        record_exception=True,
+        set_status_on_exception=True,
+        end_on_exit=True,
+    ) as span:
+        yield span
 
 
 def span_context(
@@ -107,8 +60,8 @@ def span_context(
     *,
     span_kind: SpanKind = SpanKind.INTERNAL,
     attributes: Mapping[str, AttributeValue] | None = None,
-) -> _AsyncSpanContext:
-    """创建异步 OpenTelemetry Span 上下文。"""
+) -> AbstractAsyncContextManager[Span]:
+    """校验参数并创建异步 Span 上下文；每次使用时需创建新的管理器。"""
 
     if not isinstance(span_kind, SpanKind):
         raise TypeError(f"span_kind must be a SpanKind, got {type(span_kind).__name__}")
@@ -116,7 +69,7 @@ def span_context(
         raise TypeError(
             f"attributes must be a mapping or None, got {type(attributes).__name__}"
         )
-    return _AsyncSpanContext(
+    return _span_scope(
         span_name=_validate_span_name(span_name),
         span_kind=span_kind,
         attributes=attributes,

@@ -73,7 +73,8 @@ class AsyncHttpClient:
     async def close(self):
         await self.client.aclose()
 
-    def _stream_context(
+    @asynccontextmanager
+    async def _stream_context(
         self,
         method: str,
         url: str,
@@ -81,35 +82,28 @@ class AsyncHttpClient:
         params: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
         timeout: int | None = None,
-    ):
+    ) -> AsyncGenerator[httpx.Response, None]:
         req_timeout = timeout or self.timeout
         method = method.upper()
 
-        # 在内部定义上下文管理器
-        @asynccontextmanager
-        async def inner():
-            logger.info(f"Stream Start: {method} {url}")
-            try:
-                # 这里依然可以访问外层的 self, method, url 等变量（闭包特性）
-                async with self.client.stream(
-                    method,
-                    url,
-                    params=params,
-                    headers=headers,
-                    timeout=req_timeout,
-                ) as response:
-                    response.raise_for_status()
-                    yield response
+        logger.info(f"Stream Start: {method} {url}")
+        try:
+            async with self.client.stream(
+                method,
+                url,
+                params=params,
+                headers=headers,
+                timeout=req_timeout,
+            ) as response:
+                response.raise_for_status()
+                yield response
 
-            except httpx.HTTPStatusError as exc:
-                raise RuntimeError(
-                    f"Stream HTTPStatusError, status_code={exc.response.status_code}, error={exc}"
-                ) from exc
-            except Exception as exc:
-                raise RuntimeError(f"Stream Unexpected Error, error={exc}") from exc
-
-        # 调用内部函数并返回
-        return inner()
+        except httpx.HTTPStatusError as exc:
+            raise RuntimeError(
+                f"Stream HTTPStatusError, status_code={exc.response.status_code}, error={exc}"
+            ) from exc
+        except Exception as exc:
+            raise RuntimeError(f"Stream Unexpected Error, error={exc}") from exc
 
     async def _request(
         self,

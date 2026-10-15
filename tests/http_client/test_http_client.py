@@ -1,3 +1,5 @@
+import asyncio
+from collections.abc import AsyncGenerator
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -5,6 +7,121 @@ import pytest
 import pytest_asyncio
 
 from pkg.http_client import AsyncHttpClient, RequestResult
+
+
+class _ResponseStream(httpx.AsyncByteStream):
+    def __init__(self) -> None:
+        self.closed = False
+
+    async def __aiter__(self) -> AsyncGenerator[bytes, None]:
+        yield b"first"
+        yield b"second"
+
+    async def aclose(self) -> None:
+        await asyncio.sleep(0)
+        self.closed = True
+
+
+@pytest_asyncio.fixture
+async def streaming_client(
+    request: pytest.FixtureRequest,
+) -> AsyncGenerator[tuple[AsyncHttpClient, _ResponseStream], None]:
+    stream = _ResponseStream()
+    status_code = getattr(request, "param", 200)
+    transport = httpx.MockTransport(
+        lambda _: httpx.Response(status_code, stream=stream)
+    )
+    async with httpx.AsyncClient(
+        base_url="https://example.test",
+        transport=transport,
+    ) as http_client:
+        with patch(
+            "pkg.http_client.client.httpx.AsyncClient",
+            return_value=http_client,
+        ):
+            async with AsyncHttpClient(timeout=30) as client:
+                yield client, stream
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stop_early", [False, True])
+async def test_stream_context_closes_response_and_forwards_options(
+    streaming_client: tuple[AsyncHttpClient, _ResponseStream],
+    stop_early: bool,
+) -> None:
+    client, stream = streaming_client
+    async with client._stream_context(
+        "get",
+        "/stream",
+        params={"page": 2},
+        headers={"X-Test": "stream"},
+        timeout=5,
+    ) as response:
+        assert response.request.method == "GET"
+        assert response.request.url.params["page"] == "2"
+        assert response.request.headers["X-Test"] == "stream"
+        assert response.request.extensions["timeout"]["read"] == 5
+        chunks = []
+        async for chunk in response.aiter_bytes():
+            chunks.append(chunk)
+            if stop_early:
+                break
+        assert chunks == ([b"first"] if stop_early else [b"first", b"second"])
+
+    assert stream.closed
+    assert response.is_closed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("streaming_client", [503], indirect=True)
+async def test_stream_context_closes_response_on_http_error(
+    streaming_client: tuple[AsyncHttpClient, _ResponseStream],
+) -> None:
+    client, stream = streaming_client
+    with pytest.raises(
+        RuntimeError,
+        match="Stream HTTPStatusError, status_code=503",
+    ) as exc:
+        async with client._stream_context("GET", "/stream"):
+            pytest.fail("HTTP error must be raised before yielding the response")
+
+    assert isinstance(exc.value.__cause__, httpx.HTTPStatusError)
+    assert stream.closed
+
+
+@pytest.mark.asyncio
+async def test_stream_context_closes_response_and_preserves_error_cause(
+    streaming_client: tuple[AsyncHttpClient, _ResponseStream],
+) -> None:
+    client, stream = streaming_client
+    error = ValueError("consumer failed")
+    with pytest.raises(RuntimeError, match="Stream Unexpected Error") as exc:
+        async with client._stream_context("GET", "/stream"):
+            raise error
+
+    assert exc.value.__cause__ is error
+    assert stream.closed
+
+
+@pytest.mark.asyncio
+async def test_stream_context_closes_response_on_task_cancellation(
+    streaming_client: tuple[AsyncHttpClient, _ResponseStream],
+) -> None:
+    client, stream = streaming_client
+    entered = asyncio.Event()
+
+    async def consume() -> None:
+        async with client._stream_context("GET", "/stream"):
+            entered.set()
+            await asyncio.Future()
+
+    task = asyncio.create_task(consume())
+    await entered.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert stream.closed
 
 
 class TestRequestResult:

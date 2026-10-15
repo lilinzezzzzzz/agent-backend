@@ -1,5 +1,8 @@
-from contextlib import asynccontextmanager
+import sys
+from collections.abc import AsyncGenerator
+from contextlib import AsyncExitStack, asynccontextmanager
 
+import anyio
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 
@@ -81,7 +84,7 @@ def register_middleware(app: FastAPI):
 
 # 定义 lifespan 事件处理器
 @asynccontextmanager
-async def lifespan(_app: FastAPI):
+async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     # 初始化配置（必须最先执行）
     init_settings()
 
@@ -92,33 +95,72 @@ async def lifespan(_app: FastAPI):
         write_to_file=settings.LOG_WRITE_TO_FILE,
         write_to_console=settings.LOG_WRITE_TO_CONSOLE,
     )
-    init_tracing(
-        enabled=settings.OTEL_TRACING_ENABLED,
-        service_name=settings.OTEL_SERVICE_NAME,
-        otlp_traces_endpoint=(
-            str(settings.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT)
-            if settings.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT is not None
-            else None
-        ),
-        exporter_timeout_seconds=settings.OTEL_EXPORTER_OTLP_TIMEOUT_SECONDS,
-    )
-    # 初始化 DB（使用配置中的 echo）
-    init_async_db(echo=settings.DB_ECHO)
-    # 初始化 Redis
-    init_async_redis()
-    # 初始化签名认证
-    init_signature_auth_handler()
-    # 初始化后台任务管理器
-    await init_background_task_manager()
+    cleanup = AsyncExitStack()
+    cleanup.push_async_callback(logger.complete)
+    try:
+        init_tracing(
+            enabled=settings.OTEL_TRACING_ENABLED,
+            service_name=settings.OTEL_SERVICE_NAME,
+            otlp_traces_endpoint=(
+                str(settings.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT)
+                if settings.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT is not None
+                else None
+            ),
+            exporter_timeout_seconds=settings.OTEL_EXPORTER_OTLP_TIMEOUT_SECONDS,
+        )
+        cleanup.callback(shutdown_tracing)
 
-    logger.info("lifespan init completed, Application will start.")
+        # 先登记清理，覆盖初始化中途已创建部分连接的失败路径。
+        cleanup.push_async_callback(close_async_db)
+        init_async_db(echo=settings.DB_ECHO)
+        cleanup.push_async_callback(close_async_redis)
+        init_async_redis()
+        init_signature_auth_handler()
 
-    yield
+        # 后台 TaskGroup 必须由创建它的任务退出，连接清理随后交给受保护的子任务。
+        async with AsyncExitStack() as background_cleanup:
+            background_cleanup.push_async_callback(close_background_task_manager)
+            await init_background_task_manager()
+            logger.info("lifespan init completed, Application will start.")
+            try:
+                yield
+            finally:
+                logger.warning("Application is about to close.")
+    finally:
+        await _close_resources(cleanup)
 
-    # 关闭时的清理逻辑
-    await close_async_db()
-    await close_async_redis()
-    await close_background_task_manager()
-    logger.warning("Application is about to close.")
-    shutdown_tracing()
-    await logger.complete()
+
+async def _close_resources(cleanup: AsyncExitStack) -> None:
+    """等待连接和日志清理完成，再原样传播清理异常或调用方的取消。"""
+    caller_exc_info = sys.exc_info()
+    caller_error = caller_exc_info[1]
+    cleanup_error: BaseException | None = None
+
+    async def close() -> None:
+        nonlocal cleanup_error
+        try:
+            try:
+                if caller_error is not None:
+                    raise caller_error
+            finally:
+                # 保留调用方异常状态，让 ExitStack 正确连接多次清理失败的上下文。
+                with anyio.CancelScope(shield=True):
+                    await cleanup.__aexit__(*caller_exc_info)
+        except BaseException as exc:
+            # 交回调用方抛出，避免 TaskGroup 把清理异常包装为 ExceptionGroup。
+            if exc is not caller_error:
+                cleanup_error = exc
+
+    try:
+        with anyio.CancelScope(shield=True):
+            async with anyio.create_task_group() as task_group:
+                task_group.start_soon(close)
+    finally:
+        if cleanup_error is not None:
+            fixed_context = cleanup_error.__context__
+            try:
+                raise cleanup_error
+            except BaseException:
+                if fixed_context is not None:
+                    cleanup_error.__context__ = fixed_context
+                raise

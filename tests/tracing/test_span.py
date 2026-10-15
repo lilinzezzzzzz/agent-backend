@@ -1,3 +1,4 @@
+import asyncio
 import json
 from pathlib import Path
 from typing import Any
@@ -203,7 +204,7 @@ async def test_json_logs_use_request_context_trace_id_without_span_id(
 
 
 def test_span_context_rejects_sync_usage_and_invalid_arguments() -> None:
-    with pytest.raises(TypeError, match="async with"):
+    with pytest.raises(TypeError, match="asynchronous context manager"):
         with span_context("sync"):
             pass
 
@@ -220,3 +221,47 @@ def test_span_context_rejects_sync_usage_and_invalid_arguments() -> None:
 
     with pytest.raises(TypeError, match="attributes must be a mapping"):
         dynamic_span_context("bad.attributes", attributes=[])
+
+
+@pytest.mark.asyncio
+async def test_span_context_checks_runtime_when_entered(
+    tracing_runtime: InMemorySpanExporter,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scope = span_context("delayed")
+    monkeypatch.setattr(otel_runtime, "_runtime", None)
+
+    async with scope as span:
+        assert span.is_recording() is False
+
+    assert tracing_runtime.get_finished_spans() == ()
+
+
+@pytest.mark.asyncio
+async def test_separate_span_context_calls_create_independent_scopes(
+    tracing_runtime: InMemorySpanExporter,
+) -> None:
+    for _ in range(2):
+        async with span_context("repeated"):
+            pass
+
+    finished = tracing_runtime.get_finished_spans()
+    assert len(finished) == 2
+    assert finished[0].context.span_id != finished[1].context.span_id
+
+
+@pytest.mark.asyncio
+async def test_cancellation_ends_span_and_restores_parent(
+    tracing_runtime: InMemorySpanExporter,
+) -> None:
+    async with span_context("parent") as parent:
+        with pytest.raises(asyncio.CancelledError):
+            async with span_context("cancelled"):
+                raise asyncio.CancelledError
+        assert trace.get_current_span() is parent
+
+    assert {span.name for span in tracing_runtime.get_finished_spans()} == {
+        "parent",
+        "cancelled",
+    }
+    assert trace.get_current_span().get_span_context().is_valid is False

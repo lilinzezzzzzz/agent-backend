@@ -65,24 +65,18 @@ class AnyioTaskHandler:
         logger.info("AsyncTaskManagerAnyIO started.")
 
     async def shutdown(self) -> None:
-        """停止接收新任务，取消并等待当前后台任务退出。"""
+        """停止接收新任务并等待子任务退出；必须由调用 start() 的同一任务执行。"""
         logger.warning("Shutting down AsyncTaskManagerAnyIO...")
         self._accepting = False
 
-        async with self._lock:
-            active_tasks = list(self.tasks.values())
-
-        for info in active_tasks:
-            try:
-                info.scope.cancel()
-            except Exception as e:
-                logger.warning(f"Error canceling task {info.task_id}: {e}")
+        # 任务表只在同一事件循环中修改；同步快照不会交错，也不会在退出前被取消。
+        for info in list(self.tasks.values()):
+            info.scope.cancel()
 
         if self._tg_started and self._tg is not None:
+            task_group = self._tg
             try:
-                await self._tg.__aexit__(None, None, None)
-            except Exception as e:
-                logger.error(f"Error closing TaskGroup: {e}")
+                await task_group.__aexit__(None, None, None)
             finally:
                 self._tg = None
                 self._tg_started = False
@@ -187,6 +181,11 @@ class AnyioTaskHandler:
         coro_name = self.get_coro_func_name(coro_func)
 
         async with self._lock:
+            task_group = self._tg
+            if not self._accepting or task_group is None:
+                raise RuntimeError(
+                    "AsyncTaskManagerAnyIO is shutting down, not accepting new tasks."
+                )
             if len(self.tasks) >= self.max_queue:
                 logger.error(f"Queue overflow: {len(self.tasks)}/{self.max_queue}")
                 raise RuntimeError(f"Queue overflow: {self.max_queue}")
@@ -199,7 +198,7 @@ class AnyioTaskHandler:
             info = TaskInfo(task_id=task_id, name=coro_name, scope=scope)
             self.tasks[task_id] = info
 
-            self._tg.start_soon(
+            task_group.start_soon(
                 self._run_task_inner, info, coro_func, args_tuple, kwargs_dict, timeout
             )
         return True

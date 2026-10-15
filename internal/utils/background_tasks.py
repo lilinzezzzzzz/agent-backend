@@ -24,8 +24,10 @@ async def close_background_task_manager() -> None:
         logger.warning("Background task manager has not been initialized.")
         return
 
-    await _background_task_manager.shutdown()
-    _background_task_manager = None
+    try:
+        await _background_task_manager.shutdown()
+    finally:
+        _background_task_manager = None
     logger.info("Stop background task manager completed.")
 
 

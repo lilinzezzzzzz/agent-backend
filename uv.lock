@@ -63,7 +63,7 @@ dependencies = [
     { name = "pyyaml" },
     { name = "redis" },
     { name = "shortuuid" },
-    { name = "sqlalchemy" },
+    { name = "sqlalchemy", extra = ["asyncio"] },
     { name = "starlette" },
     { name = "tqdm" },
     { name = "trio" },
@@ -151,7 +151,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "redis", specifier = ">=7.2.1" },
     { name = "shortuuid", specifier = ">=1.0.13" },
-    { name = "sqlalchemy", specifier = ">=2.0.47" },
+    { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.47" },
     { name = "starlette", specifier = ">=0.52.1" },
     { name = "tqdm", specifier = ">=4.67.3" },
     { name = "trio", specifier = ">=0.33.0" },
@@ -2516,6 +2516,11 @@ wheels = [
     { url = "https://mirrors.aliyun.com/pypi/packages/0e/db/cafdeca5ecdaa3bb0811ba5449501da677ce0d83be8d05c5822da72d2e86/sqlalchemy-2.0.47-cp314-cp314t-win32.whl", hash = "sha256:c200db1128d72a71dc3c31c24b42eb9fd85b2b3e5a3c9ba1e751c11ac31250ff" },
     { url = "https://mirrors.aliyun.com/pypi/packages/fc/5e/ff41a010e9e0f76418b02ad352060a4341bb15f0af66cedc924ab376c7c6/sqlalchemy-2.0.47-cp314-cp314t-win_amd64.whl", hash = "sha256:669837759b84e575407355dcff912835892058aea9b80bd1cb76d6a151cf37f7" },
     { url = "https://mirrors.aliyun.com/pypi/packages/15/9f/7c378406b592fcf1fc157248607b495a40e3202ba4a6f1372a2ba6447717/sqlalchemy-2.0.47-py3-none-any.whl", hash = "sha256:e2647043599297a1ef10e720cf310846b7f31b6c841fee093d2b09d81215eb93" },
+]
+
+[package.optional-dependencies]
+asyncio = [
+    { name = "greenlet" },
 ]
 
 [[package]]

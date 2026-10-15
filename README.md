@@ -355,72 +355,48 @@ docker run --rm -p 8000:8000 \
 
 如果容器内无法访问宿主机服务，需要把 `DB_HOST`、`REDIS_HOST` 等配置改成容器网络可解析的地址。
 
-### 生产 Compose 与 logrotate sidecar
+### 生产 Compose 与 journald
 
-脚手架不限定部署平台，每个 API 容器统一运行一个 Uvicorn worker，扩容由部署平台管理副本。
-`compose.yaml` 固定使用 `--workers 1`，并提供一个单副本 logrotate sidecar。两者共享宿主机日志目录，
-活动日志固定为 `app.log`；sidecar 每 5 分钟检查一次，负责 `copytruncate`、压缩和保留 30 个归档。
-该文件日志方案不提供审计级零丢失保证。
-Kubernetes 部署通过多个 Pod 横向扩展，日志采用平台统一采集，具体配置见
-[日志部署文档](docs/logging/log_rotation.md#docker-和-kubernetes-平台统一采集)。当前 Compose 发布固定宿主机端口，
-不能直接通过增加 API 副本完成扩容，需要部署平台配套端口和负载均衡配置。
-单 worker 不要求固定配置 1 核 CPU，资源应根据请求类型、延迟目标、内存占用和压测结果确定。
-文件输出、日志目录和关闭业务控制台日志均由 `configs/.env.prod` 配置；Compose 只注入 `APP_ENV`。
+`compose.yaml` 使用 Docker journald 驱动，要求目标 Linux 主机运行 systemd-journald 并启用持久化。
+应用在 `configs/.env.prod` 中关闭文件输出、开启 JSON 控制台日志；不再部署 logrotate sidecar 或挂载应用日志目录。
+API 支持 `API_WORKERS` 配置，默认 1；多 worker 数量结合 CPU、内存、下游连接预算和压测结果调整。
 
-部署前需要 Docker Engine、Docker Compose v2、可访问的 PostgreSQL/Redis 等外部依赖，以及不含 `APP_ENV` 的
-真实 `.secrets`。Compose 部署参数和唯一的 `APP_ENV` 使用根目录 `.env`，应用配置和密钥仍通过只读文件
-挂载加载：
+日志标签为 `<COMPOSE_PROJECT_NAME>-<APP_ENV>-api`，默认 `agent-backend-prod-api`。项目名跨发布保持不变，
+容器 ID 或镜像更新不改变标签。宿主机 journal 独立保留历史，可按需导出 `.log`，不提供跨主机备份或零丢失保证。
+
+新部署先参考 [日志部署文档](docs/logging/log_rotation.md#docker-compose-journald) 完成宿主机准备、
+密钥权限检查与依赖配置，再执行：
 
 ```bash
 cp .env.compose.example .env
-```
-
-至少按目标环境调整 `.env` 中的 `APP_ENV`、`AGENT_BACKEND_LOG_DIR`、镜像、端口和资源限制。
-`.env` 不应存放应用密钥，也不会提交到 Git。
-
-先构建镜像并查询 API 镜像内 `app` 用户的数字 UID/GID：
-
-```bash
-docker compose build api logrotate
-API_UID=$(docker run --rm --entrypoint id agent-backend:prod -u)
-API_GID=$(docker run --rm --entrypoint id agent-backend:prod -g)
-sudo chown "$API_UID:$API_GID" .secrets
-sudo chmod 0400 .secrets
-sudo install -d -m 0750 -o "$API_UID" -g "$API_GID" /var/log/agent-backend
-```
-
-如果修改了 `.env` 中的 `AGENT_BACKEND_IMAGE` 或 `AGENT_BACKEND_LOG_DIR`，上面的镜像名和目录也必须使用相同值。
-密钥文件必须允许镜像内的非 root `app` 用户读取；上述数字 UID/GID 归属只影响宿主机文件元数据，文件仍以只读方式
-挂载到容器。每次更换为不同 UID/GID 的 API 镜像后都应重新执行权限设置。
-确认配置展开结果只包含密钥文件路径、不包含密钥内容，然后依次启动 sidecar 和 API：
-
-```bash
-docker compose config
-docker compose up -d logrotate
+docker compose config --quiet
+docker compose build api
 docker compose up -d api
-docker compose ps
 ```
 
-常用检查和停止命令：
+已有 `.env` 应手动合并，勿直接覆盖。宿主机配置模板位于 `deploy/journald/agent-backend.conf`，
+不会由 Compose 自动安装；磁盘预算与保留策略影响整机 journal，需要运维确认后应用。
 
 ```bash
-docker compose logs --tail=200 -f logrotate
-docker compose logs --tail=200 -f api
-docker compose exec logrotate \
-  logrotate --debug --state /var/lib/logrotate/status /etc/logrotate.d/agent-backend
-docker compose down
+# 日常查看；标签按实际项目名和环境替换
+sudo journalctl CONTAINER_TAG=agent-backend-prod-api -n 200 -f -o cat
+
+# 跨发布查询，包含尚未过期的旧容器日志
+sudo journalctl CONTAINER_TAG=agent-backend-prod-api --since "1 day ago" --no-pager -o cat
 ```
 
-`down` 默认保留 `logrotate-state` named volume 和宿主机日志。不要使用 `down --volumes`，除非已经明确批准删除
-轮转状态。目标 Linux 环境的完整单 worker 验收使用显式隔离目录运行：
+持久化路径、容量与限流、按时间导出和下载、旧文件日志保留及回滚见
+[日志部署文档](docs/logging/log_rotation.md#docker-compose-journald)。
+当前 Compose 固定发布宿主机端口，多容器扩容需要额外配置端口与负载均衡。
+
+仅在获准的 Linux 测试主机执行隔离验收：
 
 ```bash
-./scripts/verify_logrotate_sidecar.sh /tmp/agent-backend-logrotate-acceptance
+./scripts/verify_journald.sh /tmp/agent-backend-journald-acceptance
 ```
 
-验收脚本会创建自己的临时子目录和 Compose project，结束时删除测试容器、测试 state volume 和测试镜像，但保留
-隔离目录中的日志归档供检查。它拒绝在 macOS 或生产日志目录上运行。详细权限、轮转和故障处理见
-`docs/logging/log_rotation.md`。隔离目录还必须位于仓库之外，避免测试 secrets 或日志进入 Docker build context。
+脚本验证多 worker 输出、固定标签、容器重建和删除后的历史查询及持久化日志导出；不修改宿主机配置，
+不删除旧部署日志。宿主机重启、长期保留和高峰日志完整性仍需另行验收。
 
 ## 相关文档
 

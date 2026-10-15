@@ -1,7 +1,8 @@
 # 日志输出与轮转部署方案
 
 本文档面向开发和运维人员，说明 `agent-backend` 的日志责任边界和本地开发用法，并提供
-Docker Compose、Linux `logrotate` 和 Kubernetes 三种部署环境的轮转与持久化方案。
+Docker Compose journald（当前默认）、Docker local、logrotate sidecar（参考）、Linux `logrotate`
+和 Kubernetes 的日志持久化方案。
 
 ## 应用责任边界
 
@@ -47,20 +48,18 @@ Celery Worker 使用同一组配置；开启文件输出时路径为 `<LOG_BASE_
 | --- | --- | --- | --- | --- |
 | `local`：本地开发 | `true` | `true` | `logs`，解析为项目根目录下的 `logs/` | 开发者按需清理；不适合长期运行 |
 | `dev` / `test`：开发、测试或临时进程 | `false` | `true` | 不配置 | CI / 终端收集标准错误流 |
-| `prod`：本仓库 Compose + logrotate Sidecar | `true` | `false` | `logs`，在 API 容器内解析为 `/app/logs` | 单副本 logrotate Sidecar |
+| `prod`：本仓库 Compose + journald | `false` | `true` | 不配置，不写应用文件 | 宿主机持久化 journal |
 
 还应遵守以下约束：
 
 - 不要同时设置为 `false`，否则应用日志没有任何输出目标。
 - 同时设置为 `true` 主要用于本地调试。在线环境双写会重复占用 I/O 和磁盘，并可能被日志平台重复采集。
 - `LOG_WRITE_TO_FILE=true` 时，必须配置可写的 `LOG_BASE_DIR` 和独立于应用进程的轮转机制。
-- logrotate Sidecar 依赖固定文件输入，因此 `configs/.env.prod` 不能改为 console-only；没有 Sidecar 时则不应沿用
-  当前 `prod` 配置写入容器文件。
+- Compose journald 部署必须使用 console-only，避免日志落入容器文件系统。
 - `LOG_FORMAT` 与输出目标相互独立；平台采集通常使用 `json`，本地阅读通常使用 `text`。
 
-同一个配置文件无法同时表达 Sidecar file-only 和 Kubernetes console-only 两种拓扑。如果生产环境改用普通
-Docker 或 Kubernetes，应在部署前调整对应 `configs/.env.{APP_ENV}`，或者新增独立的 `APP_ENV` 配置文件，
-不要再通过 Compose 或 manifest 临时覆盖这些变量。
+Compose journald 和 Kubernetes 均使用 console-only；日志存储由各自平台负责。输出目标仍由环境配置文件
+声明，不通过 Compose 或 manifest 临时覆盖。
 
 ## 日志格式
 
@@ -140,22 +139,24 @@ truncate -s 0 logs/celery/app.log
 按需应对容器重建、Pod 漂移或节点故障造成的日志丢失；明确应用、容器运行时、宿主机和日志平台之间的轮转与
 保留责任；同时保留统一的 JSON Lines 和 trace ID，便于检索、聚合和故障排查。
 
-不同方案解决的问题和适用边界如下。两个输出开关的权威取值见前文“输出目标的选择原则”：
+当前根 Compose 默认选择 journald；其他方案供不同部署需求参考，不会自动启用。
+下表并列比较适用边界，当前环境配置取值见前文“输出目标的选择原则”，替代方案的输出要求见各自章节：
 
 | 部署方式 | 主要解决的问题或痛点 | 应用输出 | 轮转和保留责任 |
 | --- | --- | --- | --- |
 | 本地开发 | 无需部署日志基础设施即可实时查看和回溯日志，降低本地调试成本；不解决长期运行时的磁盘增长问题 | stderr + 固定 `app.log` | 不定时轮转，按需手动清理 |
-| Docker / Docker Compose | 避免应用自行轮转和运维人员直接操作 Docker 内部日志文件；限制单机容器日志的磁盘占用 | stderr | Docker `local` logging driver |
+| Docker local（可选） | 避免应用自行轮转和运维人员直接操作 Docker 内部日志文件；限制单机容器日志的磁盘占用 | stderr | Docker `local` logging driver |
 | Linux 直接部署 | 满足传统运维工具对固定日志路径、压缩归档和保留数量的要求，同时让应用继续写入固定文件 | 固定 `app.log` | Linux `logrotate` |
-| Docker Compose 且要求宿主机固定文件 | 兼顾容器化部署和宿主机固定路径需求，便于既有采集器、备份或普通业务日志工具读取日志 | bind mount 后的固定 `app.log` | 单副本 logrotate sidecar |
+| Compose journald（当前默认，Linux + systemd） | 跨容器重建保留日志，按固定标签查询并按需导出文件 | stdout/stderr | 宿主机 journald |
+| Compose logrotate sidecar（参考） | 持续保存宿主机固定路径文件，便于直接下载或对接文件工具；接受 copytruncate 丢失窗口 | bind mount 后的固定 `app.log` | 单副本 sidecar；历史资产见下文 |
 | Kubernetes | 解决 Pod 日志易失、实例分散以及跨 Pod 检索困难的问题，并由平台统一补充工作负载元数据、集中存储和设置 retention | stdout/stderr | 节点采集 Agent 和集中日志平台 |
 
 Docker `local` logging driver 和 Linux `logrotate` 主要控制单机磁盘占用与历史文件数量，并不提供跨实例集中检索、
 跨节点持久化或严格无丢失保证。只有配置了节点采集 Agent、集中日志后端及其 retention 策略，才能覆盖这些平台级需求。
 
-## Docker 和 Docker Compose
+## Docker local 驱动（可选替代方案）
 
-不要求宿主机固定文件路径时，应在所选 `configs/.env.{APP_ENV}` 中配置 console-only，由 Docker `local`
+不需要跨容器删除保留历史时，可以在所选 `configs/.env.{APP_ENV}` 中配置 console-only，由 Docker `local`
 logging driver 对 stderr 落盘、轮转和压缩：
 
 ```env
@@ -163,8 +164,9 @@ LOG_WRITE_TO_FILE=false
 LOG_WRITE_TO_CONSOLE=true
 ```
 
-根目录 `.env` 的 `APP_ENV` 必须指向一个已经配置为 console-only 的环境文件；仓库当前的 `.env.prod` 专用于
-logrotate Sidecar，不能原样用于本节方案。`.secrets` 只保留应用启动所需的密钥。以下 Compose 片段假设
+本节不是根 Compose 的默认部署方案；容器删除时 Docker local 历史日志也会清理。
+根目录 `.env` 的 `APP_ENV` 必须指向 console-only 的环境文件，`prod` 已符合此输出要求。
+`.secrets` 只保留应用启动所需的密钥。以下 Compose 片段假设
 容器内项目根目录为 `/app`：
 
 ```yaml
@@ -207,26 +209,59 @@ Docker 管理的内部日志文件不是运维契约，不应直接使用 `tail`
 参考 [Docker local logging driver](https://docs.docker.com/engine/logging/drivers/local/) 和
 [Compose logging 配置](https://docs.docker.com/reference/compose-file/services/#logging)。
 
-## Docker Compose logrotate sidecar
+## Docker Compose logrotate sidecar（参考方案）
 
-需要在固定宿主机目录交付日志文件时，可使用仓库提供的 `compose.yaml` 和
-`deploy/logrotate/`。API 与 sidecar 共享同一个宿主机 bind source，但使用各自职责对应的容器路径：API 只追加
+本节保留原部署方案，适用于需要持续在宿主机固定目录保存 `.log/.gz` 文件的环境。
+**它不是当前默认方案；当前默认使用下文的 Docker Compose journald。**
+
+原 `deploy/logrotate/` 和 `scripts/verify_logrotate_sidecar.sh` 已从当前工作区移除，当前 `compose.yaml`、
+`.env.compose.example` 和 `configs/.env.prod` 也已切换到 journald。下文的参数、文件路径和命令均属于
+历史版本 `117597dad235c48f8b587ec406860082ee5339b4`，不能直接配合当前工作区执行。
+
+### 历史资产与使用边界
+
+以下路径均相对于上述历史提交，而非当前工作区：
+
+| 历史资产 | 用途 |
+| --- | --- |
+| `compose.yaml`、`.env.compose.example` | API 与 sidecar 编排、部署参数 |
+| `configs/.env.prod` | JSON 文件输出、关闭业务控制台输出 |
+| `deploy/logrotate/Dockerfile` | 固定版本的 logrotate 镜像 |
+| `deploy/logrotate/agent-backend.conf`、`deploy/logrotate/crontab` | 轮转策略与调度 |
+| `scripts/verify_logrotate_sidecar.sh` | 当时的隔离验收脚本 |
+
+可以在仓库根目录只读查看历史内容，不会恢复或覆盖当前文件：
+
+```bash
+git show 117597dad235c48f8b587ec406860082ee5339b4:compose.yaml
+git show 117597dad235c48f8b587ec406860082ee5339b4:deploy/logrotate/agent-backend.conf
+git show 117597dad235c48f8b587ec406860082ee5339b4:scripts/verify_logrotate_sidecar.sh
+```
+
+若要重新采用本方案，应准备完整匹配的历史部署资产或另行适配当前版本，并在隔离 Linux 环境重新验收；
+不能只恢复 sidecar service 而继续使用 console-only 的生产配置。本节不表示历史镜像、依赖和脚本已针对
+当前版本重新验证。已完成计划中的结果仅属于当时版本。
+
+### 架构与适用范围
+
+API 与 sidecar 共享同一个宿主机 bind source，但使用各自职责对应的容器路径：API 只追加
 `/app/logs/app.log`，sidecar 从 `/var/log/agent-backend/app.log` 轮转同一个文件。sidecar 不挂载应用配置、
 密钥或 Docker socket，不使用网络，根文件系统只读；轮转 state 单独保存在 `logrotate-state` named volume。
 
-该方案只适合允许 `copytruncate` 极小丢失窗口的普通业务日志。审计、计费、合规、多主机或 Kubernetes 场景应使用
-stdout/stderr、节点级单一采集器和集中日志后端。
+该方案只适合接受 `copytruncate` 丢失窗口的普通业务日志。多进程不负责轮转，但仍共享写入文件；
+单 worker 也不能消除复制与截断之间的丢失窗口。严格审计完整性需单独设计可靠存储，不能仅凭采用
+日志采集器宣称零丢失。多主机和 Kubernetes 通常由平台统一采集与存储。
 
 ### Compose 参数和应用配置
 
-从模板创建根目录 `.env`：
+以下初始化命令仅用于已经准备好完整历史资产的新部署；已有 `.env` 应手动合并：
 
 ```bash
 cp .env.compose.example .env
 ```
 
-每个 API 容器统一运行一个 Uvicorn worker，Compose 启动参数固定为 `--workers 1`，不提供 worker 数量配置。
-扩容由部署平台管理副本；当前 Compose 使用固定宿主机端口，增加副本前需配套端口和负载均衡配置。
+该历史提交的 Compose 固定使用 `--workers 1`，这属于当时的进程约定，并非 sidecar 方案本身要求单 worker。
+历史 Compose 固定发布宿主机端口，多容器扩容需额外配置端口和负载均衡。当前默认 Compose 的 worker 配置见 journald 章节。
 
 `.env` 保存唯一的 `APP_ENV` 和 Compose 部署参数：镜像名、宿主机日志目录、端口、资源限制及
 Docker 内部日志上限。真实密码、token 和 API key 仍只放在 `.secrets`。关键参数如下：
@@ -241,7 +276,7 @@ Docker 内部日志上限。真实密码、token 和 API key 仍只放在 `.secr
 | `DOCKER_LOG_MAX_SIZE` / `DOCKER_LOG_MAX_FILE` | API access/error log 与 sidecar stderr 的 Docker `local` driver 上限 |
 
 Compose 根据同一个 `APP_ENV` 挂载 `configs/.env.${APP_ENV}`，并只把该环境选择器注入 API 进程。
-当前 `configs/.env.prod` 为 Sidecar 拓扑配置：
+历史版本的 `configs/.env.prod` 使用以下 Sidecar 拓扑配置；当前版本已改为 console-only：
 
 ```env
 LOG_BASE_DIR=logs
@@ -287,7 +322,7 @@ root 所有的目录。先启动 sidecar 可以提前暴露配置、state volume
 
 ### 轮转策略和文件名
 
-唯一策略来源是 `deploy/logrotate/agent-backend.conf`：
+历史策略位于上述提交的 `deploy/logrotate/agent-backend.conf`，内容为：
 
 ```text
 daily
@@ -344,7 +379,7 @@ sidecar 停止不会联动终止 API，但 `app.log` 会持续增长。此时应
 第二个周期调度 sidecar，以免轮转竞争。`docker compose down` 默认保留 state volume 和宿主机日志，不要在普通回滚中
 使用 `--volumes` 或删除归档。
 
-目标 Linux 环境的完整验收命令为：
+仅在准备好完整历史部署资产的隔离 Linux 环境中，使用该历史版本的脚本验收；当前工作区没有此脚本：
 
 ```bash
 ./scripts/verify_logrotate_sidecar.sh /tmp/agent-backend-logrotate-acceptance
@@ -355,10 +390,204 @@ API 重建和 sidecar 故障隔离。隔离目录必须位于仓库之外，防�
 脚本结束时清理测试容器、state volume 和唯一测试镜像，但保留隔离日志供复核。macOS Docker Desktop 只能用于功能
 冒烟，不能替代 Linux bind mount、权限和 inode 验收。
 
+## Docker Compose journald
+
+**当前默认方案。** 本节描述当前根 Compose 与生产配置；原 logrotate sidecar 方案作为独立参考保留在前文。
+
+根 `compose.yaml` 使用 Docker `journald` 驱动，要求 Docker Engine 与持久化 journal 位于同一台
+Linux systemd 主机。macOS Docker Desktop、远程 Docker context 和未运行 journald 的主机不能代替目标环境验收。
+API 业务日志输出到 stderr；Uvicorn access/error 输出也由同一驱动收集。容器不挂载日志目录或 journal socket，
+Docker daemon 负责发送日志。仓库不再部署 logrotate sidecar。
+
+### 配置与固定服务标签
+
+应用配置 `configs/.env.prod`：
+
+```dotenv
+LOG_FORMAT=json
+LOG_WRITE_TO_FILE=false
+LOG_WRITE_TO_CONSOLE=true
+```
+
+新部署从 `.env.compose.example` 创建根 `.env`；已有部署手动合并参数，不覆盖自己的配置。
+`API_WORKERS` 控制 Uvicorn worker 数，默认 1；多 worker 与容器 CPU/内存和下游连接预算共同调整。
+日志方案支持多个 worker，不强制单进程。
+
+```yaml
+logging:
+  driver: journald
+  options:
+    tag: "${COMPOSE_PROJECT_NAME:?set COMPOSE_PROJECT_NAME in .env}-${APP_ENV:?set APP_ENV in .env}-api"
+    mode: blocking
+```
+
+默认项目名 `agent-backend`、环境 `prod` 得到 `agent-backend-prod-api`。项目名需在同一部署跨发布保持不变，
+不要包含版本、时间或容器 ID。不同项目/环境使用不同标签；同服务副本共享标签。
+`CONTAINER_ID_FULL` 和 `IMAGE_NAME` 等 journal 元数据用于区分实例和版本。
+不要依赖 `docker compose -p` 覆盖插值中的项目名，统一在根 `.env` 设置 `COMPOSE_PROJECT_NAME`。
+
+此驱动没有日志路径、`max-size` 或 `max-file` 选项。`blocking` 可能把日志背压传递给请求处理；改为
+`non-blocking` 会引入缓冲区满时丢弃消息的取舍，不应在没有压测证据时直接更改。
+
+### 宿主机持久化与保留
+
+`deploy/journald/agent-backend.conf` 是供运维审核的宿主机配置示例，不会被 Compose 自动安装。
+在获准修改的 Linux 主机上先检查现有配置、磁盘容量和系统日志需求：
+
+```bash
+systemctl is-active systemd-journald
+systemd-analyze cat-config systemd/journald.conf
+journalctl --disk-usage
+```
+
+示例内容如下，数值是初始预算，必须按实际日志速率调整：
+
+```ini
+[Journal]
+Storage=persistent
+SystemMaxUse=2G
+SystemKeepFree=2G
+MaxRetentionSec=14day
+Compress=yes
+```
+
+普通 journal 配置影响整机，不是本项目独享的配额。空间不足可能提前清理，14day 不保证完整保存 14 天。
+不要直接操作 `.journal` 内部文件，也不要对 `/var/log/journal` 再运行 logrotate。
+持久化路径为 `/var/log/journal`；`/run/log/journal` 是临时存储。需要独立磁盘时由运维设置挂载，
+Compose 不能逐服务指定 journal 存储路径。磁盘损坏和主机丢失需要独立备份，不由本方案保证。
+
+确认不与现有 drop-in 冲突后，在维护窗口安装配置并使其生效；以下命令会修改宿主机，不能在本地文档检查时执行：
+
+```bash
+sudo install -d -m 0755 /etc/systemd/journald.conf.d
+sudo install -m 0644 deploy/journald/agent-backend.conf /etc/systemd/journald.conf.d/agent-backend.conf
+sudo systemctl restart systemd-journald
+sudo journalctl --flush
+sudo journalctl --sync
+```
+
+`RateLimitIntervalSec` / `RateLimitBurst` 可能丢弃高峰日志；Docker 汇聚的流量不能假定按容器独立限流。
+上线前观察 journald 的 suppressed/dropped 提示，并按实际峰值校准宿主机策略；不默认关闭整机限流。
+避免把“避开 copytruncate 窗口”描述成端到端零丢失保证。
+
+### 构建与启动
+
+先确认上面的宿主机前置条件、真实依赖可达，以及 `.secrets` 不含 `APP_ENV`。API 保持非 root，
+应用配置与密钥只读挂载。以下示例镜像名需与根 `.env` 的 `AGENT_BACKEND_IMAGE` 一致：
+
+```bash
+docker compose build api
+API_UID=$(docker run --rm --entrypoint id agent-backend:prod -u)
+API_GID=$(docker run --rm --entrypoint id agent-backend:prod -g)
+sudo chown "$API_UID:$API_GID" .secrets
+sudo chmod 0400 .secrets
+docker compose config --quiet
+docker compose up -d api
+```
+
+更换镜像用户 UID/GID 后重新核对密钥文件权限。journald 不可用时应修复宿主机前置条件，
+不要静默回退为容器内文件日志。仅为该 service 配置日志驱动，无需修改 Docker daemon 的全局默认驱动。
+
+### 日常查询
+
+以下命令在 Docker 所在 Linux 主机执行；将标签换成实际项目名和环境。读取系统日志需要相应权限，
+示例使用 sudo。固定标签匹配跨发布的现存 journal 记录，旧容器已删除也可查询；不要加仅限本次开机的 `-b`。
+
+```bash
+# 最近 200 条并持续跟踪
+sudo journalctl CONTAINER_TAG=agent-backend-prod-api -n 200 -f -o cat
+
+# 最近一小时
+sudo journalctl CONTAINER_TAG=agent-backend-prod-api --since "1 hour ago" --no-pager -o short-iso
+
+# 按 trace ID 搜索
+sudo journalctl CONTAINER_TAG=agent-backend-prod-api --since "1 day ago" --no-pager -o cat | grep -F '实际_trace_id'
+
+# 包含容器 ID、镜像等元数据
+sudo journalctl CONTAINER_TAG=agent-backend-prod-api --since "1 hour ago" --no-pager -o json
+
+# 当前 Compose 容器的便捷查询；跨发布历史使用上面的 journalctl
+docker compose logs --tail=200 -f api
+```
+
+`-o cat` 输出正文；`-o short-iso` 增加 journal 时间；`-o json` 是包含 MESSAGE 的 journal 外层 JSON。
+应用业务消息为 JSON，但 Uvicorn 原生日志可能是文本，因此不能把整个 `-o cat` 输出当成纯 JSON Lines。
+需要区分实例时同时增加 `CONTAINER_ID_FULL=实际完整ID` 条件。
+
+### 导出和下载 .log
+
+在服务器上选择有写权限的目录，明确时间范围与时区，导出已保留的历史。以下为北京时间示例：
+
+```bash
+mkdir -p "$HOME/log-exports"
+sudo journalctl CONTAINER_TAG=agent-backend-prod-api \
+  --since "2026-10-15 09:00:00 Asia/Shanghai" \
+  --until "2026-10-15 12:00:00 Asia/Shanghai" \
+  --no-pager -o cat > "$HOME/log-exports/agent-backend-20261015.log"
+```
+
+重定向由当前登录用户执行，sudo 不赋予导出目录写权限。若要保留容器元数据，用 `-o json` 导出 `.jsonl`。
+在本地电脑执行下载，替换真实用户、服务器和目录：
+
+```bash
+scp 用户名@服务器地址:/home/用户名/log-exports/agent-backend-20261015.log "$HOME/Downloads/"
+```
+
+导出不会修改 journal。已过期、被清理或未成功采集的日志不能恢复；导出文件含业务内容，应限制访问并按需清理。
+
+### 从旧 sidecar 部署切换
+
+历史计划中的 logrotate 描述保留为当时记录，不代表当前部署方式。
+原方案的结构、参数和可核验 Git 资产见前文“Docker Compose logrotate sidecar（参考方案）”。
+旧 `.log/.gz` 不会自动导入 journal，保留原宿主机日志目录和 `logrotate-state` volume，按旧文件方式查询。
+先完成宿主机准备及隔离验收，再安排获准的发布窗口：
+
+1. 记录原 Compose 项目、镜像、环境和日志目录，保留可用的旧版本部署文件。
+2. 更新环境配置为 console-only，合并新模板；移除旧 `AGENT_BACKEND_LOG_DIR`、`LOGROTATE_*`、
+   `DOCKER_LOG_MAX_*` 参数。保留 `API_WORKERS` 和现有资源限制。
+3. 重建 API，并验证新的请求日志进入固定标签且可从持久化 journal 查询。
+4. 使用旧部署文件精确停止旧 logrotate service；本仓库脚本不自动删除旧容器、归档或 volume。
+   不要用无差别 `--remove-orphans`/`--volumes` 清理共享部署。
+5. 若失败，使用旧镜像、旧生产配置和旧 Compose 恢复文件输出及 sidecar；切换期间的 journal 与旧文件需分别查询。
+
+更改日志驱动需要重建容器，普通 restart 不足以完成切换。旧归档是否清理是独立运维决定。
+
+### 隔离验收与未验证边界
+
+仅在获准的 Linux 测试主机执行；需要本机 Docker Engine、Compose v2.24.4 或更新版本、持久化 journald、
+可构建 API 镜像的网络以及 root 或 `sudo -n journalctl` 权限：
+
+```bash
+./scripts/verify_journald.sh /tmp/agent-backend-journald-acceptance
+```
+
+脚本使用唯一 Compose 项目、固定测试标签、示例密钥与 3 个 worker。它验证驱动/标签、业务 JSON 到达、
+并发请求、容器重建导致 ID 变化但标签不变、旧容器删除后历史仍可读取，以及从 `/var/log/journal` 导出日志。
+不存在的匿名探测路径用于产生 404 请求日志，不要求新增业务 API，也不证明数据库等业务依赖健康。
+脚本只清理自己的容器、镜像和示例密钥，保留导出文件；测试 journal 记录由宿主机正常 retention 清理。
+不会安装宿主机配置、重启服务、清空 journal 或删除旧部署资源。
+
+宿主机重启后的持久化需要另行安排重启验收：保存测试标签与 marker，重启后再用 journalctl 查询。
+高负载限流、长消息/异常堆栈完整性、长期 retention、断电与磁盘故障不由此冒烟脚本证明。
+本地语法与 YAML 校验不能替代上述 Linux 验收。
+
+2026-10-15 验证记录：在授权 Linux 开发服务器上，Docker Engine 26.1.3、Compose v2.27.0，
+执行 `./scripts/verify_journald.sh /tmp/agent-backend-journald-acceptance`，退出码为 0。
+两次发布各 3 个 worker、各 20 个并发请求的业务 JSON 均从持久化 journal 读出；容器 ID 改变、
+固定标签保持不变，两个容器删除后导出仍包含两次发布的 marker。根配置模板的 Compose 校验也通过。
+服务器已有持久化 journal，本次未安装示例 drop-in、未重启宿主机、未修改其他服务。
+本地 `uv run --no-sync pytest tests/config/test_config.py -q -p no:cacheprovider`：36 项通过，
+存在依赖库弃用警告。shell 语法、YAML 契约和 Markdown 链接检查通过。
+以上结果不覆盖前述重启、高负载、长消息、长期保留或业务依赖健康。
+
+参考：[Docker journald driver](https://docs.docker.com/engine/logging/drivers/journald/)、
+[journald.conf](https://www.freedesktop.org/software/systemd/man/latest/journald.conf.html)、
+[journalctl](https://www.freedesktop.org/software/systemd/man/latest/journalctl.html)。
+
 ## Linux logrotate
 
-本方案适用于 Linux 直接部署，或仍由宿主机统一管理 logrotate 的既有环境；它是 sidecar 的替代部署形态，不能与
-sidecar 同时管理同一个 `app.log`。
+本节只适用于仍需固定文件的 Linux 直接部署或既有环境，不是根 Compose 的当前方案。
+同一日志文件只能有一个轮转者；启用前需显式改为文件输出。
 
 ### 应用配置
 
@@ -467,7 +696,7 @@ systemctl status logrotate.timer
 journalctl -u logrotate.service
 ```
 
-仓库内只能验证应用不会执行轮转；`logrotate`、systemd、bind mount 权限和单 worker 运行时行为必须在
+仓库内只能验证应用不会执行轮转；`logrotate`、systemd、bind mount 权限和多进程运行时行为必须在
 Linux 测试环境完成最终验证。
 
 ## Docker 和 Kubernetes 平台统一采集
@@ -480,8 +709,7 @@ LOG_WRITE_TO_FILE=false
 LOG_WRITE_TO_CONSOLE=true
 ```
 
-仓库当前的 `configs/.env.prod` 专用于 logrotate Sidecar，不能不加修改地用于 Kubernetes。若 Kubernetes
-仍选择 `APP_ENV=prod`，ConfigMap 中提供的 `.env.prod` 必须采用上述 console-only 配置。
+`configs/.env.prod` 已使用 console-only；Kubernetes 仍需自行配置节点采集与后端，不能照搬 Compose 的 journald 驱动。
 
 使用 ConfigMap 和 Secret 将完整配置挂载为文件，容器环境变量只保留 `APP_ENV`。
 以下 Deployment 片段假设容器内项目根目录为 `/app`：

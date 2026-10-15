@@ -32,7 +32,7 @@
 - 非敏感运行参数必须在环境配置中声明，凭据只能放在 `.secrets` 允许的字段中；不得提交或记录真实
   secret、token、密码、私钥、数据库连接串或生产配置。
 - 根 `Dockerfile`、`compose.yaml`、`.env.compose.example` 与 `deploy/` 共同构成容器部署 contract；
-  保持 API 非 root、配置和密钥只读挂载、logrotate 单副本及最小权限边界。
+  保持 API 非 root、配置和密钥只读挂载、journald 固定服务标签及最小权限边界。
 
 ## 数据与验证
 

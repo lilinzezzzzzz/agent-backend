@@ -47,7 +47,6 @@ PROJECT_NAME="agent-backend-logrotate-verify-$$"
 API_IMAGE="$PROJECT_NAME-api:verify"
 LOGROTATE_IMAGE="$PROJECT_NAME-logrotate:verify"
 API_PORT=${LOGROTATE_VERIFY_API_PORT:-18000}
-API_WORKERS=${LOGROTATE_VERIFY_API_WORKERS:-3}
 ALPINE_REPOSITORY=${LOGROTATE_ALPINE_REPOSITORY:-https://dl-cdn.alpinelinux.org/alpine/v3.22}
 STARTED=false
 
@@ -62,7 +61,6 @@ AGENT_BACKEND_IMAGE=$API_IMAGE
 LOGROTATE_IMAGE=$LOGROTATE_IMAGE
 LOGROTATE_ALPINE_REPOSITORY=$ALPINE_REPOSITORY
 AGENT_BACKEND_LOG_DIR=$LOG_DIR
-API_WORKERS=$API_WORKERS
 API_PORT=$API_PORT
 API_CPUS=2.0
 API_MEMORY_LIMIT=1g
@@ -165,8 +163,8 @@ compose up -d
 wait_for_api
 
 WORKER_COUNT=$(compose logs --no-color api | awk '/Started server process/ {count++} END {print count + 0}')
-[ "$WORKER_COUNT" -eq "$API_WORKERS" ] || \
-    die "expected $API_WORKERS Uvicorn workers, observed $WORKER_COUNT"
+[ "$WORKER_COUNT" -eq 1 ] || \
+    die "expected 1 Uvicorn worker, observed $WORKER_COUNT"
 
 BEFORE_MARKER="before-rotation-$$"
 emit_requests "$BEFORE_MARKER" 40

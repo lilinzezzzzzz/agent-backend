@@ -1,4 +1,4 @@
-# 面向单台 Linux 主机的通用部署编排：
+# API 与 logrotate sidecar 的 Docker Compose 部署编排：
 # - 先把 .env.compose.example 复制为仓库根目录的 .env，再在其中调整部署参数。
 # - APP_ENV 只在根目录 .env 维护；Compose 将它注入容器并据此挂载对应的应用配置文件。
 # - 应用凭据不放在根目录 .env，仍由下方的 .secrets 只读挂载提供。
@@ -12,7 +12,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    # 显式声明生产启动命令，避免 Worker 拓扑依赖 Dockerfile 的默认命令。
+    # 每个 API 容器固定运行一个 Uvicorn worker；扩容由部署平台管理副本。
     command:
       - uvicorn
       - entrypoints.main:app
@@ -26,10 +26,10 @@ services:
       - httptools
       - --access-log
       - --workers
-      - ${API_WORKERS:?set API_WORKERS in .env}
+      - "1"
     # 异常退出或 Docker daemon/主机重启后自动恢复，但尊重运维人员的显式停止操作。
     restart: unless-stopped
-    # 使用轻量 init 转发终止信号，并回收多 Worker Uvicorn 创建的子进程。
+    # 使用轻量 init 转发终止信号并回收孤儿进程。
     init: true
     # API_PORT 是宿主机端口；Uvicorn 在容器内始终监听 8000。
     ports:
@@ -65,7 +65,7 @@ services:
     # 禁止通过 setuid 或文件 capability 在容器内获得额外权限。
     security_opt:
       - no-new-privileges:true
-    # Compose 级资源上限；应与 API_WORKERS 及数据库等下游连接上限一起调整。
+    # Compose 级资源上限；应结合请求负载及数据库等下游连接上限调整。
     cpus: ${API_CPUS:-2.0}
     mem_limit: ${API_MEMORY_LIMIT:-1g}
     # 限制 Uvicorn access/error 写入 Docker stdout/stderr 的大小；它与应用 app.log 相互独立。
@@ -92,7 +92,7 @@ services:
     network_mode: none
     volumes:
       # 与 API 共享同一个宿主机目录；容器内路径可以不同。
-      # logrotate 使用 copytruncate，所有 API Worker 可以保持原文件描述符继续写入。
+      # logrotate 使用 copytruncate，API worker 可以保持原文件描述符继续写入。
       - type: bind
         source: ${AGENT_BACKEND_LOG_DIR:?set AGENT_BACKEND_LOG_DIR in .env}
         target: /var/log/agent-backend

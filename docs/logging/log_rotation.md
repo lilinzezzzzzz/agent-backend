@@ -17,7 +17,7 @@ Logger 不负责：
 - 压缩、保留或清理历史日志。
 - 向集中日志后端上传日志。
 
-这个边界避免多个 Uvicorn Worker 或 Celery 进程同时轮转同一文件。需要注意，多进程直接追加
+这个边界避免多个应用实例或 Celery 进程同时轮转同一文件。需要注意，多进程直接追加
 同一文件仍不提供严格的全局顺序保证；对顺序、完整性或审计有严格要求时，应使用单一日志采集器。
 
 ## 应用配置
@@ -209,7 +209,7 @@ Docker 管理的内部日志文件不是运维契约，不应直接使用 `tail`
 
 ## Docker Compose logrotate sidecar
 
-当单台 Linux 主机必须在固定宿主机目录交付日志文件时，仓库提供 `compose.yaml` 和
+需要在固定宿主机目录交付日志文件时，可使用仓库提供的 `compose.yaml` 和
 `deploy/logrotate/`。API 与 sidecar 共享同一个宿主机 bind source，但使用各自职责对应的容器路径：API 只追加
 `/app/logs/app.log`，sidecar 从 `/var/log/agent-backend/app.log` 轮转同一个文件。sidecar 不挂载应用配置、
 密钥或 Docker socket，不使用网络，根文件系统只读；轮转 state 单独保存在 `logrotate-state` named volume。
@@ -225,14 +225,16 @@ stdout/stderr、节点级单一采集器和集中日志后端。
 cp .env.compose.example .env
 ```
 
-`.env` 保存唯一的 `APP_ENV` 和 Compose 部署参数：镜像名、宿主机日志目录、API Worker 数、端口、资源限制及
+每个 API 容器统一运行一个 Uvicorn worker，Compose 启动参数固定为 `--workers 1`，不提供 worker 数量配置。
+扩容由部署平台管理副本；当前 Compose 使用固定宿主机端口，增加副本前需配套端口和负载均衡配置。
+
+`.env` 保存唯一的 `APP_ENV` 和 Compose 部署参数：镜像名、宿主机日志目录、端口、资源限制及
 Docker 内部日志上限。真实密码、token 和 API key 仍只放在 `.secrets`。关键参数如下：
 
 | 参数 | 作用 |
 | --- | --- |
 | `APP_ENV` | 唯一应用环境标识；可选值为 `local`、`dev`、`test`、`prod` |
 | `AGENT_BACKEND_LOG_DIR` | API 与 sidecar 共享的宿主机绝对目录 |
-| `API_WORKERS` | API 容器内 Uvicorn Worker 数量 |
 | `AGENT_BACKEND_IMAGE` / `LOGROTATE_IMAGE` | API 和 sidecar 镜像名 |
 | `LOGROTATE_ALPINE_REPOSITORY` | sidecar 构建使用的 Alpine repository 根地址；默认使用官方源 |
 | `APP_SECRETS_FILE` | 不含 `APP_ENV` 的应用密钥文件，只读挂载到 API 容器 |
@@ -348,7 +350,7 @@ sidecar 停止不会联动终止 API，但 `app.log` 会持续增长。此时应
 ./scripts/verify_logrotate_sidecar.sh /tmp/agent-backend-logrotate-acceptance
 ```
 
-脚本要求显式隔离目录，覆盖多 Worker 持续写入、JSON Lines、inode、`delaycompress`、`rotate 30`、state 持久化、
+脚本要求显式隔离目录，覆盖单 worker 数量检查、并发请求持续写入、JSON Lines、inode、`delaycompress`、`rotate 30`、state 持久化、
 API 重建和 sidecar 故障隔离。隔离目录必须位于仓库之外，防止测试 secrets 或日志进入 API 镜像 build context。
 脚本结束时清理测试容器、state volume 和唯一测试镜像，但保留隔离日志供复核。macOS Docker Desktop 只能用于功能
 冒烟，不能替代 Linux bind mount、权限和 inode 验收。
@@ -465,7 +467,7 @@ systemctl status logrotate.timer
 journalctl -u logrotate.service
 ```
 
-仓库内只能验证应用不会执行轮转；`logrotate`、systemd、bind mount 权限和多 Worker 运行时行为必须在
+仓库内只能验证应用不会执行轮转；`logrotate`、systemd、bind mount 权限和单 worker 运行时行为必须在
 Linux 测试环境完成最终验证。
 
 ## Docker 和 Kubernetes 平台统一采集

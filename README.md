@@ -357,11 +357,14 @@ docker run --rm -p 8000:8000 \
 
 ### 生产 Compose 与 logrotate sidecar
 
-`compose.yaml` 面向单台 Linux 主机，运行一个可配置多 Worker 的 API service 和一个单副本
-logrotate sidecar。两者共享宿主机日志目录，活动日志固定为 `app.log`；sidecar 每 5 分钟检查一次，负责
-`copytruncate`、压缩和保留 30 个归档。该方案不提供审计级零丢失保证，也不用于 Kubernetes。
-若改为 Kubernetes 部署，通常每个 FastAPI Pod 运行一个 Uvicorn worker，通过多个 Pod 横向扩展；每个 Pod
-是否配置 1 核 CPU，应根据请求类型、延迟目标、内存占用和压测结果确定，而不是固定规则。
+脚手架不限定部署平台，每个 API 容器统一运行一个 Uvicorn worker，扩容由部署平台管理副本。
+`compose.yaml` 固定使用 `--workers 1`，并提供一个单副本 logrotate sidecar。两者共享宿主机日志目录，
+活动日志固定为 `app.log`；sidecar 每 5 分钟检查一次，负责 `copytruncate`、压缩和保留 30 个归档。
+该文件日志方案不提供审计级零丢失保证。
+Kubernetes 部署通过多个 Pod 横向扩展，日志采用平台统一采集，具体配置见
+[日志部署文档](docs/logging/log_rotation.md#docker-和-kubernetes-平台统一采集)。当前 Compose 发布固定宿主机端口，
+不能直接通过增加 API 副本完成扩容，需要部署平台配套端口和负载均衡配置。
+单 worker 不要求固定配置 1 核 CPU，资源应根据请求类型、延迟目标、内存占用和压测结果确定。
 文件输出、日志目录和关闭业务控制台日志均由 `configs/.env.prod` 配置；Compose 只注入 `APP_ENV`。
 
 部署前需要 Docker Engine、Docker Compose v2、可访问的 PostgreSQL/Redis 等外部依赖，以及不含 `APP_ENV` 的
@@ -372,7 +375,7 @@ logrotate sidecar。两者共享宿主机日志目录，活动日志固定为 `a
 cp .env.compose.example .env
 ```
 
-至少按目标环境调整 `.env` 中的 `APP_ENV`、`AGENT_BACKEND_LOG_DIR`、`API_WORKERS`、镜像、端口和资源限制。
+至少按目标环境调整 `.env` 中的 `APP_ENV`、`AGENT_BACKEND_LOG_DIR`、镜像、端口和资源限制。
 `.env` 不应存放应用密钥，也不会提交到 Git。
 
 先构建镜像并查询 API 镜像内 `app` 用户的数字 UID/GID：
@@ -409,7 +412,7 @@ docker compose down
 ```
 
 `down` 默认保留 `logrotate-state` named volume 和宿主机日志。不要使用 `down --volumes`，除非已经明确批准删除
-轮转状态。目标 Linux 环境的完整多 Worker 验收使用显式隔离目录运行：
+轮转状态。目标 Linux 环境的完整单 worker 验收使用显式隔离目录运行：
 
 ```bash
 ./scripts/verify_logrotate_sidecar.sh /tmp/agent-backend-logrotate-acceptance

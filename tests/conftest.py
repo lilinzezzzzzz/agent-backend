@@ -207,6 +207,10 @@ TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 # 注意：集成测试需要真实的 Redis 服务
 TEST_REDIS_URL = os.getenv("TEST_REDIS_URL", "redis://localhost:6379/15")
 
+# pytest 临时目录根路径，固定在仓库内便于定位测试产物（已在 .gitignore 中忽略）。
+# pytest 会在每次运行首次使用 tmp_path 时清空该目录；显式传入 --basetemp 时不使用它。
+PYTEST_TMP_ROOT = PROJECT_ROOT / ".pytest-tmp"
+
 
 # ==========================================
 # 4. pytest 配置 hooks
@@ -222,9 +226,13 @@ def pytest_configure(config: pytest.Config) -> None:
     - 注册自定义 markers
     - 设置测试环境
     - 设置 pytest 临时目录
+
+    tryfirst 确保在 pytest 内置 tmpdir 插件读取 basetemp 之前完成设置；
+    命令行传入的 --basetemp 优先于这里的默认值。
     """
+    # .pytest-tmp 只保存本次运行的临时文件，每次运行都会被清空。
     if config.option.basetemp is None:
-        config.option.basetemp = PROJECT_ROOT / ".pytest-tmp"
+        config.option.basetemp = PYTEST_TMP_ROOT
 
     # 注册自定义 markers
     config.addinivalue_line(

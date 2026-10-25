@@ -7,7 +7,7 @@ requires-python = ">=3.14,<3.15"
 
 # 生产运行时依赖：只保留真正业务需要 import 的模块
 dependencies = [
-    "fastapi>=0.135.1",
+    "fastapi>=0.162.0",
     "uvicorn>=0.41.0",
     "starlette>=0.52.1",
     "pydantic>=2.12.5",
@@ -68,9 +68,9 @@ dependencies = [
     "mcp>=1,<2",
     "pypinyin>=0.55.0",
     "agentscope>=2,<3",
-    "opentelemetry-api>=1.42.1,<2",
-    "opentelemetry-exporter-otlp-proto-http>=1.42.1,<2",
-    "opentelemetry-sdk>=1.42.1,<2",
+    "opentelemetry-api>=1.44.0,<2",
+    "opentelemetry-exporter-otlp-proto-http>=1.44.0,<2",
+    "opentelemetry-sdk>=1.44.0,<2",
 ]
 
 # 分组依赖 —— 开发环境才需要

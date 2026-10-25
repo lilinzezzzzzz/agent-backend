@@ -4,10 +4,19 @@ from unittest.mock import AsyncMock, MagicMock
 import anyio
 import pytest
 from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from opentelemetry import trace
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+from opentelemetry.trace import SpanKind
 
 import internal.app as app_module
 import internal.infra.celery.lifecycle as celery_lifecycle
+import internal.middlewares.endpoint_guard as endpoint_guard_module
+import internal.middlewares.recorder as recorder_module
 import internal.utils.background_tasks as background_tasks
+import pkg.tracing.otel as otel_runtime
+from pkg.tracing import span_context
 
 
 @pytest.fixture
@@ -399,3 +408,85 @@ async def test_celery_worker_shutdown_waits_for_enqueued_logs(
     await celery_lifecycle.worker_shutdown()
 
     complete.assert_awaited_once_with()
+
+
+def test_fastapi_lifespan_owns_one_exporter_and_native_request_spans(
+    lifecycle_events: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    exporter = InMemorySpanExporter()
+    shutdown_exporter = MagicMock(wraps=exporter.shutdown)
+    monkeypatch.setattr(exporter, "shutdown", shutdown_exporter)
+    exporter_factory = MagicMock(return_value=exporter)
+    monkeypatch.setattr(otel_runtime, "OTLPSpanExporter", exporter_factory)
+    monkeypatch.setattr(otel_runtime, "BatchSpanProcessor", SimpleSpanProcessor)
+    current_provider = [trace.get_tracer_provider()]
+    monkeypatch.setattr(trace, "get_tracer_provider", lambda: current_provider[0])
+    monkeypatch.setattr(
+        trace,
+        "set_tracer_provider",
+        lambda provider: current_provider.__setitem__(0, provider),
+    )
+    monkeypatch.setattr(app_module, "init_tracing", otel_runtime.init_tracing)
+    monkeypatch.setattr(recorder_module, "logger", MagicMock())
+    endpoint = "http://collector.invalid/v1/traces"
+    app_module.settings.DEBUG = True
+    app_module.settings.OTEL_TRACING_ENABLED = True
+    app_module.settings.OTEL_OPERATION_SPANS_ENABLED = True
+    app_module.settings.OTEL_METRICS_ENABLED = False
+    app_module.settings.OTEL_LOGS_ENABLED = False
+    app_module.settings.OTEL_AUTO_CONFIGURE = False
+    app_module.settings.OTEL_SERVICE_NAME = "test-agent-backend"
+    app_module.settings.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT = endpoint
+    app_module.settings.OTEL_EXPORTER_OTLP_TIMEOUT_SECONDS = 3.5
+    app_module.settings.BACKEND_CORS_ORIGINS = ["https://client.example"]
+    monkeypatch.setattr(
+        endpoint_guard_module,
+        "settings",
+        MagicMock(ENDPOINT_GUARD_ENABLED=False),
+    )
+    monkeypatch.setattr(
+        endpoint_guard_module,
+        "new_endpoint_guard_rule_provider",
+        MagicMock(),
+    )
+    monkeypatch.setenv("FASTAPI_OTEL_AUTO_CONFIGURE", "true")
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://unused.invalid")
+
+    def shutdown_tracing() -> None:
+        otel_runtime.shutdown_tracing()
+        lifecycle_events.append("shutdown_tracing")
+
+    monkeypatch.setattr(app_module, "shutdown_tracing", shutdown_tracing)
+
+    def register_router(app: FastAPI) -> None:
+        @app.get("/ping")
+        async def ping() -> dict[str, bool]:
+            async with span_context("business.ping"):
+                return {"ok": True}
+
+    monkeypatch.setattr(app_module, "register_router", register_router)
+    app = app_module.create_app()
+    try:
+        with TestClient(app) as client:
+            response = client.get("/ping", headers={"Origin": "https://client.example"})
+            assert response.status_code == 200
+            assert response.json() == {"ok": True}
+            assert response.headers["Access-Control-Allow-Origin"] == "https://client.example"
+            assert "traceparent" in response.headers["Access-Control-Expose-Headers"].lower()
+    finally:
+        otel_runtime.shutdown_tracing()
+
+    finished = {span.name: span for span in exporter.get_finished_spans()}
+    root = finished["GET /ping"]
+    business = finished["business.ping"]
+    assert sum(span.kind is SpanKind.SERVER for span in finished.values()) == 1
+    assert business.parent.span_id == finished["fastapi.endpoint"].context.span_id
+    assert response.headers["traceparent"] == (
+        f"00-{root.context.trace_id:032x}-{root.context.span_id:016x}-{int(root.context.trace_flags):02x}"
+    )
+    assert root.context.trace_flags.sampled
+    assert "X-Trace-ID" not in response.headers
+    exporter_factory.assert_called_once_with(endpoint=endpoint, timeout=3.5)
+    shutdown_exporter.assert_called_once_with()
+    assert lifecycle_events == _CLEANUP_ORDER

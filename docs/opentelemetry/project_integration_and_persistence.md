@@ -12,14 +12,14 @@ Collector pipeline、持久化后端和真实 Trace 查询链路尚未在本仓�
 | 能力 | 当前状态 | 代码或配置依据 |
 | --- | --- | --- |
 | Trace 生成 | 已实现 | `pkg.tracing` 提供进程级 runtime 和 `span_context` |
-| FastAPI Root Span | 已实现 | recorder middleware 创建 `SERVER` Span |
+| FastAPI 请求与框架 Span | 已实现 | FastAPI 原生 telemetry 创建 `SERVER` Span，以及依赖解析、endpoint、序列化和 `BackgroundTasks` Span |
 | 业务 Span | 已实现 | 业务代码使用 `async with span_context(...)` 手动埋点 |
 | Celery Worker tracing runtime | 已实现 | Worker 启动和关闭 hook 初始化、关闭 runtime |
 | OTLP Trace 上报 | 已实现 | `BatchSpanProcessor + OTLPSpanExporter` 使用 OTLP/HTTP 上报 |
-| Trace 与日志关联 | 已实现 | 日志处理器从 request context 读取 `trace_id`，Root Span 复用同一 ID |
-| W3C Trace Context | 未实现 | 当前不解析或注入 `traceparent` / `tracestate` |
-| 自动 Instrumentation | 未实现 | FastAPI、HTTP client 和 Celery 均未接入自动 Instrumentation |
-| Metric / Log 的 OTel pipeline | 未实现 | 当前只配置 Trace Exporter |
+| 请求 ID 与日志关联 | 已实现 | recorder 将当前 Trace ID 写入 request context 和日志，响应返回 `traceparent`，关闭 tracing 后仍可使用 |
+| W3C 入口上下文 | 已实现 | 使用标准 Propagator 提取 `traceparent` / `tracestate`；开启采集时 FastAPI 保留远端父 Span 和采样决定 |
+| 下游自动传播 | 未实现 | HTTP client 和 Celery message 尚未接入自动上下文注入、提取 |
+| Metric / Log 的 OTel pipeline | 项目尚未配置 | 采集开关已配置化，可复用外部组件提供的 MeterProvider / LoggerProvider；当前仅由项目创建 Trace Exporter |
 | Collector 部署与 pipeline | 仓库内未实现 | 仓库没有 Collector receiver、processor、exporter 配置 |
 | 可观测性数据持久化 | 仓库内未实现 | 没有存储 schema、写入配置、迁移或保留策略 |
 | 真实 Trace 查询 | 未实现 | logger-span 查询接口仍使用确定性 mock 数据 |
@@ -35,9 +35,11 @@ Collector pipeline、持久化后端和真实 Trace 查询链路尚未在本仓�
 
 ```mermaid
 flowchart LR
-    Client[浏览器或调用方] -->|X-Trace-ID 可选| Middleware[FastAPI recorder middleware]
-    Middleware --> RootSpan[SERVER Root Span]
-    RootSpan --> BusinessSpan[span_context 业务 Span]
+    Client[浏览器或调用方] -->|traceparent 可选| Native[FastAPI 原生 telemetry]
+    Native --> RootSpan[HTTP SERVER Span]
+    RootSpan --> Middleware[recorder 关联 ID / 日志 / 异常信封]
+    Middleware --> Framework[依赖解析 / endpoint / 序列化 / BackgroundTasks]
+    Framework --> BusinessSpan[span_context 业务 Span]
     BusinessSpan --> Processor[BatchSpanProcessor]
     Processor --> Exporter[OTLPSpanExporter]
     Exporter -->|OTLP/HTTP| Receiver[外部 OTLP Receiver]
@@ -47,6 +49,7 @@ flowchart LR
 
 应用只依赖 OTLP Receiver 地址，不应直接依赖 Collector 或某种存储产品的内部协议。
 这样可以在不修改业务埋点的前提下更换 Collector、Trace 后端或存储实现。
+调用方不需要安装 OpenTelemetry SDK；追踪头均为可选，服务端可以为未接入遥测的调用方创建新的关联 ID。
 
 ### 2.2 配置所有权
 
@@ -55,7 +58,11 @@ OpenTelemetry 配置由 [`internal/config.py`](../../internal/config.py) 声明�
 
 | 配置项 | 作用 |
 | --- | --- |
-| `OTEL_TRACING_ENABLED` | 控制是否创建真实 Span |
+| `OTEL_TRACING_ENABLED` | 控制 FastAPI 原生和业务 Span 的创建、上报；不关闭请求 ID、日志关联和响应头 |
+| `OTEL_OPERATION_SPANS_ENABLED` | 独立控制 FastAPI 的依赖解析、endpoint、序列化和 BackgroundTasks Span；仅在 tracing 开启时生效，不影响手动业务埋点 |
+| `OTEL_METRICS_ENABLED` | 控制 FastAPI HTTP 请求指标采集，需要已配置的 MeterProvider |
+| `OTEL_LOGS_ENABLED` | 控制 FastAPI 校验失败和 recorder 捕获的未处理异常的 OTel 日志，需要已配置的 LoggerProvider；Loguru 仍由原有日志开关控制 |
+| `OTEL_AUTO_CONFIGURE` | 控制 FastAPI 从进程环境自动增加 exporter；当前 Settings 自管模式只允许 `false`，开启会在配置校验时报错 |
 | `OTEL_SERVICE_NAME` | 写入 OTel Resource 的 `service.name` |
 | `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | OTLP/HTTP Trace 接收地址，应包含与接收端匹配的 `/v1/traces` 路径 |
 | `OTEL_EXPORTER_OTLP_TIMEOUT_SECONDS` | 单次 Exporter 请求超时 |
@@ -63,6 +70,20 @@ OpenTelemetry 配置由 [`internal/config.py`](../../internal/config.py) 声明�
 当前配置校验要求：`OTEL_TRACING_ENABLED=true` 时必须提供 Trace endpoint。
 endpoint 可以指向 Collector，也可以指向原生支持 OTLP/HTTP 的可观测性后端。
 认证凭证、Token 或 TLS 私钥不得写入普通环境模板或文档示例。
+
+上述五个 telemetry 开关均由 `Settings` 传入 FastAPI。新增的四个配置项必须在环境文件中显式声明，
+已有外部配置文件升级时需要同步补齐。仓库四种环境中新增项的初始配置为：
+
+```dotenv
+OTEL_OPERATION_SPANS_ENABLED=true
+OTEL_METRICS_ENABLED=false
+OTEL_LOGS_ENABLED=false
+OTEL_AUTO_CONFIGURE=false
+```
+
+`OTEL_AUTO_CONFIGURE` 的限制遵循[项目配置来源规则](../../AGENTS.md#配置与安全)：应用参数从 Settings
+配置链读取，exporter 由应用生命周期管理。FastAPI 自动模式会另读进程中的 `OTEL_*` 变量，可能重复增加
+exporter，因此当前校验明确拒绝 `true`。支持该模式需要同时调整配置来源与资源所有权。
 
 ### 2.3 Runtime 与进程生命周期
 
@@ -77,29 +98,53 @@ TracerProvider
 ```
 
 - FastAPI lifespan 在应用启动时调用 `init_tracing()`，关闭时调用 `shutdown_tracing()`。
+- FastAPI 原生 telemetry 复用该全局 Provider，按配置控制请求与 operation spans；recorder 负责请求关联上下文。
 - Celery Worker hook 在 Worker 进程启动和关闭时执行相同生命周期。
 - runtime 拥有的 Provider 在关闭时执行 shutdown，从而处理 Processor 中尚未导出的 Span。
+- 上下文传播使用标准 W3C Propagator；runtime 负责 Provider/exporter 的创建和关闭。
 - tracing 关闭时，`span_context` 返回 non-recording Span，业务调用点不需要编写配置分支。
+
+项目按 [FastAPI 官方 Provider/exporter 集成方式](https://fastapi.tiangolo.com/advanced/opentelemetry/#configure-providers-and-exporters)
+显式传入 `telemetry={"auto_configure": settings.OTEL_AUTO_CONFIGURE}`，其值由 Settings 校验为 `false`，
+避免框架根据 shell 中的 `OTEL_*` 再增加 exporter。
+应用仍通过项目 Settings 配置链读取参数，不新增 shell 环境变量兜底，也不需要再调用 `FastAPIInstrumentor`。
+环境配置初始关闭 Metrics 和 OTel Logs，项目只创建 Trace pipeline，普通日志继续使用 Loguru。
+若所接入的组件已在请求处理前配置全局 MeterProvider 或 LoggerProvider，可以分别开启对应开关；创建
+Provider 的组件负责其 exporter、flush 和 shutdown。仅修改开关不会自动创建这两条导出 pipeline。
 
 这里的 shutdown 只能尽力导出进程内剩余数据，不等价于最终存储成功。强制终止、网络不可达、Exporter 超时或
 接收端拒绝数据时仍可能丢失 Span。
 
 ### 2.4 Trace ID 与上下文传播
 
-当前浏览器不发送 `traceparent`，只可发送 UUIDv7 hex 格式的 `X-Trace-ID`：
+请求关联与遥测采集是两个独立能力。项目统一使用 [W3C Trace Context](https://www.w3.org/TR/trace-context/)
+的 `traceparent`，不再读取或返回 `X-Trace-ID`。
+已有调用方需要同步切换；只关心关联查询的调用方可以从合法 `traceparent` 提取其中的 `trace-id`。
 
-1. recorder middleware 校验 `X-Trace-ID`；缺失或非法时由服务端生成。
-2. `RequestContextIdGenerator` 在创建 Root Span 时优先复用 request context 中的合法 ID。
-3. 子 Span 由 OTel Context 继承同一 `trace_id`，并生成各自的 `span_id`。
-4. 响应头和访问日志继续使用同一 `X-Trace-ID`，用于把客户端请求、日志和 Trace 关联起来。
+| 调用方输入 | 开启 tracing | 关闭 tracing |
+| --- | --- | --- |
+| 合法 `traceparent` | 延续远端 Trace ID，以远端 Span 为父节点创建请求 Span，保留采样决定和 `tracestate` | 提取并保留传播上下文，用同一 Trace ID 关联日志；保留上游 parent-id 和采样标志 |
+| 无追踪头或输入非法 | 由 FastAPI / SDK 创建新请求 Span 和 Trace ID | 创建随机、非零的 Trace ID 和 parent-id，采样标志为 `00` |
 
-`X-Trace-ID` 是当前项目的兼容机制，不是 W3C Trace Context。后续接入标准跨服务传播时，入口优先级应为：
+`traceparent` 的 version、trace-id、parent-id 和 trace-flags 均由标准 Propagator 解析、校验。
+无效父上下文不会用于日志关联；丢弃无效 `traceparent` 时也丢弃关联的 `tracestate`。
+W3C Trace ID 不要求是 UUIDv7，有效的 32 位 hex ID 均可使用。
+采样标志按位解释，保留其他合法标志；不能把完整 trace-flags 硬编码为 `01` 或 `00`。
 
-```text
-合法 traceparent > 合法 X-Trace-ID > OpenTelemetry SDK 生成
-```
+开启 tracing 时，FastAPI 在用户 middleware 之前创建请求 Span，recorder 使用该 Span 的实际上下文。
+远端决定不采样时，Trace ID 仍可用于日志关联。关闭 tracing 时，recorder 使用 `NonRecordingSpan`
+保存传播上下文，不初始化 Provider/exporter，也不记录或导出 Span 数据。
+上下文只在当前请求期间 attach，结束、异常或取消时 detach，避免继承无关调用方的活跃 Span 或污染后续请求。
+仅启用 Metrics/Logs 时，中间件保留 FastAPI 的请求元数据，独立提取传播身份，使校验日志仍可关联同一 Trace ID。
 
-同时还需要为 HTTP client、Celery message 或其他下游载体实现对应的上下文注入和提取。
+响应头返回当前请求的 `traceparent`，这是本项目为客户端关联查询提供的约定；W3C Trace Context 的主要
+标准用途是请求和下游调用的上下文传播。CORS 显式暴露该响应头，浏览器可以读取并解析 Trace ID。
+开启 tracing 时，响应中的 parent-id 对应实际请求 Span；关闭 tracing 且有合法上游头时，返回透传的父上下文。
+
+未接入遥测的项目可以省略追踪头，也可以只实现标准头的生成、提取和透传，无需部署 Collector 或上报数据。
+若调用方主动生成头，需要同时生成合法 Trace ID、parent-id 和采样标志；采样策略不能只看调用方是否安装 SDK。
+HTTP client、Celery message 或其他下游载体的自动注入、提取仍需另行实现；当前业务代码可以从已 attach 的
+上下文显式注入标准头，入口支持不代表整个跨服务工作流已经打通。
 Trace ID 只能用于关联查询，不能用于认证、授权或幂等判断。
 
 ### 2.5 业务埋点与日志关联
@@ -114,13 +159,22 @@ async with span_context("order.create") as span:
 
 Span 名称和属性名应保持稳定，不要把动态值拼入 Span 名称；使用高基数属性前应评估存储和索引成本。
 Span 和属性不得包含密码、Token、完整请求体或个人敏感信息。
+FastAPI 原生 server span 会记录 `url.query`，框架只 redact `sig`、`X-Amz-*`、`X-Goog-Signature`
+等少量签名参数；业务不得在 query string 中传递 token、授权 code 或其他敏感值，应改用 header 或 body。
+若无法保证该约定，需要在 SpanProcessor / Exporter 层增加 redaction。
 异常由 `span_context` 记录为 exception event 并设置错误状态；业务异常仍按原有应用语义传播或转换，
 不能因为可观测性链路失败而改变业务结果。
 
-日志处理器只从 `pkg.request_context` 读取 `trace_id`，不读取当前 OTel Span。Root Span 通过
-`RequestContextIdGenerator` 优先复用同一 ID，从而建立日志与 Trace 的关联。普通日志不输出 `span_id`；
+日志处理器只从 `pkg.request_context` 读取 `trace_id`，由 recorder 保证它与实际请求 Span 的 ID 一致；
+关闭 tracing 后仍保留同一日志关联入口。普通日志不输出 `span_id`；
 Span 身份和父子关系由 Trace 数据自身保留。日志中的 `trace_id` 只建立关联字段，不代表 Log 已通过
 OpenTelemetry 导出；当前 Log 仍走项目既有日志处理链路。
+
+升级后的请求 Span 名称采用 FastAPI 的 `GET /route/{id}` 等模板形式，替代 `middleware.request`。
+框架操作使用 `fastapi.dependencies`、`fastapi.endpoint`、`fastapi.serialization` 和
+`fastapi.background_task`；业务 Span 名称保留原值，认证 Span 会位于依赖解析 Span 之下。
+现有仪表盘或查询若按旧名称、父子层级过滤，需要同步适配。FastAPI 的 BackgroundTasks 在响应 Span 结束后
+继续保持同一 Trace；项目自管后台 TaskGroup 和 Celery 的生命周期保持各自原有边界。
 
 ### 2.6 logger-span 演示接口边界
 
@@ -258,7 +312,7 @@ OpenTelemetry 链路失败不应使正常业务请求失败。项目需要通过
 ## 5. 验收标准
 
 - 应用侧 endpoint 指向明确、可访问且经过认证的 OTLP Receiver。
-- FastAPI 和 Celery 产生的 Trace 均能完成持久化；实现标准上下文传播后，同一工作流的跨进程 Span 能正确关联。
+- FastAPI 和 Celery 产生的 Trace 均能完成持久化；另行接入下游 HTTP / Celery message 传播后，同一工作流的跨进程 Span 能正确关联。
 - 后端可按 `trace_id` 查询完整 Span 树，父子关系、时间、状态和关键属性正确。
 - Collector 或后端短暂不可用时，重试、队列、丢弃和恢复行为符合既定容量边界。
 - 应用进程关闭、Collector 重启和后端限流场景均有实际验证记录。

@@ -49,6 +49,10 @@ def _base_env_values() -> dict[str, str]:
         "LOG_WRITE_TO_CONSOLE": "true",
         "CONFIG_ECHO_REVEAL_SECRETS": "false",
         "OTEL_TRACING_ENABLED": "false",
+        "OTEL_OPERATION_SPANS_ENABLED": "true",
+        "OTEL_METRICS_ENABLED": "false",
+        "OTEL_LOGS_ENABLED": "false",
+        "OTEL_AUTO_CONFIGURE": "false",
         "OTEL_SERVICE_NAME": "agent-backend-test",
         "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT": "http://collector:4318/v1/traces",
         "OTEL_EXPORTER_OTLP_TIMEOUT_SECONDS": "7",
@@ -353,6 +357,80 @@ def test_otlp_exporter_config_values_are_loaded(tmp_path: Path) -> None:
         == "http://collector:4318/v1/traces"
     )
     assert settings.OTEL_EXPORTER_OTLP_TIMEOUT_SECONDS == 7
+
+
+def test_telemetry_switches_are_loaded_independently_from_files(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env_path = tmp_path / ".env.test"
+    secrets_path = tmp_path / ".secrets"
+    env_values = _base_env_values()
+    env_values.update(
+        {
+            "OTEL_OPERATION_SPANS_ENABLED": "false",
+            "OTEL_METRICS_ENABLED": "true",
+            "OTEL_LOGS_ENABLED": "true",
+        }
+    )
+    for name in (
+        "OTEL_TRACING_ENABLED",
+        "OTEL_OPERATION_SPANS_ENABLED",
+        "OTEL_AUTO_CONFIGURE",
+    ):
+        monkeypatch.setenv(name, "true")
+    monkeypatch.setenv("OTEL_METRICS_ENABLED", "false")
+    monkeypatch.setenv("OTEL_LOGS_ENABLED", "false")
+    _write_env_file(env_path, env_values)
+    _write_env_file(secrets_path, _secret_values())
+
+    settings = _new_settings(env_path, secrets_path)
+
+    assert settings.OTEL_TRACING_ENABLED is False
+    assert settings.OTEL_OPERATION_SPANS_ENABLED is False
+    assert settings.OTEL_METRICS_ENABLED is True
+    assert settings.OTEL_LOGS_ENABLED is True
+    assert settings.OTEL_AUTO_CONFIGURE is False
+
+
+def test_automatic_exporter_setup_is_rejected_in_settings_managed_mode(
+    tmp_path: Path,
+) -> None:
+    env_path = tmp_path / ".env.test"
+    secrets_path = tmp_path / ".secrets"
+    env_values = _base_env_values()
+    env_values["OTEL_AUTO_CONFIGURE"] = "true"
+    _write_env_file(env_path, env_values)
+    _write_env_file(secrets_path, _secret_values())
+
+    with pytest.raises(ValidationError, match="OTEL_AUTO_CONFIGURE must be false"):
+        _new_settings(env_path, secrets_path)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "OTEL_OPERATION_SPANS_ENABLED",
+        "OTEL_METRICS_ENABLED",
+        "OTEL_LOGS_ENABLED",
+        "OTEL_AUTO_CONFIGURE",
+    ],
+)
+def test_telemetry_switches_require_an_explicit_file_value(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    name: str,
+) -> None:
+    env_path = tmp_path / ".env.test"
+    secrets_path = tmp_path / ".secrets"
+    env_values = _base_env_values()
+    env_values.pop(name)
+    monkeypatch.setenv(name, "false")
+    _write_env_file(env_path, env_values)
+    _write_env_file(secrets_path, _secret_values())
+
+    with pytest.raises(ValidationError, match=name):
+        _new_settings(env_path, secrets_path)
 
 
 def test_log_output_config_values_are_loaded(tmp_path: Path) -> None:

@@ -183,17 +183,6 @@ mock_ids_module.uuid7_unique_id = MagicMock(side_effect=mock_gen_id)
 mock_ids_module.uuid7_unique_str_id = MagicMock(side_effect=lambda: mock_gen_id().hex)
 
 
-def _normalize_uuid7_trace_id(value: str | None) -> str | None:
-    if not isinstance(value, str) or len(value) != 32:
-        return None
-    try:
-        parsed = uuid.UUID(hex=value)
-    except ValueError:
-        return None
-    return parsed.hex if parsed.version == 7 and parsed.int != 0 else None
-
-
-mock_ids_module.normalize_uuid7_trace_id = _normalize_uuid7_trace_id
 sys.modules["pkg.ids"] = mock_ids_module
 
 # ==========================================

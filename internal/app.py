@@ -25,6 +25,14 @@ def create_app() -> FastAPI:
         docs_url="/docs" if debug else None,
         redoc_url="/redoc" if debug else None,
         lifespan=lifespan,
+        telemetry={
+            "tracing": settings.OTEL_TRACING_ENABLED,
+            "operation_spans": settings.OTEL_OPERATION_SPANS_ENABLED,
+            "metrics": settings.OTEL_METRICS_ENABLED,
+            "logs": settings.OTEL_LOGS_ENABLED,
+            # Settings 校验当前自管 exporter 模式只允许关闭自动配置。
+            "auto_configure": settings.OTEL_AUTO_CONFIGURE,
+        },
     )
 
     register_router(app)
@@ -74,12 +82,17 @@ def register_middleware(app: FastAPI):
             allow_origins=settings.BACKEND_CORS_ORIGINS,
             allow_methods=["*"],
             allow_headers=["*"],
+            expose_headers=["traceparent"],
         )
 
     # 1. 日志中间件：记录请求和响应的日志，监控 API 性能和请求流
     from internal.middlewares import ASGIRecordMiddleware
 
-    app.add_middleware(ASGIRecordMiddleware)
+    app.add_middleware(
+        ASGIRecordMiddleware,
+        tracing_enabled=settings.OTEL_TRACING_ENABLED,
+        logs_enabled=settings.OTEL_LOGS_ENABLED,
+    )
 
 
 # 定义 lifespan 事件处理器

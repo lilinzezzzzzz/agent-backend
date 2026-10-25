@@ -104,6 +104,10 @@ class Settings(BaseSettings):
 
     # --- OpenTelemetry ---
     OTEL_TRACING_ENABLED: bool
+    OTEL_OPERATION_SPANS_ENABLED: bool
+    OTEL_METRICS_ENABLED: bool
+    OTEL_LOGS_ENABLED: bool
+    OTEL_AUTO_CONFIGURE: bool
     OTEL_SERVICE_NAME: str
     OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: AnyHttpUrl | None = None
     OTEL_EXPORTER_OTLP_TIMEOUT_SECONDS: PositiveInt
@@ -248,6 +252,16 @@ class Settings(BaseSettings):
         if value is None or value.is_absolute():
             return value
         return (BASE_DIR / value).resolve()
+
+    @field_validator("OTEL_AUTO_CONFIGURE")
+    def validate_otel_auto_configure(cls, value: bool) -> bool:
+        """当前由 Settings 管理 exporter，禁止框架另从进程环境自动配置。"""
+        if value:
+            raise ValueError(
+                "OTEL_AUTO_CONFIGURE must be false: providers and exporters are "
+                "managed by application Settings"
+            )
+        return value
 
     @model_validator(mode="after")
     def validate_log_output(self) -> "Settings":

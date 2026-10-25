@@ -305,6 +305,14 @@ AgentScope 2.0 的推荐接入路线是嵌入官方 Agent Service，而不是自
 uv run pytest
 ```
 
+测试默认使用 pytest 的系统临时目录。需要保留或查看测试产物时，可指定仓库内目录：
+
+```bash
+uv run pytest --basetemp=.pytest-tmp
+```
+
+`.pytest-tmp/` 已加入 `.gitignore`；使用该参数时，目录会在每次运行首次访问 `tmp_path` 时被清空。
+
 运行单个测试文件：
 
 ```bash

@@ -19,19 +19,19 @@ from pkg.tracing import init_tracing, shutdown_tracing
 
 
 def create_app() -> FastAPI:
-    debug = settings.DEBUG
+    debug = settings.debug
     app = FastAPI(
         debug=debug,
         docs_url="/docs" if debug else None,
         redoc_url="/redoc" if debug else None,
         lifespan=lifespan,
         telemetry={
-            "tracing": settings.OTEL_TRACING_ENABLED,
-            "operation_spans": settings.OTEL_OPERATION_SPANS_ENABLED,
-            "metrics": settings.OTEL_METRICS_ENABLED,
-            "logs": settings.OTEL_LOGS_ENABLED,
+            "tracing": settings.otel.tracing_enabled,
+            "operation_spans": settings.otel.operation_spans_enabled,
+            "metrics": settings.otel.metrics_enabled,
+            "logs": settings.otel.logs_enabled,
             # Settings 校验当前自管 exporter 模式只允许关闭自动配置。
-            "auto_configure": settings.OTEL_AUTO_CONFIGURE,
+            "auto_configure": settings.otel.auto_configure,
         },
     )
 
@@ -73,13 +73,13 @@ def register_middleware(app: FastAPI):
     app.add_middleware(ASGIEndpointGuardMiddleware)
 
     # 2. CORS 中间件：处理跨域请求
-    if settings.BACKEND_CORS_ORIGINS:
+    if settings.cors.origins:
         from starlette.middleware.cors import CORSMiddleware
 
         app.add_middleware(
             CORSMiddleware,
             allow_credentials=True,
-            allow_origins=settings.BACKEND_CORS_ORIGINS,
+            allow_origins=settings.cors.origins,
             allow_methods=["*"],
             allow_headers=["*"],
             expose_headers=["traceparent"],
@@ -90,8 +90,8 @@ def register_middleware(app: FastAPI):
 
     app.add_middleware(
         ASGIRecordMiddleware,
-        tracing_enabled=settings.OTEL_TRACING_ENABLED,
-        logs_enabled=settings.OTEL_LOGS_ENABLED,
+        tracing_enabled=settings.otel.tracing_enabled,
+        logs_enabled=settings.otel.logs_enabled,
     )
 
 
@@ -103,29 +103,29 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
 
     # 初始化日志（使用配置中的格式）
     init_logger(
-        log_format=settings.LOG_FORMAT,
-        base_log_dir=settings.LOG_BASE_DIR,
-        write_to_file=settings.LOG_WRITE_TO_FILE,
-        write_to_console=settings.LOG_WRITE_TO_CONSOLE,
+        log_format=settings.log.format,
+        base_log_dir=settings.log.base_dir,
+        write_to_file=settings.log.write_to_file,
+        write_to_console=settings.log.write_to_console,
     )
     cleanup = AsyncExitStack()
     cleanup.push_async_callback(logger.complete)
     try:
         init_tracing(
-            enabled=settings.OTEL_TRACING_ENABLED,
-            service_name=settings.OTEL_SERVICE_NAME,
+            enabled=settings.otel.tracing_enabled,
+            service_name=settings.otel.service_name,
             otlp_traces_endpoint=(
-                str(settings.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT)
-                if settings.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT is not None
+                str(settings.otel.exporter_otlp_traces_endpoint)
+                if settings.otel.exporter_otlp_traces_endpoint is not None
                 else None
             ),
-            exporter_timeout_seconds=settings.OTEL_EXPORTER_OTLP_TIMEOUT_SECONDS,
+            exporter_timeout_seconds=settings.otel.exporter_otlp_timeout_seconds,
         )
         cleanup.callback(shutdown_tracing)
 
         # 先登记清理，覆盖初始化中途已创建部分连接的失败路径。
         cleanup.push_async_callback(close_async_db)
-        init_async_db(echo=settings.DB_ECHO)
+        init_async_db(echo=settings.db.echo)
         cleanup.push_async_callback(close_async_redis)
         init_async_redis()
         init_signature_auth_handler()

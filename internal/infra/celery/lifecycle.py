@@ -14,26 +14,26 @@ def worker_startup() -> None:
 
     init_logger(
         level="INFO",
-        log_format=settings.LOG_FORMAT,
+        log_format=settings.log.format,
         base_log_dir=(
-            settings.LOG_BASE_DIR / "celery"
-            if settings.LOG_BASE_DIR is not None
+            settings.log.base_dir / "celery"
+            if settings.log.base_dir is not None
             else None
         ),
-        write_to_file=settings.LOG_WRITE_TO_FILE,
-        write_to_console=settings.LOG_WRITE_TO_CONSOLE,
+        write_to_file=settings.log.write_to_file,
+        write_to_console=settings.log.write_to_console,
     )
     init_tracing(
-        enabled=settings.OTEL_TRACING_ENABLED,
-        service_name=settings.OTEL_SERVICE_NAME,
+        enabled=settings.otel.tracing_enabled,
+        service_name=settings.otel.service_name,
         otlp_traces_endpoint=(
-            str(settings.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT)
-            if settings.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT is not None
+            str(settings.otel.exporter_otlp_traces_endpoint)
+            if settings.otel.exporter_otlp_traces_endpoint is not None
             else None
         ),
-        exporter_timeout_seconds=settings.OTEL_EXPORTER_OTLP_TIMEOUT_SECONDS,
+        exporter_timeout_seconds=settings.otel.exporter_otlp_timeout_seconds,
     )
-    logger.info(f"Celery worker initialized with APP_ENV: {settings.APP_ENV}")
+    logger.info(f"Celery worker initialized with APP_ENV: {settings.app_env}")
     logger.info("Worker process starting: initialized basic resources.")
 
 

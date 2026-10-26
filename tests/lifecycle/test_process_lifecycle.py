@@ -1,4 +1,5 @@
 import asyncio
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import anyio
@@ -430,20 +431,20 @@ def test_fastapi_lifespan_owns_one_exporter_and_native_request_spans(
     monkeypatch.setattr(app_module, "init_tracing", otel_runtime.init_tracing)
     monkeypatch.setattr(recorder_module, "logger", MagicMock())
     endpoint = "http://collector.invalid/v1/traces"
-    app_module.settings.DEBUG = True
-    app_module.settings.OTEL_TRACING_ENABLED = True
-    app_module.settings.OTEL_OPERATION_SPANS_ENABLED = True
-    app_module.settings.OTEL_METRICS_ENABLED = False
-    app_module.settings.OTEL_LOGS_ENABLED = False
-    app_module.settings.OTEL_AUTO_CONFIGURE = False
-    app_module.settings.OTEL_SERVICE_NAME = "test-agent-backend"
-    app_module.settings.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT = endpoint
-    app_module.settings.OTEL_EXPORTER_OTLP_TIMEOUT_SECONDS = 3.5
-    app_module.settings.BACKEND_CORS_ORIGINS = ["https://client.example"]
+    app_module.settings.debug = True
+    app_module.settings.otel.tracing_enabled = True
+    app_module.settings.otel.operation_spans_enabled = True
+    app_module.settings.otel.metrics_enabled = False
+    app_module.settings.otel.logs_enabled = False
+    app_module.settings.otel.auto_configure = False
+    app_module.settings.otel.service_name = "test-agent-backend"
+    app_module.settings.otel.exporter_otlp_traces_endpoint = endpoint
+    app_module.settings.otel.exporter_otlp_timeout_seconds = 3.5
+    app_module.settings.cors.origins = ["https://client.example"]
     monkeypatch.setattr(
         endpoint_guard_module,
         "settings",
-        MagicMock(ENDPOINT_GUARD_ENABLED=False),
+        SimpleNamespace(endpoint_guard=SimpleNamespace(enabled=False)),
     )
     monkeypatch.setattr(
         endpoint_guard_module,
@@ -472,8 +473,14 @@ def test_fastapi_lifespan_owns_one_exporter_and_native_request_spans(
             response = client.get("/ping", headers={"Origin": "https://client.example"})
             assert response.status_code == 200
             assert response.json() == {"ok": True}
-            assert response.headers["Access-Control-Allow-Origin"] == "https://client.example"
-            assert "traceparent" in response.headers["Access-Control-Expose-Headers"].lower()
+            assert (
+                response.headers["Access-Control-Allow-Origin"]
+                == "https://client.example"
+            )
+            assert (
+                "traceparent"
+                in response.headers["Access-Control-Expose-Headers"].lower()
+            )
     finally:
         otel_runtime.shutdown_tracing()
 

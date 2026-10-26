@@ -44,7 +44,7 @@
 - 生产者执行与响应发送分离并带 shield，当前工具在取消收尾预算内有界地执行完并提交结果；
 - 预算到期后显式取消执行任务：若取消时工具仍在飞行中，run 落为 `recovery_required`（结果不确定，
   不自动重放），否则落为 `interrupted`；状态提交与 lease 释放在同一事务完成；
-- 收尾预算来自 `AGENT_CANCEL_GRACE_SECONDS`；预算内未能完成收尾时保留最近已提交 checkpoint，
+- 收尾预算来自 `agent.cancel_grace_seconds`；预算内未能完成收尾时保留最近已提交 checkpoint，
   由 lease 到期后的下一次查询或恢复按「恢复判定」收敛，不会宣称暂停已成功。
 
 ## 打断状态的读取路径
@@ -133,16 +133,16 @@ SSE 事件：`route`、`run_started`、`run_resumed`、`step_completed`、`run_i
 
 ## 配置
 
-以下 key 在 `internal/config.py` 声明，并同步到 `configs/.env.*`：
+以下 key 在 `internal/config.py` 声明，并同步到 `configs/app.*.toml`：
 
 | key | 默认值 | 说明 |
 | --- | --- | --- |
-| `AGENT_LEASE_SECONDS` | 30 | 执行者 lease 时长 |
-| `AGENT_CONTROL_POLL_SECONDS` | 5 | heartbeat / control 轮询周期；必须小于 lease |
-| `AGENT_CANCEL_GRACE_SECONDS` | 70 | 取消收尾预算；必须覆盖 `AGENT_LLM_TIMEOUT_SECONDS` 与提交预算，上限 300 |
-| `AGENT_STREAM_BUFFER_SIZE` | 16 | 执行事件到响应发送之间的有界通道容量 |
-| `AGENT_CHECKPOINT_MAX_BYTES` | 1048576 | 单个 checkpoint JSON 上限；超出时明确失败而不是截断后继续推理 |
-| `AGENT_LLM_TIMEOUT_SECONDS` | 60 | Agent LLM 调用超时 |
+| `agent.lease_seconds` | 30 | 执行者 lease 时长 |
+| `agent.control_poll_seconds` | 5 | heartbeat / control 轮询周期；必须小于 lease |
+| `agent.cancel_grace_seconds` | 70 | 取消收尾预算；必须覆盖 `agent.llm_timeout_seconds` 与提交预算，上限 300 |
+| `agent.stream_buffer_size` | 16 | 执行事件到响应发送之间的有界通道容量 |
+| `agent.checkpoint_max_bytes` | 1048576 | 单个 checkpoint JSON 上限；超出时明确失败而不是截断后继续推理 |
+| `agent.llm_timeout_seconds` | 60 | Agent LLM 调用超时 |
 
 ## 已知未验证条件
 

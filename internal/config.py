@@ -5,7 +5,10 @@
 
 import os
 import sys
-from collections.abc import Mapping
+import tomllib
+from collections.abc import Generator, Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from functools import cache
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -15,6 +18,9 @@ from dotenv import dotenv_values
 from loguru import logger
 from pydantic import (
     AnyHttpUrl,
+    BaseModel,
+    ConfigDict,
+    Field,
     PositiveInt,
     SecretStr,
     field_validator,
@@ -24,6 +30,7 @@ from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
     SettingsConfigDict,
+    TomlConfigSettingsSource,
 )
 from sqlalchemy.engine import URL
 
@@ -43,6 +50,30 @@ EndpointGuardSource = Literal["settings", "redis", "settings+redis"]
 EmbeddingProvider = Literal["openai_compatible"]
 AppEnv = Literal["local", "dev", "test", "prod"]
 APP_ENV_VALUES = {"local", "dev", "test", "prod"}
+_CURRENT_APP_CONFIG_PATH: ContextVar[Path | None] = ContextVar(
+    "current_app_config_path",
+    default=None,
+)
+
+
+class _AppTomlSettingsSource(TomlConfigSettingsSource):
+    """按 load_config 选择的应用 TOML 文件加载配置。"""
+
+    def __init__(self, settings_cls: type[BaseSettings]) -> None:
+        super().__init__(
+            settings_cls,
+            toml_file=_CURRENT_APP_CONFIG_PATH.get(),
+        )
+
+
+@contextmanager
+def _use_app_config_path(path: Path) -> Generator[None]:
+    token = _CURRENT_APP_CONFIG_PATH.set(path)
+    try:
+        yield
+    finally:
+        _CURRENT_APP_CONFIG_PATH.reset(token)
+
 
 # 数据库驱动映射
 DB_DRIVER_MAP: dict[str, str] = {
@@ -87,174 +118,49 @@ def _build_redis_url(*, host: str, port: int, password: str, db: int) -> str:
     return urlunsplit(("redis", netloc, f"/{db}", "", ""))
 
 
-class Settings(BaseSettings):
-    """
-    应用全局配置。
-    """
+class _ConfigModel(BaseModel):
+    """应用配置分组模型，拒绝未知字段。"""
 
-    # --- 核心环境配置 ---
-    APP_ENV: AppEnv
-    DEBUG: bool
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
-    # --- 日志配置 ---
-    LOG_FORMAT: LogFormat  # 日志格式: TEXT 或 JSON
-    LOG_BASE_DIR: Path | None = None
-    LOG_WRITE_TO_FILE: bool
-    LOG_WRITE_TO_CONSOLE: bool
 
-    # --- OpenTelemetry ---
-    OTEL_TRACING_ENABLED: bool
-    OTEL_OPERATION_SPANS_ENABLED: bool
-    OTEL_METRICS_ENABLED: bool
-    OTEL_LOGS_ENABLED: bool
-    OTEL_AUTO_CONFIGURE: bool
-    OTEL_SERVICE_NAME: str
-    OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: AnyHttpUrl | None = None
-    OTEL_EXPORTER_OTLP_TIMEOUT_SECONDS: PositiveInt
+class LogSettings(_ConfigModel):
+    format: LogFormat
+    base_dir: Path | None = None
+    write_to_file: bool
+    write_to_console: bool
 
-    # --- 密钥配置 ---
-    AES_SECRET: SecretStr
-    JWT_SECRET: SecretStr
-    JWT_ALGORITHM: str
-    ACCESS_TOKEN_EXPIRE_SECONDS: int
-    CONFIG_ECHO_REVEAL_SECRETS: bool  # 打印配置时是否显示敏感值
-
-    # --- CORS ---
-    BACKEND_CORS_ORIGINS: list[str]
-
-    # --- 第三方登录 ---
-    WECHAT_APP_ID: str
-    WECHAT_APP_SECRET: SecretStr
-    WECHAT_GRANT_TYPE: str
-
-    # --- LLM ---
-    LLM_DEFAULT_PROVIDER: str
-    LLM_MIMO_BASE_URL: str
-    LLM_MIMO_MODEL: str
-    LLM_MIMO_API_KEY: SecretStr
-    LLM_DEEPSEEK_BASE_URL: str
-    LLM_DEEPSEEK_MODEL: str
-    LLM_DEEPSEEK_API_KEY: SecretStr
-
-    # --- Embedding ---
-    EMBEDDING_PROVIDER: EmbeddingProvider
-    EMBEDDING_BASE_URL: str
-    EMBEDDING_MODEL: str
-    EMBEDDING_API_KEY: SecretStr
-    EMBEDDING_DIMENSION: PositiveInt
-    EMBEDDING_TIMEOUT_SECONDS: PositiveInt
-
-    # --- Vector store ---
-    MILVUS_URI: AnyHttpUrl
-    MILVUS_DB_NAME: str
-    MILVUS_TIMEOUT_SECONDS: PositiveInt
-
-    # --- Agent ---
-    AGENT_ACTION_CONFIRMATION_SECONDS: PositiveInt
-    AGENT_ACTION_IDEMPOTENCY_SECONDS: PositiveInt
-
-    # --- Agent 受管理运行（打断 / 恢复） ---
-    AGENT_LEASE_SECONDS: PositiveInt
-    AGENT_CONTROL_POLL_SECONDS: PositiveInt
-    AGENT_CANCEL_GRACE_SECONDS: PositiveInt
-    AGENT_STREAM_BUFFER_SIZE: PositiveInt
-    AGENT_CHECKPOINT_MAX_BYTES: PositiveInt
-    AGENT_LLM_TIMEOUT_SECONDS: PositiveInt
-
-    # --- RAG ---
-    RAG_ALLOWED_DOMAINS: list[str]
-    RAG_ALLOWED_KB_IDS: list[int]
-    RAG_MAX_CONTEXT_CHARS: PositiveInt
-
-    # --- Database ---
-    DB_TYPE: DBType  # 数据库类型: mysql, postgresql (必填)
-    DB_HOST: str
-    DB_PORT: int
-    DB_USERNAME: str
-    DB_PASSWORD: SecretStr
-    DB_DATABASE: str
-    DB_ECHO: bool  # 是否输出 SQL 日志
-
-    # --- Database Read Replica (可选，不配置则不启用读写分离) ---
-    DB_READ_HOST: str | None = None
-    DB_READ_PORT: int | None = None
-    DB_READ_USERNAME: str | None = None
-    DB_READ_PASSWORD: SecretStr | None = None
-    DB_READ_DATABASE: str | None = None
-
-    # --- Redis ---
-    REDIS_HOST: str
-    REDIS_PORT: int
-    REDIS_PASSWORD: SecretStr
-    REDIS_DB: int
-
-    # --- Celery PostgreSQL idempotency ---
-    CELERY_IDEMPOTENCY_ENABLED: bool
-    CELERY_EXECUTION_DEADLINE_GRACE_SECONDS: PositiveInt
-    CELERY_QUEUE_START_TIMEOUT_SECONDS: PositiveInt
-    CELERY_PUBLISH_CONFIRM_TIMEOUT_SECONDS: PositiveInt
-    CELERY_PUBLISH_RECONCILER_INTERVAL_SECONDS: PositiveInt
-    CELERY_ORPHAN_FENCE_SECONDS: PositiveInt
-    CELERY_RECONCILER_BEAT_ENABLED: bool
-    CELERY_RECONCILER_INTERVAL_SECONDS: PositiveInt
-    CELERY_RECONCILER_BATCH_SIZE: PositiveInt
-    CELERY_RECONCILER_QUEUE: str
-    CELERY_TASK_MAX_PAYLOAD_BYTES: PositiveInt
-
-    # --- Endpoint Guard ---
-    ENDPOINT_GUARD_ENABLED: bool
-    ENDPOINT_GUARD_SOURCE: EndpointGuardSource
-    ENDPOINT_GUARD_RULES: str
-    ENDPOINT_GUARD_REDIS_KEY: str
-    ENDPOINT_GUARD_CACHE_TTL_SECONDS: int
-    ENDPOINT_GUARD_FAIL_OPEN: bool
-
-    model_config = SettingsConfigDict(
-        case_sensitive=True,
-        extra="forbid",
-        env_file_encoding="utf-8",
-    )
-
-    @classmethod
-    def settings_customise_sources(
-        cls,
-        _settings_cls: type[BaseSettings],
-        init_settings: PydanticBaseSettingsSource,
-        env_settings: PydanticBaseSettingsSource,
-        dotenv_settings: PydanticBaseSettingsSource,
-        file_secret_settings: PydanticBaseSettingsSource,
-    ) -> tuple[PydanticBaseSettingsSource, ...]:
-        """Load application settings only from explicit arguments and files."""
-        del env_settings
-        return init_settings, dotenv_settings, file_secret_settings
-
-    @field_validator("DB_TYPE", mode="before")
-    def validate_db_type(cls, v: str) -> str:
-        """校验数据库类型"""
-        if not v:
-            raise ValueError("DB_TYPE is required and cannot be empty")
-        allowed = list(DB_DRIVER_MAP.keys())
-        if v not in allowed:
-            raise ValueError(f"DB_TYPE must be one of {allowed}, got '{v}'")
-        return v
-
-    @field_validator("MILVUS_DB_NAME")
-    def validate_milvus_db_name(cls, value: str) -> str:
-        """Milvus database 名称必须是非空字符串。"""
-        normalized = value.strip()
-        if not normalized:
-            raise ValueError("MILVUS_DB_NAME cannot be empty")
-        return normalized
-
-    @field_validator("LOG_BASE_DIR")
-    def resolve_log_base_dir(cls, value: Path | None) -> Path | None:
+    @field_validator("base_dir")
+    def resolve_base_dir(cls, value: Path | None) -> Path | None:
         """相对日志目录统一基于项目根目录解析。"""
         if value is None or value.is_absolute():
             return value
         return (BASE_DIR / value).resolve()
 
-    @field_validator("OTEL_AUTO_CONFIGURE")
-    def validate_otel_auto_configure(cls, value: bool) -> bool:
+    @model_validator(mode="after")
+    def validate_output(self) -> "LogSettings":
+        """校验日志至少有一个输出目标，且文件输出必须配置目录。"""
+        if not self.write_to_file and not self.write_to_console:
+            raise ValueError(
+                "LOG_WRITE_TO_FILE and LOG_WRITE_TO_CONSOLE cannot both be false"
+            )
+        if self.write_to_file and self.base_dir is None:
+            raise ValueError("LOG_BASE_DIR is required when LOG_WRITE_TO_FILE=true")
+        return self
+
+
+class OtelSettings(_ConfigModel):
+    tracing_enabled: bool
+    operation_spans_enabled: bool
+    metrics_enabled: bool
+    logs_enabled: bool
+    auto_configure: bool
+    service_name: str
+    exporter_otlp_traces_endpoint: AnyHttpUrl | None = None
+    exporter_otlp_timeout_seconds: PositiveInt
+
+    @field_validator("auto_configure")
+    def validate_auto_configure(cls, value: bool) -> bool:
         """当前由 Settings 管理 exporter，禁止框架另从进程环境自动配置。"""
         if value:
             raise ValueError(
@@ -264,158 +170,335 @@ class Settings(BaseSettings):
         return value
 
     @model_validator(mode="after")
-    def validate_log_output(self) -> "Settings":
-        """校验日志至少有一个输出目标，且文件输出必须配置目录。"""
-        if not self.LOG_WRITE_TO_FILE and not self.LOG_WRITE_TO_CONSOLE:
-            raise ValueError(
-                "LOG_WRITE_TO_FILE and LOG_WRITE_TO_CONSOLE cannot both be false"
-            )
-        if self.LOG_WRITE_TO_FILE and self.LOG_BASE_DIR is None:
-            raise ValueError("LOG_BASE_DIR is required when LOG_WRITE_TO_FILE=true")
-        return self
-
-    @model_validator(mode="after")
-    def decrypt_sensitive_fields(self) -> "Settings":
-        """解密敏感字段"""
-        fields_to_decrypt = ["DB_PASSWORD", "DB_READ_PASSWORD", "REDIS_PASSWORD"]
-        aes_key = self.AES_SECRET.get_secret_value()
-
-        if not aes_key:
-            return self
-
-        for field in fields_to_decrypt:
-            secret_value: SecretStr | None = getattr(self, field)
-            if secret_value is None:
-                continue
-            original_value = secret_value.get_secret_value()
-            if original_value.startswith("ENC(") and original_value.endswith(")"):
-                try:
-                    decrypted_value = aes_decrypt(original_value[4:-1], aes_key)
-                    object.__setattr__(self, field, SecretStr(decrypted_value))
-                except Exception as e:
-                    logger.error(f"Failed to decrypt field '{field}': {str(e)}")
-                    raise ValueError(f"Failed to decrypt field '{field}'") from e
-        return self
-
-    @model_validator(mode="after")
-    def validate_tracing_exporter(self) -> "Settings":
+    def validate_tracing_exporter(self) -> "OtelSettings":
         """启用 tracing 时必须配置真实的 OTLP/HTTP Trace 接收端。"""
-        if (
-            self.OTEL_TRACING_ENABLED
-            and self.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT is None
-        ):
+        if self.tracing_enabled and self.exporter_otlp_traces_endpoint is None:
             raise ValueError(
                 "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT is required when "
                 "OTEL_TRACING_ENABLED=true"
             )
         return self
 
+
+class JwtSettings(_ConfigModel):
+    algorithm: str
+
+
+class AccessTokenSettings(_ConfigModel):
+    expire_seconds: int
+
+
+class AuthSettings(_ConfigModel):
+    jwt: JwtSettings
+    access_token: AccessTokenSettings
+
+
+class CorsSettings(_ConfigModel):
+    origins: list[str]
+
+
+class WechatSettings(_ConfigModel):
+    grant_type: str
+
+
+class LlmProviderSettings(_ConfigModel):
+    base_url: str
+    model: str
+
+
+class LlmSettings(_ConfigModel):
+    default_provider: str
+    mimo: LlmProviderSettings
+    deepseek: LlmProviderSettings
+
+
+class EmbeddingSettings(_ConfigModel):
+    provider: EmbeddingProvider
+    base_url: str
+    model: str
+    dimension: PositiveInt
+    timeout_seconds: PositiveInt
+
+
+class MilvusSettings(_ConfigModel):
+    uri: AnyHttpUrl
+    db_name: str
+    timeout_seconds: PositiveInt
+
+    @field_validator("db_name")
+    def validate_db_name(cls, value: str) -> str:
+        """Milvus database 名称必须是非空字符串。"""
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("MILVUS_DB_NAME cannot be empty")
+        return normalized
+
+
+class AgentSettings(_ConfigModel):
+    action_confirmation_seconds: PositiveInt
+    action_idempotency_seconds: PositiveInt
+    lease_seconds: PositiveInt
+    control_poll_seconds: PositiveInt
+    cancel_grace_seconds: PositiveInt
+    stream_buffer_size: PositiveInt
+    checkpoint_max_bytes: PositiveInt
+    llm_timeout_seconds: PositiveInt
+
     @model_validator(mode="after")
-    def validate_agent_managed_run(self) -> "Settings":
+    def validate_managed_run(self) -> "AgentSettings":
         """校验受管理 Agent 运行的心跳、取消收尾与 checkpoint 上限。"""
-        if self.AGENT_CONTROL_POLL_SECONDS >= self.AGENT_LEASE_SECONDS:
+        if self.control_poll_seconds >= self.lease_seconds:
             raise ValueError(
                 "AGENT_CONTROL_POLL_SECONDS must be less than AGENT_LEASE_SECONDS"
             )
-        if self.AGENT_CANCEL_GRACE_SECONDS <= self.AGENT_LLM_TIMEOUT_SECONDS:
+        if self.cancel_grace_seconds <= self.llm_timeout_seconds:
             raise ValueError(
                 "AGENT_CANCEL_GRACE_SECONDS must cover AGENT_LLM_TIMEOUT_SECONDS "
                 "plus the checkpoint commit budget"
             )
-        if self.AGENT_CANCEL_GRACE_SECONDS > 300:
+        if self.cancel_grace_seconds > 300:
             raise ValueError("AGENT_CANCEL_GRACE_SECONDS cannot exceed 300")
-        if self.AGENT_CHECKPOINT_MAX_BYTES > 16 * 1024 * 1024:
+        if self.checkpoint_max_bytes > 16 * 1024 * 1024:
             raise ValueError("AGENT_CHECKPOINT_MAX_BYTES cannot exceed 16 MiB")
         return self
 
+
+class RagSettings(_ConfigModel):
+    allowed_domains: list[str]
+    allowed_kb_ids: list[int]
+    max_context_chars: PositiveInt
+
+
+class DatabaseReadReplicaSettings(_ConfigModel):
+    host: str
+    port: int | None = None
+    username: str | None = None
+    database: str | None = None
+
+
+class DatabaseSettings(_ConfigModel):
+    type: DBType
+    host: str
+    port: int
+    username: str
+    database: str
+    echo: bool
+    read_replica: DatabaseReadReplicaSettings | None = None
+
+    @field_validator("type", mode="before")
+    def validate_db_type(cls, value: str) -> str:
+        """校验数据库类型。"""
+        if not value:
+            raise ValueError("DB_TYPE is required and cannot be empty")
+        allowed = list(DB_DRIVER_MAP.keys())
+        if value not in allowed:
+            raise ValueError(f"DB_TYPE must be one of {allowed}")
+        return value
+
+
+class RedisSettings(_ConfigModel):
+    host: str
+    port: int
+    db: int
+
+
+class CelerySettings(_ConfigModel):
+    idempotency_enabled: bool
+    execution_deadline_grace_seconds: PositiveInt
+    queue_start_timeout_seconds: PositiveInt
+    publish_confirm_timeout_seconds: PositiveInt
+    publish_reconciler_interval_seconds: PositiveInt
+    orphan_fence_seconds: PositiveInt
+    reconciler_beat_enabled: bool
+    reconciler_interval_seconds: PositiveInt
+    reconciler_batch_size: PositiveInt
+    reconciler_queue: str
+    task_max_payload_bytes: PositiveInt
+
     @model_validator(mode="after")
-    def validate_celery_idempotency(self) -> "Settings":
-        """校验 Celery PostgreSQL 幂等状态机的安全边界。"""
-        if not self.CELERY_IDEMPOTENCY_ENABLED:
+    def validate_idempotency_timing(self) -> "CelerySettings":
+        """校验 Celery 幂等状态机的内部时序边界。"""
+        if not self.idempotency_enabled:
             return self
-        if self.DB_TYPE != "postgresql":
-            raise ValueError("CELERY_IDEMPOTENCY_ENABLED requires DB_TYPE=postgresql")
-        if self.CELERY_EXECUTION_DEADLINE_GRACE_SECONDS > 300:
+        if self.execution_deadline_grace_seconds > 300:
             raise ValueError(
                 "CELERY_EXECUTION_DEADLINE_GRACE_SECONDS cannot exceed 300"
             )
-        if (
-            self.CELERY_QUEUE_START_TIMEOUT_SECONDS
-            <= self.CELERY_RECONCILER_INTERVAL_SECONDS
-        ):
+        if self.queue_start_timeout_seconds <= self.reconciler_interval_seconds:
             raise ValueError(
                 "CELERY_QUEUE_START_TIMEOUT_SECONDS must exceed "
                 "CELERY_RECONCILER_INTERVAL_SECONDS"
             )
-        if (
-            self.CELERY_PUBLISH_CONFIRM_TIMEOUT_SECONDS
-            <= self.CELERY_PUBLISH_RECONCILER_INTERVAL_SECONDS
+        if self.publish_confirm_timeout_seconds <= (
+            self.publish_reconciler_interval_seconds
         ):
             raise ValueError(
                 "CELERY_PUBLISH_CONFIRM_TIMEOUT_SECONDS must exceed "
                 "CELERY_PUBLISH_RECONCILER_INTERVAL_SECONDS"
             )
-        if not self.CELERY_RECONCILER_QUEUE.strip():
+        if not self.reconciler_queue.strip():
             raise ValueError("CELERY_RECONCILER_QUEUE cannot be empty")
+        return self
+
+
+class EndpointGuardSettings(_ConfigModel):
+    enabled: bool
+    source: EndpointGuardSource
+    rules: list[dict[str, object]]
+    redis_key: str
+    cache_ttl_seconds: int
+    fail_open: bool
+
+
+class ConfigEchoSettings(_ConfigModel):
+    reveal_secrets: bool
+
+
+class SecretsSettings(_ConfigModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    aes_secret: SecretStr = Field(validation_alias="AES_SECRET")
+    jwt_secret: SecretStr = Field(validation_alias="JWT_SECRET")
+    db_password: SecretStr = Field(validation_alias="DB_PASSWORD")
+    db_read_password: SecretStr | None = Field(
+        default=None,
+        validation_alias="DB_READ_PASSWORD",
+    )
+    redis_password: SecretStr = Field(validation_alias="REDIS_PASSWORD")
+    wechat_app_id: str = Field(validation_alias="WECHAT_APP_ID")
+    wechat_app_secret: SecretStr = Field(validation_alias="WECHAT_APP_SECRET")
+    llm_mimo_api_key: SecretStr = Field(validation_alias="LLM_MIMO_API_KEY")
+    llm_deepseek_api_key: SecretStr = Field(validation_alias="LLM_DEEPSEEK_API_KEY")
+    embedding_api_key: SecretStr = Field(validation_alias="EMBEDDING_API_KEY")
+
+
+class Settings(BaseSettings):
+    """
+    应用全局配置。
+    """
+
+    app_env: AppEnv
+    debug: bool
+
+    log: LogSettings
+    otel: OtelSettings
+    auth: AuthSettings
+    cors: CorsSettings
+    wechat: WechatSettings
+    llm: LlmSettings
+    embedding: EmbeddingSettings
+    milvus: MilvusSettings
+    agent: AgentSettings
+    rag: RagSettings
+    db: DatabaseSettings
+    redis: RedisSettings
+    celery: CelerySettings
+    endpoint_guard: EndpointGuardSettings
+    config_echo: ConfigEchoSettings
+    secrets: SecretsSettings
+
+    model_config = SettingsConfigDict(
+        case_sensitive=True,
+        extra="forbid",
+        hide_input_in_errors=True,
+        env_file_encoding="utf-8",
+    )
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        """Load TOML application settings from the selected environment file."""
+        del env_settings, dotenv_settings, file_secret_settings
+        return init_settings, _AppTomlSettingsSource(settings_cls)
+
+    @model_validator(mode="after")
+    def decrypt_sensitive_fields(self) -> "Settings":
+        """解密敏感字段。"""
+        aes_key = self.secrets.aes_secret.get_secret_value()
+
+        if not aes_key:
+            return self
+
+        for field in ("db_password", "db_read_password", "redis_password"):
+            secret_value: SecretStr | None = getattr(self.secrets, field)
+            if secret_value is None:
+                continue
+            original_value = secret_value.get_secret_value()
+            if original_value.startswith("ENC(") and original_value.endswith(")"):
+                try:
+                    decrypted_value = aes_decrypt(original_value[4:-1], aes_key)
+                    object.__setattr__(self.secrets, field, SecretStr(decrypted_value))
+                except Exception as e:
+                    logger.error(f"Failed to decrypt field '{field}': {str(e)}")
+                    raise ValueError(f"Failed to decrypt field '{field}'") from e
+        return self
+
+    @model_validator(mode="after")
+    def validate_celery_idempotency(self) -> "Settings":
+        """校验 Celery PostgreSQL 幂等状态机的数据库边界。"""
+        if self.celery.idempotency_enabled and self.db.type != "postgresql":
+            raise ValueError("CELERY_IDEMPOTENCY_ENABLED requires DB_TYPE=postgresql")
         return self
 
     @property
     def sqlalchemy_database_uri(self) -> str:
-        """根据数据库类型动态生成连接 URI"""
-        driver = DB_DRIVER_MAP.get(self.DB_TYPE)
+        """根据数据库类型动态生成连接 URI。"""
+        driver = DB_DRIVER_MAP.get(self.db.type)
         if not driver:
-            raise ValueError(f"Unsupported database type: {self.DB_TYPE}")
+            raise ValueError(f"Unsupported database type: {self.db.type}")
 
-        password = self.DB_PASSWORD.get_secret_value()
+        password = self.secrets.db_password.get_secret_value()
 
-        if self.DB_TYPE == "mysql":
+        if self.db.type == "mysql":
             return URL.create(
                 drivername=driver,
-                username=self.DB_USERNAME,
+                username=self.db.username,
                 password=password,
-                host=self.DB_HOST,
-                port=self.DB_PORT,
-                database=self.DB_DATABASE,
+                host=self.db.host,
+                port=self.db.port,
+                database=self.db.database,
                 query={"charset": "utf8mb4"},
             ).render_as_string(hide_password=False)
-        elif self.DB_TYPE == "postgresql":
+        elif self.db.type == "postgresql":
             return URL.create(
                 drivername=driver,
-                username=self.DB_USERNAME,
+                username=self.db.username,
                 password=password,
-                host=self.DB_HOST,
-                port=self.DB_PORT,
-                database=self.DB_DATABASE,
+                host=self.db.host,
+                port=self.db.port,
+                database=self.db.database,
             ).render_as_string(hide_password=False)
         else:
-            raise ValueError(f"Unsupported database type: {self.DB_TYPE}")
+            raise ValueError(f"Unsupported database type: {self.db.type}")
 
     @property
     def sqlalchemy_read_database_uri(self) -> str | None:
-        """
-        根据数据库类型动态生成只读副本的连接 URI。
-        未配置的字段自动 fallback 到主库同名字段。
-        如果 DB_READ_HOST 未设置，返回 None 表示不启用读写分离。
-        """
-        if self.DB_READ_HOST is None:
+        """根据数据库类型动态生成只读副本连接 URI。"""
+        read_replica = self.db.read_replica
+        if read_replica is None:
             return None
 
-        driver = DB_DRIVER_MAP.get(self.DB_TYPE)
+        driver = DB_DRIVER_MAP.get(self.db.type)
         if not driver:
-            raise ValueError(f"Unsupported database type: {self.DB_TYPE}")
+            raise ValueError(f"Unsupported database type: {self.db.type}")
 
-        # 未设置的字段 fallback 到主库
-        host = self.DB_READ_HOST
-        port = self.DB_READ_PORT or self.DB_PORT
-        username = self.DB_READ_USERNAME or self.DB_USERNAME
+        host = read_replica.host
+        port = read_replica.port or self.db.port
+        username = read_replica.username or self.db.username
         password = (
-            self.DB_READ_PASSWORD.get_secret_value()
-            if self.DB_READ_PASSWORD is not None
-            else self.DB_PASSWORD.get_secret_value()
+            self.secrets.db_read_password.get_secret_value()
+            if self.secrets.db_read_password is not None
+            else self.secrets.db_password.get_secret_value()
         )
-        database = self.DB_READ_DATABASE or self.DB_DATABASE
+        database = read_replica.database or self.db.database
 
-        if self.DB_TYPE == "mysql":
+        if self.db.type == "mysql":
             return URL.create(
                 drivername=driver,
                 username=username,
@@ -425,7 +508,7 @@ class Settings(BaseSettings):
                 database=database,
                 query={"charset": "utf8mb4"},
             ).render_as_string(hide_password=False)
-        elif self.DB_TYPE == "postgresql":
+        elif self.db.type == "postgresql":
             return URL.create(
                 drivername=driver,
                 username=username,
@@ -435,15 +518,15 @@ class Settings(BaseSettings):
                 database=database,
             ).render_as_string(hide_password=False)
         else:
-            raise ValueError(f"Unsupported database type: {self.DB_TYPE}")
+            raise ValueError(f"Unsupported database type: {self.db.type}")
 
     @property
     def redis_url(self) -> str:
         return _build_redis_url(
-            host=self.REDIS_HOST,
-            port=self.REDIS_PORT,
-            password=self.REDIS_PASSWORD.get_secret_value(),
-            db=self.REDIS_DB,
+            host=self.redis.host,
+            port=self.redis.port,
+            password=self.secrets.redis_password.get_secret_value(),
+            db=self.redis.db,
         )
 
 
@@ -499,27 +582,27 @@ def detect_app_env() -> AppEnv:
     return cast(AppEnv, app_env)
 
 
-def _required_config_keys() -> set[str]:
-    """返回必须由环境配置文件显式提供的字段。"""
-    return {
-        name
-        for name, field in Settings.model_fields.items()
-        if field.is_required() and name not in SECRET_FILE_KEYS and name != "APP_ENV"
-    }
-
-
 def _required_secret_keys() -> set[str]:
     """返回必须由密钥文件显式提供的字段。"""
     return {
-        name
-        for name, field in Settings.model_fields.items()
-        if field.is_required() and name in SECRET_FILE_KEYS
+        field.validation_alias
+        for field in SecretsSettings.model_fields.values()
+        if field.is_required() and isinstance(field.validation_alias, str)
     }
 
 
-def _validate_environment_file(env_file_path: Path) -> dict[str, str | None]:
-    """验证环境配置文件的字段来源和完整性。"""
-    env_values = dict(dotenv_values(env_file_path))
+def _validate_environment_file(env_file_path: Path) -> dict[str, Any]:
+    """验证 TOML 环境配置文件的字段来源和完整性。"""
+    with env_file_path.open("rb") as env_file:
+        env_values = tomllib.load(env_file)
+
+    if "APP_ENV" in env_values or "app_env" in env_values:
+        raise ValueError(
+            f"APP_ENV must be configured in the root .env, not {env_file_path}"
+        )
+    if "secrets" in env_values:
+        raise ValueError(f"Secret keys must be moved from {env_file_path} to .secrets")
+
     misplaced_secret_keys = sorted(set(env_values) & SECRET_FILE_KEYS)
     if misplaced_secret_keys:
         keys = ", ".join(misplaced_secret_keys)
@@ -527,14 +610,19 @@ def _validate_environment_file(env_file_path: Path) -> dict[str, str | None]:
             f"Secret keys must be moved from {env_file_path} to .secrets: {keys}"
         )
 
-    missing_keys = sorted(_required_config_keys() - set(env_values))
-    if missing_keys:
-        keys = ", ".join(missing_keys)
-        raise ValueError(
-            f"Required configuration keys missing from {env_file_path}: {keys}"
-        )
-
     return env_values
+
+
+def _load_settings_from_files(
+    app_env: AppEnv,
+    app_config_path: Path,
+    secrets_path: Path,
+) -> Settings:
+    """在明确的 TOML 应用配置和 dotenv 密钥文件上下文中构造 Settings。"""
+    secrets_values = dict(dotenv_values(secrets_path))
+    secrets = SecretsSettings.model_validate(secrets_values)
+    with _use_app_config_path(app_config_path):
+        return Settings(app_env=app_env, secrets=secrets)  # type: ignore[call-arg]
 
 
 def _validate_secrets_file() -> tuple[Path, dict[str, str | None]]:
@@ -583,17 +671,29 @@ def _sensitive_secret_config_keys(secrets: Mapping[str, str | None]) -> set[str]
     }
 
 
+def _iter_settings_values(
+    model: BaseModel,
+    prefix: str = "",
+) -> Iterator[tuple[str, Any]]:
+    """递归遍历嵌套配置，生成点路径和实际字段值。"""
+    for name in type(model).model_fields:
+        value = getattr(model, name)
+        key = f"{prefix}.{name}" if prefix else name
+        if isinstance(value, BaseModel):
+            yield from _iter_settings_values(value, key)
+        else:
+            yield key, value
+
+
 def _config_echo_value(
-    settings: Settings,
     key: str,
     value: Any,
     *,
     sensitive_keys: set[str],
     reveal_sensitive: bool,
 ) -> Any:
-    setting_value = getattr(settings, key, value)
-    if hasattr(setting_value, "get_secret_value"):
-        value = setting_value.get_secret_value()
+    if hasattr(value, "get_secret_value"):
+        value = value.get_secret_value()
 
     if reveal_sensitive or key not in sensitive_keys:
         return value
@@ -609,21 +709,17 @@ def _config_echo_value(
     return "***"
 
 
-def _echo_loaded_config(
-    settings: Settings,
-    secrets: Mapping[str, str | None],
-) -> None:
-    sensitive_keys = _sensitive_secret_config_keys(secrets)
-    reveal_sensitive = settings.CONFIG_ECHO_REVEAL_SECRETS
+def _echo_loaded_config(settings: Settings) -> None:
+    sensitive_keys = {f"secrets.{name}" for name in SecretsSettings.model_fields}
+    reveal_sensitive = settings.config_echo.reveal_secrets
     echo_mode = "unmasked" if reveal_sensitive else "masked"
 
     logger.info("=" * 50)
     logger.success(
-        f"Configuration Details (CONFIG_ECHO_REVEAL_SECRETS={settings.CONFIG_ECHO_REVEAL_SECRETS}, {echo_mode}):"
+        f"Configuration Details (config_echo.reveal_secrets={reveal_sensitive}, {echo_mode}):"
     )
-    for key, value in settings.model_dump().items():
+    for key, value in _iter_settings_values(settings):
         echo_value = _config_echo_value(
-            settings,
             key,
             value,
             sensitive_keys=sensitive_keys,
@@ -641,8 +737,8 @@ def load_config() -> Settings:
     加载顺序：
     1. 从进程环境或仓库根目录 .env 获取 APP_ENV
     2. 验证 .secrets 文件不再包含 APP_ENV
-    3. 验证对应环境配置文件的字段来源和完整性
-    4. 加载配置文件 (.env.{env} 和 .secrets)，并显式注入 APP_ENV
+    3. 验证对应环境 TOML 配置文件的字段来源和完整性
+    4. 加载配置文件 (app.{env}.toml 和 .secrets)，并显式注入 APP_ENV
     """
     _logger = _setup_startup_logger()
     _logger.info("Loading configuration...")
@@ -650,14 +746,14 @@ def load_config() -> Settings:
     # 1-2. 获取唯一 APP_ENV，并验证密钥文件
     try:
         app_env = detect_app_env()
-        secrets_path, secrets_dict = _validate_secrets_file()
+        secrets_path, _ = _validate_secrets_file()
         _logger.info(f"Detected Environment: {app_env}")
     except (FileNotFoundError, ValueError) as e:
         _logger.critical(f"Configuration validation failed: {e}")
         raise
 
-    # 3. 检查对应环境文件是否存在
-    env_file_path = BASE_DIR / "configs" / f".env.{app_env}"
+    # 3. 检查对应环境 TOML 文件是否存在
+    env_file_path = BASE_DIR / "configs" / f"app.{app_env}.toml"
     if not env_file_path.exists():
         msg = f"CRITICAL: Config file missing for environment '{app_env}' at {env_file_path}"
         _logger.critical(msg)
@@ -669,15 +765,15 @@ def load_config() -> Settings:
         _logger.critical(f"Configuration validation failed: {e}")
         raise
 
-    # 4. 加载已完成字段隔离校验的配置和密钥文件；不读取其他 shell 环境变量
+    # 4. 加载已完成字段隔离校验的 TOML 配置和 dotenv 密钥文件；不读取其他 shell 环境变量
     load_files = [env_file_path, secrets_path]
     _logger.info(f"Loading files: {[f.name for f in load_files]}")
 
     try:
-        _settings = Settings(APP_ENV=app_env, _env_file=load_files)  # type: ignore
+        _settings = _load_settings_from_files(app_env, env_file_path, secrets_path)
         _logger.success("Configuration loaded successfully.")
 
-        _echo_loaded_config(_settings, secrets_dict)
+        _echo_loaded_config(_settings)
 
         return _settings
     except Exception as e:

@@ -43,10 +43,11 @@ WECHAT_APP_ID=your_wechat_app_id
 WECHAT_APP_SECRET=your_wechat_app_secret
 ```
 
-在当前环境的 `configs/.env.{APP_ENV}` 中配置非敏感授权参数：
+在当前环境的 `configs/app.{APP_ENV}.toml` 中配置非敏感授权参数：
 
-```env
-WECHAT_GRANT_TYPE=authorization_code
+```toml
+[wechat]
+grant_type = "authorization_code"
 ```
 
 根目录 `.env` 只用于选择 `APP_ENV`，不要在其中放置微信凭据。

@@ -27,8 +27,8 @@
 
 ## 配置与安全
 
-- `internal/config.py` 是配置加载入口。根目录 `.env` 只选择 `APP_ENV`，应用读取
-  `configs/.env.{APP_ENV}` 和根目录 `.secrets`；除 `APP_ENV` 外不增加 shell 环境变量兜底。
+- `internal/config.py` 是配置加载入口。根目录 `.env` 只选择 `APP_ENV`，应用读取嵌套 TOML
+  `configs/app.{APP_ENV}.toml` 和根目录 `.secrets`；除 `APP_ENV` 外不增加 shell 环境变量兜底。
 - 非敏感运行参数必须在环境配置中声明，凭据只能放在 `.secrets` 允许的字段中；不得提交或记录真实
   secret、token、密码、私钥、数据库连接串或生产配置。
 - 根 `Dockerfile`、`compose.yaml`、`.env.compose.example` 与 `deploy/` 共同构成容器部署 contract；

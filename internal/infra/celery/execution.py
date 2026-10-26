@@ -18,7 +18,7 @@ def run_in_async[T](
     reset_async_redis()
 
     async def _wrapper() -> T:
-        init_async_db(echo=settings.DB_ECHO)
+        init_async_db(echo=settings.db.echo)
         init_async_redis()
         context.init(trace_id=trace_id)
 

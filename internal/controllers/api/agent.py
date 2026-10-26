@@ -573,7 +573,7 @@ def _managed_streaming_response(
     return StreamingResponse(
         _serialize_managed_events(
             events,
-            heartbeat_seconds=float(settings.AGENT_CONTROL_POLL_SECONDS),
+            heartbeat_seconds=float(settings.agent.control_poll_seconds),
         ),
         media_type=_SSE_MEDIA_TYPE,
         headers=_SSE_HEADERS,

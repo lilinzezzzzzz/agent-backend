@@ -48,9 +48,11 @@ def _patch_wechat_dependencies(
         auth_module,
         "settings",
         SimpleNamespace(
-            WECHAT_APP_ID="app-id",
-            WECHAT_APP_SECRET=SecretStr("app-secret"),
-            WECHAT_GRANT_TYPE="authorization_code",
+            secrets=SimpleNamespace(
+                wechat_app_id="app-id",
+                wechat_app_secret=SecretStr("app-secret"),
+            ),
+            wechat=SimpleNamespace(grant_type="authorization_code"),
         ),
     )
     monkeypatch.setattr(

@@ -1463,7 +1463,7 @@ def new_database_agent_storage_backend() -> DatabaseAgentStorageBackend:
         run_step_dao=new_agent_run_step_dao(),
         checkpoint_dao=new_agent_run_checkpoint_dao(),
         attempt_dao=new_agent_run_attempt_dao(),
-        checkpoint_max_bytes=settings.AGENT_CHECKPOINT_MAX_BYTES,
+        checkpoint_max_bytes=settings.agent.checkpoint_max_bytes,
     )
 
 

@@ -54,34 +54,35 @@ flowchart LR
 ### 2.2 配置所有权
 
 OpenTelemetry 配置由 [`internal/config.py`](../../internal/config.py) 声明，实际环境值维护在
-`configs/.env.{APP_ENV}`：
+`configs/app.{APP_ENV}.toml`：
 
 | 配置项 | 作用 |
 | --- | --- |
-| `OTEL_TRACING_ENABLED` | 控制 FastAPI 原生和业务 Span 的创建、上报；不关闭请求 ID、日志关联和响应头 |
-| `OTEL_OPERATION_SPANS_ENABLED` | 独立控制 FastAPI 的依赖解析、endpoint、序列化和 BackgroundTasks Span；仅在 tracing 开启时生效，不影响手动业务埋点 |
-| `OTEL_METRICS_ENABLED` | 控制 FastAPI HTTP 请求指标采集，需要已配置的 MeterProvider |
-| `OTEL_LOGS_ENABLED` | 控制 FastAPI 校验失败和 recorder 捕获的未处理异常的 OTel 日志，需要已配置的 LoggerProvider；Loguru 仍由原有日志开关控制 |
-| `OTEL_AUTO_CONFIGURE` | 控制 FastAPI 从进程环境自动增加 exporter；当前 Settings 自管模式只允许 `false`，开启会在配置校验时报错 |
-| `OTEL_SERVICE_NAME` | 写入 OTel Resource 的 `service.name` |
-| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | OTLP/HTTP Trace 接收地址，应包含与接收端匹配的 `/v1/traces` 路径 |
-| `OTEL_EXPORTER_OTLP_TIMEOUT_SECONDS` | 单次 Exporter 请求超时 |
+| `otel.tracing_enabled` | 控制 FastAPI 原生和业务 Span 的创建、上报；不关闭请求 ID、日志关联和响应头 |
+| `otel.operation_spans_enabled` | 独立控制 FastAPI 的依赖解析、endpoint、序列化和 BackgroundTasks Span；仅在 tracing 开启时生效，不影响手动业务埋点 |
+| `otel.metrics_enabled` | 控制 FastAPI HTTP 请求指标采集，需要已配置的 MeterProvider |
+| `otel.logs_enabled` | 控制 FastAPI 校验失败和 recorder 捕获的未处理异常的 OTel 日志，需要已配置的 LoggerProvider；Loguru 仍由原有日志开关控制 |
+| `otel.auto_configure` | 控制 FastAPI 从进程环境自动增加 exporter；当前 Settings 自管模式只允许 `false`，开启会在配置校验时报错 |
+| `otel.service_name` | 写入 OTel Resource 的 `service.name` |
+| `otel.exporter_otlp_traces_endpoint` | OTLP/HTTP Trace 接收地址，应包含与接收端匹配的 `/v1/traces` 路径 |
+| `otel.exporter_otlp_timeout_seconds` | 单次 Exporter 请求超时 |
 
-当前配置校验要求：`OTEL_TRACING_ENABLED=true` 时必须提供 Trace endpoint。
+当前配置校验要求：`otel.tracing_enabled=true` 时必须提供 Trace endpoint。
 endpoint 可以指向 Collector，也可以指向原生支持 OTLP/HTTP 的可观测性后端。
 认证凭证、Token 或 TLS 私钥不得写入普通环境模板或文档示例。
 
-上述五个 telemetry 开关均由 `Settings` 传入 FastAPI。新增的四个配置项必须在环境文件中显式声明，
+上述五个 telemetry 开关均由 `Settings` 传入 FastAPI。新增的四个配置项必须在 TOML 配置中显式声明，
 已有外部配置文件升级时需要同步补齐。仓库四种环境中新增项的初始配置为：
 
-```dotenv
-OTEL_OPERATION_SPANS_ENABLED=true
-OTEL_METRICS_ENABLED=false
-OTEL_LOGS_ENABLED=false
-OTEL_AUTO_CONFIGURE=false
+```toml
+[otel]
+operation_spans_enabled = true
+metrics_enabled = false
+logs_enabled = false
+auto_configure = false
 ```
 
-`OTEL_AUTO_CONFIGURE` 的限制遵循[项目配置来源规则](../../AGENTS.md#配置与安全)：应用参数从 Settings
+`otel.auto_configure` 的限制遵循[项目配置来源规则](../../AGENTS.md#配置与安全)：应用参数从 Settings
 配置链读取，exporter 由应用生命周期管理。FastAPI 自动模式会另读进程中的 `OTEL_*` 变量，可能重复增加
 exporter，因此当前校验明确拒绝 `true`。支持该模式需要同时调整配置来源与资源所有权。
 
@@ -105,7 +106,7 @@ TracerProvider
 - tracing 关闭时，`span_context` 返回 non-recording Span，业务调用点不需要编写配置分支。
 
 项目按 [FastAPI 官方 Provider/exporter 集成方式](https://fastapi.tiangolo.com/advanced/opentelemetry/#configure-providers-and-exporters)
-显式传入 `telemetry={"auto_configure": settings.OTEL_AUTO_CONFIGURE}`，其值由 Settings 校验为 `false`，
+显式传入 `telemetry={"auto_configure": settings.otel.auto_configure}`，其值由 Settings 校验为 `false`，
 避免框架根据 shell 中的 `OTEL_*` 再增加 exporter。
 应用仍通过项目 Settings 配置链读取参数，不新增 shell 环境变量兜底，也不需要再调用 `FastAPIInstrumentor`。
 环境配置初始关闭 Metrics 和 OTel Logs，项目只创建 Trace pipeline，普通日志继续使用 Loguru。
@@ -290,7 +291,7 @@ OpenTelemetry 链路失败不应使正常业务请求失败。项目需要通过
 
 ### 4.2 接通当前应用
 
-将 `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` 指向已验证的 Receiver，并分别验证 FastAPI 与 Celery Worker：
+将 `otel.exporter_otlp_traces_endpoint` 指向已验证的 Receiver，并分别验证 FastAPI 与 Celery Worker：
 
 - 启动时 tracing runtime 初始化成功。
 - `simulate` 产生的所有 Span 被 Receiver 接收。

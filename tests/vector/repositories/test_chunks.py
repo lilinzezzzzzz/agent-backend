@@ -145,9 +145,11 @@ def test_new_chunk_repository_requires_embedder(monkeypatch):
         chunk_vector_module,
         "settings",
         SimpleNamespace(
-            MILVUS_URI="http://milvus.example:19530",
-            MILVUS_DB_NAME="rag_test",
-            MILVUS_TIMEOUT_SECONDS=7,
+            milvus=SimpleNamespace(
+                uri="http://milvus.example:19530",
+                db_name="rag_test",
+                timeout_seconds=7,
+            )
         ),
     )
 

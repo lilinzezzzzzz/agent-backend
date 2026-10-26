@@ -42,7 +42,7 @@ def sum_numbers(self, record_id: UUID, scope: str, x: int, y: int) -> dict[str, 
             scope=scope,
             execution_token=execution_token,
             execution_timeout_seconds=IDEMPOTENT_SUM_TIMEOUT_SECONDS,
-            deadline_grace_seconds=settings.CELERY_EXECUTION_DEADLINE_GRACE_SECONDS,
+            deadline_grace_seconds=settings.celery.execution_deadline_grace_seconds,
         )
         if not claimed:
             raise Ignore()

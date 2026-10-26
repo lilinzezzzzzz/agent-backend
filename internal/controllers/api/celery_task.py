@@ -55,7 +55,7 @@ async def create_idempotent_sum_task(
         `BaseResponse[CeleryTaskDispatchRespSchema]`：返回 record ID、稳定 task ID、状态和
         created 标识；幂等载荷冲突返回 `errors.IdempotencyConflict`。
     """
-    if not settings.CELERY_IDEMPOTENCY_ENABLED:
+    if not settings.celery.idempotency_enabled:
         raise AppException(
             errors.ServiceUnavailable, message="Celery idempotency is disabled"
         )

@@ -304,6 +304,6 @@ def new_order_service() -> OrderService:
     """依赖注入：获取 OrderService 单例。"""
     return OrderService(
         action_store=new_agent_action_cache(),
-        confirmation_seconds=settings.AGENT_ACTION_CONFIRMATION_SECONDS,
-        idempotency_seconds=settings.AGENT_ACTION_IDEMPOTENCY_SECONDS,
+        confirmation_seconds=settings.agent.action_confirmation_seconds,
+        idempotency_seconds=settings.agent.action_idempotency_seconds,
     )

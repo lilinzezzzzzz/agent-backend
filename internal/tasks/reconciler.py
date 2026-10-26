@@ -23,8 +23,8 @@ def fail_stale_submitting() -> dict[str, int]:
     async def _execute() -> dict[str, int]:
         dao = new_celery_task_dao()
         record_ids = await dao.fail_stale_submitting(
-            batch_size=settings.CELERY_RECONCILER_BATCH_SIZE,
-            stale_seconds=settings.CELERY_PUBLISH_CONFIRM_TIMEOUT_SECONDS,
+            batch_size=settings.celery.reconciler_batch_size,
+            stale_seconds=settings.celery.publish_confirm_timeout_seconds,
         )
         return {"submitting_failed_count": len(record_ids)}
 
@@ -45,7 +45,7 @@ def fail_expired_queued() -> dict[str, int]:
     async def _execute() -> dict[str, int]:
         dao = new_celery_task_dao()
         record_ids = await dao.fail_expired_queued(
-            batch_size=settings.CELERY_RECONCILER_BATCH_SIZE
+            batch_size=settings.celery.reconciler_batch_size
         )
         return {"queued_failed_count": len(record_ids)}
 
@@ -64,8 +64,8 @@ def reconcile_expired_execution() -> dict[str, int]:
     async def _execute() -> dict[str, int]:
         dao = new_celery_task_dao()
         record_ids = await dao.reconcile_expired_execution(
-            batch_size=settings.CELERY_RECONCILER_BATCH_SIZE,
-            orphan_fence_seconds=settings.CELERY_ORPHAN_FENCE_SECONDS,
+            batch_size=settings.celery.reconciler_batch_size,
+            orphan_fence_seconds=settings.celery.orphan_fence_seconds,
         )
         return {"execution_reconciled_count": len(record_ids)}
 

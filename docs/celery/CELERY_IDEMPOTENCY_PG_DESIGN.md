@@ -69,9 +69,9 @@ ORPHANED
 
 跨进程状态转换在每个事务内只调用一次 `utc_now_naive()`，并复用该值设置时间字段和 CAS 条件：
 
-- `queued_deadline_at = now + CELERY_QUEUE_START_TIMEOUT_SECONDS`
-- `hard_deadline_at = now + Celery task time limit + CELERY_EXECUTION_DEADLINE_GRACE_SECONDS`
-- `fence_expires_at = now + CELERY_ORPHAN_FENCE_SECONDS`，只在进入 `ORPHANED` 时设置。
+- `queued_deadline_at = now + celery.queue_start_timeout_seconds`
+- `hard_deadline_at = now + Celery task time limit + celery.execution_deadline_grace_seconds`
+- `fence_expires_at = now + celery.orphan_fence_seconds`，只在进入 `ORPHANED` 时设置。
 - `started_at` 只在首次成功 claim 时设置。
 - `finished_at` 在进入 `SUCCEEDED`、`FAILED` 或 `CANCELLED` 时设置；进入 `ORPHANED` 不设置。
 
@@ -144,27 +144,28 @@ Reconciler 只收敛数据库状态，不重新发布消息，也不能保证 de
 
 ## 配置
 
-```dotenv
-CELERY_IDEMPOTENCY_ENABLED=true
-CELERY_EXECUTION_DEADLINE_GRACE_SECONDS=30
-CELERY_QUEUE_START_TIMEOUT_SECONDS=300
-CELERY_PUBLISH_CONFIRM_TIMEOUT_SECONDS=30
-CELERY_PUBLISH_RECONCILER_INTERVAL_SECONDS=10
-CELERY_ORPHAN_FENCE_SECONDS=300
-CELERY_RECONCILER_BEAT_ENABLED=true
-CELERY_RECONCILER_INTERVAL_SECONDS=60
-CELERY_RECONCILER_BATCH_SIZE=100
-CELERY_RECONCILER_QUEUE=celery_maintenance_queue
-CELERY_TASK_MAX_PAYLOAD_BYTES=262144
+```toml
+[celery]
+idempotency_enabled = true
+execution_deadline_grace_seconds = 30
+queue_start_timeout_seconds = 300
+publish_confirm_timeout_seconds = 30
+publish_reconciler_interval_seconds = 10
+orphan_fence_seconds = 300
+reconciler_beat_enabled = true
+reconciler_interval_seconds = 60
+reconciler_batch_size = 100
+reconciler_queue = "celery_maintenance_queue"
+task_max_payload_bytes = 262144
 ```
 
 安全边界：
 
-- `CELERY_EXECUTION_DEADLINE_GRACE_SECONDS <= 300`
-- `CELERY_QUEUE_START_TIMEOUT_SECONDS > CELERY_RECONCILER_INTERVAL_SECONDS`
-- `CELERY_PUBLISH_CONFIRM_TIMEOUT_SECONDS > CELERY_PUBLISH_RECONCILER_INTERVAL_SECONDS`
-- `CELERY_ORPHAN_FENCE_SECONDS > 0`
-- `CELERY_RECONCILER_QUEUE` 不能为空
+- `celery.execution_deadline_grace_seconds <= 300`
+- `celery.queue_start_timeout_seconds > celery.reconciler_interval_seconds`
+- `celery.publish_confirm_timeout_seconds > celery.publish_reconciler_interval_seconds`
+- `celery.orphan_fence_seconds > 0`
+- `celery.reconciler_queue` 不能为空
 
 ## API contract
 

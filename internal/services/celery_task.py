@@ -99,7 +99,7 @@ class CeleryTaskService:
             queue=queue,
             options=publish_options,
         )
-        max_payload_bytes = settings.CELERY_TASK_MAX_PAYLOAD_BYTES
+        max_payload_bytes = settings.celery.task_max_payload_bytes
         if len(payload) > max_payload_bytes:
             raise AppException(
                 errors.PayloadTooLarge,
@@ -156,7 +156,7 @@ class CeleryTaskService:
         current = await self._dao.mark_queued(
             record_id=record.id,
             scope=scope,
-            queue_start_timeout_seconds=settings.CELERY_QUEUE_START_TIMEOUT_SECONDS,
+            queue_start_timeout_seconds=settings.celery.queue_start_timeout_seconds,
         )
         if current is None:
             raise RuntimeError("Celery task disappeared after broker publish")

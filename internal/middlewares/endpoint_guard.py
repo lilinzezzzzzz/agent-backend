@@ -216,7 +216,7 @@ class ASGIEndpointGuardMiddleware:
     ):
         self.app = app
         self._enabled = (
-            bool(settings.ENDPOINT_GUARD_ENABLED) if enabled is None else enabled
+            bool(settings.endpoint_guard.enabled) if enabled is None else enabled
         )
         self._provider = provider or new_endpoint_guard_rule_provider()
 
@@ -296,19 +296,19 @@ def parse_endpoint_guard_rules(
 
 def new_endpoint_guard_rule_provider() -> EndpointGuardRuleProvider:
     """按配置创建 endpoint guard 规则提供方。"""
-    source = EndpointGuardSource(settings.ENDPOINT_GUARD_SOURCE)
+    source = EndpointGuardSource(settings.endpoint_guard.source)
     providers: list[EndpointGuardRuleProvider] = []
 
     if source in {EndpointGuardSource.SETTINGS, EndpointGuardSource.SETTINGS_AND_REDIS}:
-        providers.append(StaticEndpointGuardRuleProvider(settings.ENDPOINT_GUARD_RULES))
+        providers.append(StaticEndpointGuardRuleProvider(settings.endpoint_guard.rules))
 
     if source in {EndpointGuardSource.REDIS, EndpointGuardSource.SETTINGS_AND_REDIS}:
         providers.append(
             RedisEndpointGuardRuleProvider(
                 cache=new_endpoint_guard_cache(),
-                redis_key=settings.ENDPOINT_GUARD_REDIS_KEY,
-                cache_ttl_seconds=settings.ENDPOINT_GUARD_CACHE_TTL_SECONDS,
-                fail_open=settings.ENDPOINT_GUARD_FAIL_OPEN,
+                redis_key=settings.endpoint_guard.redis_key,
+                cache_ttl_seconds=settings.endpoint_guard.cache_ttl_seconds,
+                fail_open=settings.endpoint_guard.fail_open,
             )
         )
 

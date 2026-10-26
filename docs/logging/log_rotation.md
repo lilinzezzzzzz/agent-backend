@@ -25,26 +25,26 @@ Logger 不负责：
 
 | 配置 | 默认值 | 说明 |
 | --- | --- | --- |
-| `LOG_FORMAT` | `text` | `text` 或 `json` |
-| `LOG_BASE_DIR` | 未配置 | 文件输出目录；开启文件输出时必须显式配置 |
-| `LOG_WRITE_TO_FILE` | `false` | 是否写入固定日志文件 |
-| `LOG_WRITE_TO_CONSOLE` | `true` | 是否输出到 stderr |
+| `log.format` | `text` | `text` 或 `json` |
+| `log.base_dir` | 未配置 | 文件输出目录；开启文件输出时必须显式配置 |
+| `log.write_to_file` | `false` | 是否写入固定日志文件 |
+| `log.write_to_console` | `true` | 是否输出到 stderr |
 
-Celery Worker 使用同一组配置；开启文件输出时路径为 `<LOG_BASE_DIR>/celery/app.log`。日志格式、目录和输出
-目标统一写入 `configs/.env.{APP_ENV}`，Compose 只把根目录 `.env` 中的 `APP_ENV` 注入容器。相对
-`LOG_BASE_DIR` 统一基于项目根目录解析，绝对路径保持不变。密钥由不含 `APP_ENV` 的 `.secrets` 提供。
+Celery Worker 使用同一组配置；开启文件输出时路径为 `<log.base_dir>/celery/app.log`。日志格式、目录和输出
+目标统一写入 `configs/app.{APP_ENV}.toml`，Compose 只把根目录 `.env` 中的 `APP_ENV` 注入容器。相对
+`log.base_dir` 统一基于项目根目录解析，绝对路径保持不变。密钥由不含 `APP_ENV` 的 `.secrets` 提供。
 
-> 开启 `LOG_WRITE_TO_FILE=true` 后，应用不会自动限制文件大小。长期运行环境必须配套外部轮转，
+> 开启 `log.write_to_file=true` 后，应用不会自动限制文件大小。长期运行环境必须配套外部轮转，
 > 否则 `app.log` 会持续增长。
 
 ### 输出目标的选择原则
 
-`LOG_WRITE_TO_FILE` 和 `LOG_WRITE_TO_CONSOLE` 描述部署所需的输出目标。本项目选择在
-`configs/.env.{APP_ENV}` 中显式维护它们，不通过 Compose `environment` 覆盖。当前仓库中的环境配置约定如下：
+`log.write_to_file` 和 `log.write_to_console` 描述部署所需的输出目标。本项目选择在
+`configs/app.{APP_ENV}.toml` 中显式维护它们，不通过 Compose `environment` 覆盖。当前仓库中的环境配置约定如下：
 
 当前取值如下：
 
-| 环境配置及对应部署 | `LOG_WRITE_TO_FILE` | `LOG_WRITE_TO_CONSOLE` | `LOG_BASE_DIR` | 日志轮转或采集责任 |
+| 环境配置及对应部署 | `log.write_to_file` | `log.write_to_console` | `log.base_dir` | 日志轮转或采集责任 |
 | --- | --- | --- | --- | --- |
 | `local`：本地开发 | `true` | `true` | `logs`，解析为项目根目录下的 `logs/` | 开发者按需清理；不适合长期运行 |
 | `dev` / `test`：开发、测试或临时进程 | `false` | `true` | 不配置 | CI / 终端收集标准错误流 |
@@ -54,9 +54,9 @@ Celery Worker 使用同一组配置；开启文件输出时路径为 `<LOG_BASE_
 
 - 不要同时设置为 `false`，否则应用日志没有任何输出目标。
 - 同时设置为 `true` 主要用于本地调试。在线环境双写会重复占用 I/O 和磁盘，并可能被日志平台重复采集。
-- `LOG_WRITE_TO_FILE=true` 时，必须配置可写的 `LOG_BASE_DIR` 和独立于应用进程的轮转机制。
+- `log.write_to_file=true` 时，必须配置可写的 `log.base_dir` 和独立于应用进程的轮转机制。
 - Compose journald 部署必须使用 console-only，避免日志落入容器文件系统。
-- `LOG_FORMAT` 与输出目标相互独立；平台采集通常使用 `json`，本地阅读通常使用 `text`。
+- `log.format` 与输出目标相互独立；平台采集通常使用 `json`，本地阅读通常使用 `text`。
 
 Compose journald 和 Kubernetes 均使用 console-only；日志存储由各自平台负责。输出目标仍由环境配置文件
 声明，不通过 Compose 或 manifest 临时覆盖。
@@ -94,13 +94,14 @@ JSON Lines 格式用于平台采集，每条日志是一个独立 JSON 对象且
 ## 本地开发
 
 本地开发默认同时输出到控制台和文件，便于实时调试和回看完整日志。
-在 `configs/.env.local` 中配置：
+在 `configs/app.local.toml` 中配置：
 
-```env
-LOG_FORMAT=text
-LOG_BASE_DIR=logs
-LOG_WRITE_TO_FILE=true
-LOG_WRITE_TO_CONSOLE=true
+```toml
+[log]
+format = "text"
+base_dir = "logs"
+write_to_file = true
+write_to_console = true
 ```
 
 从仓库根目录启动应用时，日志文件为：
@@ -117,11 +118,12 @@ tail -F logs/app.log
 tail -F logs/celery/app.log
 ```
 
-只需要控制台日志时，可在 `configs/.env.local` 中关闭文件输出：
+只需要控制台日志时，可在 `configs/app.local.toml` 中关闭文件输出：
 
-```env
-LOG_WRITE_TO_FILE=false
-LOG_WRITE_TO_CONSOLE=true
+```toml
+[log]
+write_to_file = false
+write_to_console = true
 ```
 
 本地开发不配置定时轮转。如果日志过大，先停止应用，再按需清空固定文件：
@@ -156,12 +158,13 @@ Docker `local` logging driver 和 Linux `logrotate` 主要控制单机磁盘占�
 
 ## Docker local 驱动（可选替代方案）
 
-不需要跨容器删除保留历史时，可以在所选 `configs/.env.{APP_ENV}` 中配置 console-only，由 Docker `local`
+不需要跨容器删除保留历史时，可以在所选 `configs/app.{APP_ENV}.toml` 中配置 console-only，由 Docker `local`
 logging driver 对 stderr 落盘、轮转和压缩：
 
-```env
-LOG_WRITE_TO_FILE=false
-LOG_WRITE_TO_CONSOLE=true
+```toml
+[log]
+write_to_file = false
+write_to_console = true
 ```
 
 本节不是根 Compose 的默认部署方案；容器删除时 Docker local 历史日志也会清理。
@@ -175,7 +178,7 @@ services:
     environment:
       APP_ENV: ${APP_ENV:?set APP_ENV in .env}
     volumes:
-      - ./configs/.env.${APP_ENV}:/app/configs/.env.${APP_ENV}:ro
+      - ./configs/app.${APP_ENV}.toml:/app/configs/app.${APP_ENV}.toml:ro
       - ./.secrets:/app/.secrets:ro
     logging:
       driver: local
@@ -188,7 +191,7 @@ services:
     environment:
       APP_ENV: ${APP_ENV:?set APP_ENV in .env}
     volumes:
-      - ./configs/.env.${APP_ENV}:/app/configs/.env.${APP_ENV}:ro
+      - ./configs/app.${APP_ENV}.toml:/app/configs/app.${APP_ENV}.toml:ro
       - ./.secrets:/app/.secrets:ro
     logging:
       driver: local
@@ -215,7 +218,7 @@ Docker 管理的内部日志文件不是运维契约，不应直接使用 `tail`
 **它不是当前默认方案；当前默认使用下文的 Docker Compose journald。**
 
 原 `deploy/logrotate/` 和 `scripts/verify_logrotate_sidecar.sh` 已从当前工作区移除，当前 `compose.yaml`、
-`.env.compose.example` 和 `configs/.env.prod` 也已切换到 journald。下文的参数、文件路径和命令均属于
+`.env.compose.example` 和 `configs/app.prod.toml` 也已切换到 journald。下文的参数、文件路径和命令均属于
 历史版本 `117597dad235c48f8b587ec406860082ee5339b4`，不能直接配合当前工作区执行。
 
 ### 历史资产与使用边界
@@ -225,7 +228,7 @@ Docker 管理的内部日志文件不是运维契约，不应直接使用 `tail`
 | 历史资产 | 用途 |
 | --- | --- |
 | `compose.yaml`、`.env.compose.example` | API 与 sidecar 编排、部署参数 |
-| `configs/.env.prod` | JSON 文件输出、关闭业务控制台输出 |
+| `configs/.env.prod` | 历史版本的 JSON 文件输出配置（当时仍使用 dotenv） |
 | `deploy/logrotate/Dockerfile` | 固定版本的 logrotate 镜像 |
 | `deploy/logrotate/agent-backend.conf`、`deploy/logrotate/crontab` | 轮转策略与调度 |
 | `scripts/verify_logrotate_sidecar.sh` | 当时的隔离验收脚本 |
@@ -275,7 +278,7 @@ Docker 内部日志上限。真实密码、token 和 API key 仍只放在 `.secr
 | `APP_SECRETS_FILE` | 不含 `APP_ENV` 的应用密钥文件，只读挂载到 API 容器 |
 | `DOCKER_LOG_MAX_SIZE` / `DOCKER_LOG_MAX_FILE` | API access/error log 与 sidecar stderr 的 Docker `local` driver 上限 |
 
-Compose 根据同一个 `APP_ENV` 挂载 `configs/.env.${APP_ENV}`，并只把该环境选择器注入 API 进程。
+Compose 根据同一个 `APP_ENV` 挂载 `configs/app.${APP_ENV}.toml`，并只把该环境选择器注入 API 进程。
 历史版本的 `configs/.env.prod` 使用以下 Sidecar 拓扑配置；当前版本已改为 console-only：
 
 ```env
@@ -401,12 +404,13 @@ Docker daemon 负责发送日志。仓库不再部署 logrotate sidecar。
 
 ### 配置与固定服务标签
 
-应用配置 `configs/.env.prod`：
+应用配置 `configs/app.prod.toml`：
 
-```dotenv
-LOG_FORMAT=json
-LOG_WRITE_TO_FILE=false
-LOG_WRITE_TO_CONSOLE=true
+```toml
+[log]
+format = "json"
+write_to_file = false
+write_to_console = true
 ```
 
 新部署从 `.env.compose.example` 创建根 `.env`；已有部署手动合并参数，不覆盖自己的配置。
@@ -591,12 +595,13 @@ scp 用户名@服务器地址:/home/用户名/log-exports/agent-backend-20261015
 
 ### 应用配置
 
-在所选 `configs/.env.{APP_ENV}` 中配置：
+在所选 `configs/app.{APP_ENV}.toml` 中配置：
 
-```env
-LOG_BASE_DIR=/var/log/agent-backend
-LOG_WRITE_TO_FILE=true
-LOG_WRITE_TO_CONSOLE=false
+```toml
+[log]
+base_dir = "/var/log/agent-backend"
+write_to_file = true
+write_to_console = false
 ```
 
 目标文件为：
@@ -616,7 +621,7 @@ services:
     environment:
       APP_ENV: ${APP_ENV:?set APP_ENV in .env}
     volumes:
-      - ./configs/.env.prod:/app/configs/.env.prod:ro
+      - ./configs/app.prod.toml:/app/configs/app.prod.toml:ro
       - ./.secrets:/app/.secrets:ro
       - /var/log/agent-backend:/var/log/agent-backend
 
@@ -624,7 +629,7 @@ services:
     environment:
       APP_ENV: ${APP_ENV:?set APP_ENV in .env}
     volumes:
-      - ./configs/.env.prod:/app/configs/.env.prod:ro
+      - ./configs/app.prod.toml:/app/configs/app.prod.toml:ro
       - ./.secrets:/app/.secrets:ro
       - /var/log/agent-backend:/var/log/agent-backend
 ```
@@ -702,14 +707,15 @@ Linux 测试环境完成最终验证。
 ## Docker 和 Kubernetes 平台统一采集
 
 Kubernetes 部署不应让应用管理 Pod 内的日志文件。在 Kubernetes 使用的
-`configs/.env.{APP_ENV}` 中显式配置：
+`configs/app.{APP_ENV}.toml` 中显式配置：
 
-```env
-LOG_WRITE_TO_FILE=false
-LOG_WRITE_TO_CONSOLE=true
+```toml
+[log]
+write_to_file = false
+write_to_console = true
 ```
 
-`configs/.env.prod` 已使用 console-only；Kubernetes 仍需自行配置节点采集与后端，不能照搬 Compose 的 journald 驱动。
+`configs/app.prod.toml` 已使用 console-only；Kubernetes 仍需自行配置节点采集与后端，不能照搬 Compose 的 journald 驱动。
 
 使用 ConfigMap 和 Secret 将完整配置挂载为文件，容器环境变量只保留 `APP_ENV`。
 以下 Deployment 片段假设容器内项目根目录为 `/app`：
@@ -717,8 +723,8 @@ LOG_WRITE_TO_CONSOLE=true
 ```yaml
 volumeMounts:
   - name: app-env
-    mountPath: /app/configs/.env.prod
-    subPath: .env.prod
+    mountPath: /app/configs/app.prod.toml
+    subPath: app.prod.toml
     readOnly: true
   - name: app-secrets
     mountPath: /app/.secrets
@@ -730,8 +736,8 @@ volumes:
     configMap:
       name: agent-backend-config
       items:
-        - key: .env.prod
-          path: .env.prod
+        - key: app.prod.toml
+          path: app.prod.toml
   - name: app-secrets
     secret:
       secretName: agent-backend-secrets

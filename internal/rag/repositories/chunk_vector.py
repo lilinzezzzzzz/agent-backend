@@ -210,9 +210,9 @@ async def new_chunk_repository(
     repository = ChunkVectorRepository(
         backend=create_backend(
             provider=BackendProvider.MILVUS,
-            uri=str(settings.MILVUS_URI),
-            db_name=settings.MILVUS_DB_NAME,
-            timeout=settings.MILVUS_TIMEOUT_SECONDS,
+            uri=str(settings.milvus.uri),
+            db_name=settings.milvus.db_name,
+            timeout=settings.milvus.timeout_seconds,
         ),
         embedder=embedder,
         scope_value=scope_value,

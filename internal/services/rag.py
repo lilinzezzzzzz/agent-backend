@@ -61,12 +61,12 @@ class SettingsRagScopeResolver:
     def resolve_allowed_domains(
         self, *, user_id: UUID, requested_context: Mapping[str, Any]
     ) -> set[str]:
-        return {domain for domain in settings.RAG_ALLOWED_DOMAINS if domain}
+        return {domain for domain in settings.rag.allowed_domains if domain}
 
     def resolve_allowed_kb_ids(
         self, *, user_id: UUID, requested_context: Mapping[str, Any]
     ) -> set[int]:
-        return {kb_id for kb_id in settings.RAG_ALLOWED_KB_IDS if kb_id > 0}
+        return {kb_id for kb_id in settings.rag.allowed_kb_ids if kb_id > 0}
 
 
 class _RagLLMAnswerModel(BaseModel):
@@ -94,7 +94,7 @@ class RagService:
         self._repository = repository
         self._repository_factory = repository_factory or new_chunk_repository
         self._repository_lock = anyio.Lock()
-        self._max_context_chars = max_context_chars or settings.RAG_MAX_CONTEXT_CHARS
+        self._max_context_chars = max_context_chars or settings.rag.max_context_chars
 
     async def retrieve(
         self,

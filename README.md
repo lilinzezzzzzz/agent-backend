@@ -21,7 +21,7 @@ README 只记录当前仓库可直接核对的能力；更细的设计约束和�
 ## 当前能力
 
 - 进程入口：`entrypoints/main.py` 导出 FastAPI `app`，`internal.infra.celery.application` 导出 Celery `celery_app`，`internal/app.py` 负责路由、中间件和 lifespan。
-- 配置加载：`APP_ENV` 只在根目录 `.env` 维护；应用据此加载 `configs/.env.{APP_ENV}` 和
+- 配置加载：`APP_ENV` 只在根目录 `.env` 维护；应用据此加载 `configs/app.{APP_ENV}.toml` 和
   `.secrets`，并严格隔离非敏感配置与凭据字段。
 - 数据库：异步 SQLAlchemy 连接池，支持主库和可选只读副本；配置层支持 PostgreSQL、MySQL DSN。
 - Redis：连接池、业务缓存封装、认证 token metadata、Agent action confirmation / idempotency 缓存。
@@ -39,7 +39,7 @@ README 只记录当前仓库可直接核对的能力；更细的设计约束和�
 - Redis
 - PostgreSQL（当前依赖默认包含 `asyncpg`，仓库配置示例也默认使用 PostgreSQL）
 
-配置层支持 `mysql`、`postgresql` 两种 `DB_TYPE`，但当前 `pyproject.toml` 默认只包含 PostgreSQL 异步驱动 `asyncpg`。如果切换到 MySQL，需要先补充 `aiomysql` 运行时驱动，再同步锁文件和部署环境。
+配置层支持 `mysql`、`postgresql` 两种 `db.type`，但当前 `pyproject.toml` 默认只包含 PostgreSQL 异步驱动 `asyncpg`。如果切换到 MySQL，需要先补充 `aiomysql` 运行时驱动，再同步锁文件和部署环境。
 
 使用向量集成测试或真实向量检索时，还需要准备对应的 Milvus 后端依赖。
 
@@ -71,7 +71,7 @@ cp .secrets.example .secrets
 启动时配置加载顺序如下：
 
 1. Compose 把根目录 `.env` 中的 `APP_ENV` 注入容器；本地直接运行时应用会直接读取该文件。
-2. 加载 `configs/.env.{APP_ENV}`。
+2. 加载 `configs/app.{APP_ENV}.toml`。
 3. 加载只包含凭据字段的 `.secrets`；该文件不能覆盖环境配置中的普通参数。
 4. 除显式注入的 `APP_ENV` 外，不从 shell 环境变量读取应用配置。
 
@@ -100,26 +100,27 @@ LLM_DEEPSEEK_API_KEY=your_deepseek_api_key
 EMBEDDING_API_KEY=
 ```
 
-非敏感配置直接使用仓库提供的 `configs/.env.local`。该文件中的必填 key 是完整配置契约，调整值即可，
-不要删除 key；条件字段只有在对应能力启用时才需要填写。
+非敏感配置直接使用仓库提供的 `configs/app.local.toml`。该文件中的必填 key 是完整配置契约，调整值即可，
+不要删除 key；条件字段只有在对应能力启用时才需要填写。TOML 使用原生布尔、整数和数组，例如
+`debug = true`、`db.port = 5432`、`cors.origins = ["*"]`。
 
 配置说明：
 
-- 仓库已提供 `configs/.env.local`、`configs/.env.dev`、`configs/.env.test`、`configs/.env.prod`。
+- 仓库已提供 `configs/app.local.toml`、`configs/app.dev.toml`、`configs/app.test.toml`、`configs/app.prod.toml`。
 - `.secrets` 被 `.gitignore` 忽略，不要提交真实密钥、数据库口令、token 或生产配置。
-- `DB_PASSWORD`、`DB_READ_PASSWORD`、`REDIS_PASSWORD` 支持 `ENC(...)`，运行时使用 `AES_SECRET` 解密。
-- 设置 `DB_READ_HOST` 后会初始化只读副本；未设置时读会话自动 fallback 到主库。
-- `CONFIG_ECHO_REVEAL_SECRETS=true` 会在启动配置回显中显示敏感值，只应临时用于本地诊断。
-- Logger 只负责控制台输出和向 `LOG_BASE_DIR/app.log` 追加日志，不在应用内执行轮转、保留或压缩。
-- Logger 默认只输出到控制台；各环境的日志输出目标统一在 `configs/.env.{APP_ENV}` 中显式配置。各部署
-  形态的 `LOG_WRITE_TO_FILE` / `LOG_WRITE_TO_CONSOLE` 取值见
+- `.secrets` 中的 `DB_PASSWORD`、`DB_READ_PASSWORD`、`REDIS_PASSWORD` 支持 `ENC(...)`，运行时使用 `AES_SECRET` 解密。
+- 设置 `db.read_replica.host` 后会初始化只读副本；未设置时读会话自动 fallback 到主库。
+- `config_echo.reveal_secrets=true` 会在启动配置回显中显示敏感值，只应临时用于本地诊断。
+- Logger 只负责控制台输出和向 `log.base_dir/app.log` 追加日志，不在应用内执行轮转、保留或压缩。
+- Logger 默认只输出到控制台；各环境的日志输出目标统一在 `configs/app.{APP_ENV}.toml` 中显式配置。各部署
+  形态的 `log.write_to_file` / `log.write_to_console` 取值见
   [`docs/logging/log_rotation.md`](docs/logging/log_rotation.md#输出目标的选择原则)。
-- 启用 `LOG_WRITE_TO_FILE=true` 的长期运行环境必须同时配置外部日志轮转；部署方案见 `docs/logging/log_rotation.md`。
-- `LLM_*` 用于 Chat / Agent 推理模型；`EMBEDDING_*` 用于向量模型，两者不要共用配置。
+- 启用 `log.write_to_file=true` 的长期运行环境必须同时配置外部日志轮转；部署方案见 `docs/logging/log_rotation.md`。
+- `llm.*` 用于 Chat / Agent 推理模型；`embedding.*` 用于向量模型，两者不要共用配置。
 - 当前 Router、Agent、RAG 统一使用 `OpenAIResponsesClient`，请求 `/responses`；配置的服务和模型必须支持 Responses API。客户端用法及输出策略见 [LLM 客户端](pkg/llm/README.md)。
-- `EMBEDDING_PROVIDER` 当前支持 `openai_compatible`，可接 OpenAI-compatible `/embeddings` 协议的 BGE、vLLM、Xinference、TEI 或自建向量服务。
-- `EMBEDDING_DIMENSION` 必须与向量模型输出维度和向量 collection schema 保持一致。
-- `ENDPOINT_GUARD_RULES` 是 JSON 数组字符串，可按 method、path、match type 禁用或拒绝指定 endpoint。
+- `embedding.provider` 当前支持 `openai_compatible`，可接 OpenAI-compatible `/embeddings` 协议的 BGE、vLLM、Xinference、TEI 或自建向量服务。
+- `embedding.dimension` 必须与向量模型输出维度和向量 collection schema 保持一致。
+- `endpoint_guard.rules` 是 TOML 数组，可按 method、path、match type 禁用或拒绝指定 endpoint。
 
 ### 3. 启动 API
 
@@ -150,7 +151,7 @@ uv run celery -A internal.infra.celery.application:celery_app worker -l info --p
 
 未指定 `-Q/--queues` 时，Worker 消费应用 `task_queues` 中的全部队列。队列列表从
 `internal/tasks/scheduler.py` 的默认队列、任务路由和 Beat 投递配置派生并去重，维护队列名称来自
-环境配置中的 `CELERY_RECONCILER_QUEUE`。修改维护队列后需重启相关 Worker 和 Beat，使投递与订阅一致。
+环境配置中的 `celery.reconciler_queue`。修改维护队列后需重启相关 Worker 和 Beat，使投递与订阅一致。
 
 初始化 PostgreSQL 时执行 `ddl/postgresql/init.sql`，该脚本根据 `internal/models` 创建脚手架所需的全部表、
 约束和索引。API 先登记 `SUBMITTING` 记录，再调用 `CeleryClient.submit()`；Worker 可从
@@ -162,13 +163,13 @@ uv run celery -A internal.infra.celery.application:celery_app worker -l info --p
 
 状态机相关配置：
 
-- `CELERY_QUEUE_START_TIMEOUT_SECONDS`：消息确认入队后允许等待 Worker claim 的时间，默认 300 秒。
-- `CELERY_EXECUTION_DEADLINE_GRACE_SECONDS`：task time limit 之外的状态收敛宽限，默认 30 秒。
-- `CELERY_ORPHAN_FENCE_SECONDS`：`ORPHANED` 状态外部副作用隔离窗口，默认 300 秒。
-- `CELERY_PUBLISH_CONFIRM_TIMEOUT_SECONDS`：`SUBMITTING` 发布确认超时。
-- `CELERY_PUBLISH_RECONCILER_INTERVAL_SECONDS`：发布确认 Reconciler 周期。
-- `CELERY_RECONCILER_INTERVAL_SECONDS` / `CELERY_RECONCILER_BATCH_SIZE`：deadline Reconciler 周期与批量。
-- `CELERY_RECONCILER_QUEUE`：Reconciler 专用 queue。
+- `celery.queue_start_timeout_seconds`：消息确认入队后允许等待 Worker claim 的时间，默认 300 秒。
+- `celery.execution_deadline_grace_seconds`：task time limit 之外的状态收敛宽限，默认 30 秒。
+- `celery.orphan_fence_seconds`：`ORPHANED` 状态外部副作用隔离窗口，默认 300 秒。
+- `celery.publish_confirm_timeout_seconds`：`SUBMITTING` 发布确认超时。
+- `celery.publish_reconciler_interval_seconds`：发布确认 Reconciler 周期。
+- `celery.reconciler_interval_seconds` / `celery.reconciler_batch_size`：deadline Reconciler 周期与批量。
+- `celery.reconciler_queue`：Reconciler 专用 queue。
 
 Beat：
 
@@ -279,7 +280,7 @@ AgentScope 2.0 的推荐接入路线是嵌入官方 Agent Service，而不是自
 - `internal/`：业务应用代码，包含路由、中间件、配置、服务、DAO、缓存、模型、Schema、任务和业务 Agent。
 - `pkg/`：可复用基础包，包含通用 Agent、数据库、日志、OSS、第三方登录、加解密、toolkit 和向量检索抽象。
 - `examples/`：可运行示例代码，不作为生产运行时基础包。
-- `configs/`：环境配置模板与密钥模板。
+- `configs/`：非敏感 TOML 环境配置。
 - `docs/`：补充文档。
 - `tests/`：pytest 测试。
 - `ddl/`、`dml/`：数据库 SQL。
@@ -366,19 +367,19 @@ docker build -t agent-backend .
 docker run --rm -p 8000:8000 \
   -e APP_ENV=local \
   -v "$PWD/.secrets:/app/.secrets:ro" \
-  -v "$PWD/configs/.env.local:/app/configs/.env.local:ro" \
+  -v "$PWD/configs/app.local.toml:/app/configs/app.local.toml:ro" \
   agent-backend \
   uvicorn entrypoints.main:app --host 0.0.0.0 --port 8000
 ```
 
 镜像不声明默认启动命令，`docker run` 需显式传入 Uvicorn 命令；生产部署由 compose.yaml 的 `api.command` 提供。
 
-如果容器内无法访问宿主机服务，需要把 `DB_HOST`、`REDIS_HOST` 等配置改成容器网络可解析的地址。
+如果容器内无法访问宿主机服务，需要把 `db.host`、`redis.host` 等配置改成容器网络可解析的地址。
 
 ### 生产 Compose 与 journald
 
 `compose.yaml` 使用 Docker journald 驱动，要求目标 Linux 主机运行 systemd-journald 并启用持久化。
-应用在 `configs/.env.prod` 中关闭文件输出、开启 JSON 控制台日志；不再部署 logrotate sidecar 或挂载应用日志目录。
+应用在 `configs/app.prod.toml` 中关闭文件输出、开启 JSON 控制台日志；不再部署 logrotate sidecar 或挂载应用日志目录。
 API 支持 `API_WORKERS` 配置，默认 1；多 worker 数量结合 CPU、内存、下游连接预算和压测结果调整。
 
 日志标签为 `<COMPOSE_PROJECT_NAME>-<APP_ENV>-api`，默认 `agent-backend-prod-api`。项目名跨发布保持不变，

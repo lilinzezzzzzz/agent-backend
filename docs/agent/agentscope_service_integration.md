@@ -37,10 +37,10 @@
 - `internal/app.py` 负责路由、中间件和 lifespan；基础设施初始化发生在主应用 lifespan。
 - `/v1` 默认 token 认证，`/v1/public` 无认证，`/v1/internal` 签名认证。
 - 配置由 `internal/config.py` 管理，`APP_ENV` 只在仓库根目录 `.env` 维护；应用据此加载
-  `configs/.env.{APP_ENV}`，凭据从 `.secrets` 独立读取，两类字段不允许相互覆盖。
+  `configs/app.{APP_ENV}.toml`，凭据从 `.secrets` 独立读取，两类字段不允许相互覆盖。
 - `.secrets` 只用于敏感值，例如 `AES_SECRET`、`JWT_SECRET`、`DB_PASSWORD`、
   `REDIS_PASSWORD`、LLM provider API key；文档和日志不能泄露真实值。
-- 当前配置回显会按 `.secrets` 中的敏感 key 做掩码；`CONFIG_ECHO_REVEAL_SECRETS=true`
+- 当前配置回显会按 `.secrets` 中的敏感 key 做掩码；`config_echo.reveal_secrets=true`
   只允许本地临时诊断。
 - Redis 已用于 token metadata、业务缓存、Endpoint Guard 动态规则等能力；AgentScope 复用 Redis
   时需要明确 DB 和 key TTL 策略。
@@ -65,13 +65,13 @@
 
 ```python
 def register_agentscope_service(app: FastAPI) -> None:
-    if not settings.AGENTSCOPE_SERVICE_ENABLED:
+    if not settings.agentscope.service_enabled:
         return
 
     from internal.infra.agentscope_service import create_agentscope_service_app
 
     agentscope_app = create_agentscope_service_app()
-    app.mount(settings.AGENTSCOPE_SERVICE_PREFIX, agentscope_app)
+    app.mount(settings.agentscope.service_prefix, agentscope_app)
     app.state.agentscope_service_app = agentscope_app
 ```
 
@@ -112,34 +112,40 @@ close_background_task_manager()
 建议新增配置字段，放在 `Settings` 的 Agent 或 AgentScope 分组中：
 
 ```python
-AGENTSCOPE_SERVICE_ENABLED: bool = False
-AGENTSCOPE_SERVICE_PREFIX: str = "/v1/agentscope"
-AGENTSCOPE_WORKSPACE_BASEDIR: str = "runtime/agentscope/workspaces"
-AGENTSCOPE_WORKSPACE_TTL_SECONDS: float = 3600.0
-AGENTSCOPE_REDIS_DB: int | None = None
-AGENTSCOPE_STORAGE_KEY_TTL_SECONDS: int | None = None
+class AgentScopeSettings(BaseModel):
+    service_enabled: bool = False
+    service_prefix: str = "/v1/agentscope"
+    workspace_basedir: str = "runtime/agentscope/workspaces"
+    workspace_ttl_seconds: float = 3600.0
+    redis_db: int | None = None
+    storage_key_ttl_seconds: int | None = None
+
+
+class Settings(BaseSettings):
+    agentscope: AgentScopeSettings
 ```
 
 配置文件落点：
 
-- `AGENTSCOPE_SERVICE_ENABLED`、`AGENTSCOPE_SERVICE_PREFIX`、workspace 路径、TTL、Redis DB
-  这类非敏感配置放在 `configs/.env.{APP_ENV}`。
-- 真实 API key、token、password 不放在 `.env.{APP_ENV}`，只放 `.secrets` 或由 AgentScope
+- `agentscope.service_enabled`、`agentscope.service_prefix`、workspace 路径、TTL、Redis DB
+  这类非敏感配置放在 `configs/app.{APP_ENV}.toml`。
+- 真实 API key、token、password 不放在 `configs/app.{APP_ENV}.toml`，只放 `.secrets` 或由 AgentScope
   官方 `Credential` 资源管理。
-- `AGENTSCOPE_REDIS_DB` 不配置时复用 `REDIS_DB`；如果担心 key 混用，使用独立 DB。
-- `AGENTSCOPE_STORAGE_KEY_TTL_SECONDS` 默认为 `None`，表示 AgentScope 资源不自动过期；demo
+- `agentscope.redis_db` 不配置时复用 `redis.db`；如果担心 key 混用，使用独立 DB。
+- `agentscope.storage_key_ttl_seconds` 默认为 `None`，表示 AgentScope 资源不自动过期；demo
   环境可以设置 TTL，生产环境需要根据会话保留策略单独确认。
-- `AGENTSCOPE_SERVICE_PREFIX` 必须以 `/` 开头，建议禁止配置为 `/` 或尾部带 `/`，避免吞掉主应用路由或产生重复路径。
+- `agentscope.service_prefix` 必须以 `/` 开头，建议禁止配置为 `/` 或尾部带 `/`，避免吞掉主应用路由或产生重复路径。
 
-`.env.test` / `.env.local` 建议示例：
+`configs/app.test.toml` / `configs/app.local.toml` 建议示例：
 
-```env
-AGENTSCOPE_SERVICE_ENABLED=false
-AGENTSCOPE_SERVICE_PREFIX=/v1/agentscope
-AGENTSCOPE_WORKSPACE_BASEDIR=runtime/agentscope/workspaces
-AGENTSCOPE_WORKSPACE_TTL_SECONDS=3600
-# AGENTSCOPE_REDIS_DB=
-# AGENTSCOPE_STORAGE_KEY_TTL_SECONDS=
+```toml
+[agentscope]
+service_enabled = false
+service_prefix = "/v1/agentscope"
+workspace_basedir = "runtime/agentscope/workspaces"
+workspace_ttl_seconds = 3600
+# redis_db =
+# storage_key_ttl_seconds =
 ```
 
 `.secrets` 建议：
@@ -222,10 +228,10 @@ LocalWorkspaceManager -> 本地 workspace
 
 Redis 设计：
 
-- 默认复用 `REDIS_HOST`、`REDIS_PORT`、`REDIS_PASSWORD`。
-- `AGENTSCOPE_REDIS_DB` 未配置时复用 `REDIS_DB`；如果线上 key 隔离要求更高，使用独立 DB。
+- 默认复用 `redis.host`、`redis.port` 与 `.secrets` 的 `REDIS_PASSWORD`。
+- `agentscope.redis_db` 未配置时复用 `redis.db`；如果线上 key 隔离要求更高，使用独立 DB。
 - AgentScope credential、session、message、schedule 都是持久化资源；不要把它们误认为临时缓存。
-- 如果设置 `AGENTSCOPE_STORAGE_KEY_TTL_SECONDS`，要明确会话、凭证、消息和 schedule 过期后的用户影响。
+- 如果设置 `agentscope.storage_key_ttl_seconds`，要明确会话、凭证、消息和 schedule 过期后的用户影响。
 
 Workspace 设计：
 
@@ -360,8 +366,8 @@ AgentScope 官方 Agent Service 支持 credential schema 和 provider model card
 
 仅适用于 demo 或系统级 Agent：
 
-- 复用 `LLM_DEFAULT_PROVIDER`、`LLM_*_BASE_URL`、`LLM_*_MODEL`、`LLM_*_API_KEY`。
-- API key 仍放 `.secrets`，不可写入 `.env.{APP_ENV}`、日志、workspace 或 AgentScope message。
+- 复用 `llm.default_provider`、`llm.<provider>.base_url`、`llm.<provider>.model` 与 `.secrets` 中的 provider API key。
+- API key 仍放 `.secrets`，不可写入 `configs/app.{APP_ENV}.toml`、日志、workspace 或 AgentScope message。
 - 文档必须说明这是系统级凭证，不代表多租户用户自带 credential。
 - 如果 provider adapter 暴露为 AgentScope model card，不得把 secret 作为 schema default 返回给客户端。
 
@@ -414,12 +420,12 @@ AgentScope 子应用使用官方响应结构，不包 `BaseResponse[T]`。但外
 
 未来实施时至少补充：
 
-- `AGENTSCOPE_SERVICE_ENABLED=false` 时不挂载 `/v1/agentscope`。
-- `AGENTSCOPE_SERVICE_ENABLED=true` 时挂载官方子应用。
+- `agentscope.service_enabled=false` 时不挂载 `/v1/agentscope`。
+- `agentscope.service_enabled=true` 时挂载官方子应用。
 - 主应用 lifespan 显式进入和退出 AgentScope app lifespan。
 - 未带 token 访问 `/v1/agentscope/chat` 被项目认证拒绝。
 - 带 token 且伪造 `X-User-ID` 时，AgentScope user id 仍来自项目 token。
-- `AGENTSCOPE_SERVICE_PREFIX` 校验：必须以 `/` 开头，不能为 `/`，不能以 `/` 结尾。
+- `agentscope.service_prefix` 校验：必须以 `/` 开头，不能为 `/`，不能以 `/` 结尾。
 - workspace 目录使用 `runtime/` 下路径并自动创建。
 - Endpoint Guard 可禁用 `/v1/agentscope` prefix。
 - KB tool 只能调用项目 Service，不直接访问 DAO / Redis / Milvus。
@@ -451,7 +457,7 @@ uv run ruff check internal/infra/agentscope_service.py internal/app.py internal/
 ### Phase 2：Credential / Provider 验证
 
 - 优先验证 AgentScope 官方 credential 流程。
-- 如需项目全局 provider adapter，再复用 `LLM_*` 配置。
+- 如需项目全局 provider adapter，再复用 `llm.*` 配置与 `.secrets` 中的 provider key。
 - 不把 `.secrets` 中的 key 写入文档、日志、workspace 或前端 schema default。
 
 ### Phase 3：KB 运维 tool / skill

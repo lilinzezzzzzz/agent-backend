@@ -10,10 +10,10 @@ _NO_AUTH_API_KEY = "not-required"
 
 def new_default_embedder() -> Embedder:
     """根据默认 embedding 配置创建 OpenAI-compatible Embedder。"""
-    provider = settings.EMBEDDING_PROVIDER
-    base_url = settings.EMBEDDING_BASE_URL
-    model = settings.EMBEDDING_MODEL
-    api_key = settings.EMBEDDING_API_KEY.get_secret_value()
+    provider = settings.embedding.provider
+    base_url = settings.embedding.base_url
+    model = settings.embedding.model
+    api_key = settings.secrets.embedding_api_key.get_secret_value()
 
     if provider != "openai_compatible" or not base_url or not model:
         raise AppException(
@@ -26,6 +26,6 @@ def new_default_embedder() -> Embedder:
         api_key=api_key or _NO_AUTH_API_KEY,
         base_url=base_url,
         model=model,
-        dimension=settings.EMBEDDING_DIMENSION,
-        timeout=settings.EMBEDDING_TIMEOUT_SECONDS,
+        dimension=settings.embedding.dimension,
+        timeout=settings.embedding.timeout_seconds,
     )

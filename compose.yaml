@@ -35,14 +35,14 @@ services:
     ports:
       - ${API_PORT:-8000}:8000
     environment:
-      # Compose 只注入环境选择器；应用配置统一由 configs/.env.${APP_ENV} 管理。
+      # Compose 只注入环境选择器；应用配置统一由 configs/app.${APP_ENV}.toml 管理。
       APP_ENV: ${APP_ENV:?set APP_ENV in .env}
     volumes:
       # 根据唯一的 APP_ENV 同时确定宿主机源文件和容器内目标文件，
       # 不再维护第二个环境变量。
       - type: bind
-        source: ./configs/.env.${APP_ENV:?set APP_ENV in .env}
-        target: /app/configs/.env.${APP_ENV:?set APP_ENV in .env}
+        source: ./configs/app.${APP_ENV:?set APP_ENV in .env}.toml
+        target: /app/configs/app.${APP_ENV:?set APP_ENV in .env}.toml
         read_only: true
         bind:
           create_host_path: false

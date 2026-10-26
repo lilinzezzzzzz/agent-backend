@@ -100,13 +100,14 @@ application/pdf
 
 建议配置：
 
-```text
-RAG_PDF_INGEST_ENABLED=false
-RAG_PDF_NATIVE_TEXT_ONLY=true
-RAG_PDF_MAX_FILE_SIZE_MB=20
-RAG_PDF_MAX_PAGES=200
-RAG_PDF_MIN_TEXT_CHARS_PER_PAGE=20
-RAG_PDF_MIN_TEXT_PAGE_RATIO=0.8
+```toml
+[rag.pdf]
+ingest_enabled = false
+native_text_only = true
+max_file_size_mb = 20
+max_pages = 200
+min_text_chars_per_page = 20
+min_text_page_ratio = 0.8
 ```
 
 ### 3.2 登记流程
@@ -239,7 +240,7 @@ text_page_ratio = 有有效文本页数 / 总页数
 min_text_chars_per_page = 单页有效文本最小字符数
 ```
 
-如果 `text_page_ratio < RAG_PDF_MIN_TEXT_PAGE_RATIO`，返回 `pdf_text_quality_low` 或
+如果 `text_page_ratio < rag.pdf.min_text_page_ratio`，返回 `pdf_text_quality_low` 或
 `unsupported_scanned_pdf`。
 
 ### 5.3 canonical text

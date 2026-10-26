@@ -12,7 +12,7 @@ def init_signature_auth_handler():
     if _signature_auth_handler is not None:
         return
 
-    _signature_auth_handler = SignatureAuthHandler(secret_key=settings.JWT_SECRET.get_secret_value())
+    _signature_auth_handler = SignatureAuthHandler(secret_key=settings.secrets.jwt_secret.get_secret_value())
 
     logger.success("Signature Auth Handler initialized Successfully.")
 

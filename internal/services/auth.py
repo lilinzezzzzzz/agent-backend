@@ -120,9 +120,9 @@ class AuthService:
         provider = IdentityProviderRegistry.create(
             IdentityProviderType.WECHAT,
             config=WeChatConfig(
-                app_id=settings.WECHAT_APP_ID,
-                app_secret=settings.WECHAT_APP_SECRET.get_secret_value(),
-                grant_type=settings.WECHAT_GRANT_TYPE,
+                app_id=settings.secrets.wechat_app_id,
+                app_secret=settings.secrets.wechat_app_secret.get_secret_value(),
+                grant_type=settings.wechat.grant_type,
             ),
         )
 

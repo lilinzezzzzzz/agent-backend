@@ -8,8 +8,14 @@ from pkg.llm import OpenAIResponsesClient
 
 
 def _provider_config_value(*, provider: str, field: str) -> str:
-    setting_name = f"LLM_{provider.upper().replace('-', '_')}_{field}"
-    value = getattr(settings, setting_name, "")
+    provider_key = provider.lower().replace("-", "_")
+    if field == "API_KEY":
+        value = getattr(settings.secrets, f"llm_{provider_key}_api_key", "")
+    else:
+        provider_settings = getattr(settings.llm, provider_key, None)
+        value = (
+            getattr(provider_settings, field.lower(), "") if provider_settings else ""
+        )
     if isinstance(value, SecretStr):
         return value.get_secret_value()
     return str(value or "")
@@ -17,7 +23,7 @@ def _provider_config_value(*, provider: str, field: str) -> str:
 
 def new_default_llm_client() -> OpenAIResponsesClient:
     """根据默认 LLM provider 配置创建 Responses API 客户端。"""
-    provider = settings.LLM_DEFAULT_PROVIDER
+    provider = settings.llm.default_provider
     base_url = _provider_config_value(provider=provider, field="BASE_URL")
     model = _provider_config_value(provider=provider, field="MODEL")
     api_key = _provider_config_value(provider=provider, field="API_KEY")
@@ -33,5 +39,5 @@ def new_default_llm_client() -> OpenAIResponsesClient:
         model=model,
         api_key=api_key,
         provider=provider,
-        timeout=settings.AGENT_LLM_TIMEOUT_SECONDS,
+        timeout=settings.agent.llm_timeout_seconds,
     )

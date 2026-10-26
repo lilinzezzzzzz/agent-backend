@@ -1238,9 +1238,9 @@ def new_agent_execution_service() -> AgentExecutionService:
         audit_service=new_agent_audit_service(),
         action_store=new_agent_action_cache(),
         limits=AgentExecutionLimits(
-            lease_seconds=settings.AGENT_LEASE_SECONDS,
-            control_poll_seconds=settings.AGENT_CONTROL_POLL_SECONDS,
-            cancel_grace_seconds=settings.AGENT_CANCEL_GRACE_SECONDS,
-            stream_buffer_size=settings.AGENT_STREAM_BUFFER_SIZE,
+            lease_seconds=settings.agent.lease_seconds,
+            control_poll_seconds=settings.agent.control_poll_seconds,
+            cancel_grace_seconds=settings.agent.cancel_grace_seconds,
+            stream_buffer_size=settings.agent.stream_buffer_size,
         ),
     )

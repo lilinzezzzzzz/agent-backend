@@ -44,10 +44,12 @@ def test_worker_queues_follow_settings_and_deduplicate(
         config_module,
         "settings",
         SimpleNamespace(
-            CELERY_RECONCILER_QUEUE=maintenance_queue,
-            CELERY_RECONCILER_BEAT_ENABLED=beat_enabled,
-            CELERY_PUBLISH_RECONCILER_INTERVAL_SECONDS=10,
-            CELERY_RECONCILER_INTERVAL_SECONDS=60,
+            celery=SimpleNamespace(
+                reconciler_queue=maintenance_queue,
+                reconciler_beat_enabled=beat_enabled,
+                publish_reconciler_interval_seconds=10,
+                reconciler_interval_seconds=60,
+            )
         ),
     )
     # Evaluate scheduling configuration independently without mutating the app's copy.

@@ -476,7 +476,7 @@ mark_task_failed(task_id, error_code, error_message) -> KbIndexTaskDTO
 职责：
 
 - 将用户可访问 KB 解析为 `RagService` 可使用的 allowed domain 和 allowed kb ids。
-- 替换当前只从 `settings.RAG_ALLOWED_DOMAINS` / `settings.RAG_ALLOWED_KB_IDS` 读取的临时解析。
+- 替换当前只从 `settings.rag.allowed_domains` / `settings.rag.allowed_kb_ids` 读取的临时解析。
 - 保留配置 fallback，避免 registry 尚未初始化时使 RAG demo 完全不可用。
 
 建议方法：

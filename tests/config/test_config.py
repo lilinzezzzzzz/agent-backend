@@ -1,18 +1,26 @@
+import json
 import sys
+import tomllib
 from pathlib import Path
+from typing import get_origin
 from unittest.mock import MagicMock
 
 import pytest
 from dotenv import dotenv_values
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 from redis.asyncio import ConnectionPool
 
 import internal.config as config_module
 from internal.config import (
     SECRET_FILE_KEYS,
+    CelerySettings,
+    DatabaseReadReplicaSettings,
+    DatabaseSettings,
+    LogSettings,
+    OtelSettings,
+    SecretsSettings,
     Settings,
     _config_echo_value,
-    _required_config_keys,
     _required_secret_keys,
     _sensitive_secret_config_keys,
 )
@@ -39,6 +47,155 @@ def _write_env_file(path: Path, values: dict[str, str]) -> None:
         "\n".join(f"{key}={value}" for key, value in values.items()) + "\n",
         encoding="utf-8",
     )
+
+
+def _toml_literal(value: object) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, str):
+        return json.dumps(value, ensure_ascii=False)
+    if isinstance(value, list):
+        return "[" + ", ".join(_toml_literal(item) for item in value) + "]"
+    if isinstance(value, dict):
+        return (
+            "{"
+            + ", ".join(f"{key} = {_toml_literal(item)}" for key, item in value.items())
+            + "}"
+        )
+    raise TypeError(f"unsupported TOML test value: {value!r}")
+
+
+_FIELD_PATHS: dict[str, tuple[str, str]] = {
+    "DEBUG": ("", "debug"),
+    "LOG_FORMAT": ("log", "format"),
+    "LOG_BASE_DIR": ("log", "base_dir"),
+    "LOG_WRITE_TO_FILE": ("log", "write_to_file"),
+    "LOG_WRITE_TO_CONSOLE": ("log", "write_to_console"),
+    "OTEL_TRACING_ENABLED": ("otel", "tracing_enabled"),
+    "OTEL_OPERATION_SPANS_ENABLED": ("otel", "operation_spans_enabled"),
+    "OTEL_METRICS_ENABLED": ("otel", "metrics_enabled"),
+    "OTEL_LOGS_ENABLED": ("otel", "logs_enabled"),
+    "OTEL_AUTO_CONFIGURE": ("otel", "auto_configure"),
+    "OTEL_SERVICE_NAME": ("otel", "service_name"),
+    "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT": ("otel", "exporter_otlp_traces_endpoint"),
+    "OTEL_EXPORTER_OTLP_TIMEOUT_SECONDS": ("otel", "exporter_otlp_timeout_seconds"),
+    "JWT_ALGORITHM": ("auth.jwt", "algorithm"),
+    "ACCESS_TOKEN_EXPIRE_SECONDS": ("auth.access_token", "expire_seconds"),
+    "CONFIG_ECHO_REVEAL_SECRETS": ("config_echo", "reveal_secrets"),
+    "BACKEND_CORS_ORIGINS": ("cors", "origins"),
+    "WECHAT_GRANT_TYPE": ("wechat", "grant_type"),
+    "LLM_DEFAULT_PROVIDER": ("llm", "default_provider"),
+    "LLM_MIMO_BASE_URL": ("llm.mimo", "base_url"),
+    "LLM_MIMO_MODEL": ("llm.mimo", "model"),
+    "LLM_DEEPSEEK_BASE_URL": ("llm.deepseek", "base_url"),
+    "LLM_DEEPSEEK_MODEL": ("llm.deepseek", "model"),
+    "EMBEDDING_PROVIDER": ("embedding", "provider"),
+    "EMBEDDING_BASE_URL": ("embedding", "base_url"),
+    "EMBEDDING_MODEL": ("embedding", "model"),
+    "EMBEDDING_DIMENSION": ("embedding", "dimension"),
+    "EMBEDDING_TIMEOUT_SECONDS": ("embedding", "timeout_seconds"),
+    "MILVUS_URI": ("milvus", "uri"),
+    "MILVUS_DB_NAME": ("milvus", "db_name"),
+    "MILVUS_TIMEOUT_SECONDS": ("milvus", "timeout_seconds"),
+    "AGENT_ACTION_CONFIRMATION_SECONDS": ("agent", "action_confirmation_seconds"),
+    "AGENT_ACTION_IDEMPOTENCY_SECONDS": ("agent", "action_idempotency_seconds"),
+    "AGENT_LEASE_SECONDS": ("agent", "lease_seconds"),
+    "AGENT_CONTROL_POLL_SECONDS": ("agent", "control_poll_seconds"),
+    "AGENT_CANCEL_GRACE_SECONDS": ("agent", "cancel_grace_seconds"),
+    "AGENT_STREAM_BUFFER_SIZE": ("agent", "stream_buffer_size"),
+    "AGENT_CHECKPOINT_MAX_BYTES": ("agent", "checkpoint_max_bytes"),
+    "AGENT_LLM_TIMEOUT_SECONDS": ("agent", "llm_timeout_seconds"),
+    "RAG_ALLOWED_DOMAINS": ("rag", "allowed_domains"),
+    "RAG_ALLOWED_KB_IDS": ("rag", "allowed_kb_ids"),
+    "RAG_MAX_CONTEXT_CHARS": ("rag", "max_context_chars"),
+    "DB_TYPE": ("db", "type"),
+    "DB_HOST": ("db", "host"),
+    "DB_PORT": ("db", "port"),
+    "DB_USERNAME": ("db", "username"),
+    "DB_DATABASE": ("db", "database"),
+    "DB_ECHO": ("db", "echo"),
+    "DB_READ_HOST": ("db.read_replica", "host"),
+    "DB_READ_PORT": ("db.read_replica", "port"),
+    "DB_READ_USERNAME": ("db.read_replica", "username"),
+    "DB_READ_DATABASE": ("db.read_replica", "database"),
+    "REDIS_HOST": ("redis", "host"),
+    "REDIS_PORT": ("redis", "port"),
+    "REDIS_DB": ("redis", "db"),
+    "CELERY_IDEMPOTENCY_ENABLED": ("celery", "idempotency_enabled"),
+    "CELERY_EXECUTION_DEADLINE_GRACE_SECONDS": (
+        "celery",
+        "execution_deadline_grace_seconds",
+    ),
+    "CELERY_QUEUE_START_TIMEOUT_SECONDS": ("celery", "queue_start_timeout_seconds"),
+    "CELERY_PUBLISH_CONFIRM_TIMEOUT_SECONDS": (
+        "celery",
+        "publish_confirm_timeout_seconds",
+    ),
+    "CELERY_PUBLISH_RECONCILER_INTERVAL_SECONDS": (
+        "celery",
+        "publish_reconciler_interval_seconds",
+    ),
+    "CELERY_ORPHAN_FENCE_SECONDS": ("celery", "orphan_fence_seconds"),
+    "CELERY_RECONCILER_BEAT_ENABLED": ("celery", "reconciler_beat_enabled"),
+    "CELERY_RECONCILER_INTERVAL_SECONDS": ("celery", "reconciler_interval_seconds"),
+    "CELERY_RECONCILER_BATCH_SIZE": ("celery", "reconciler_batch_size"),
+    "CELERY_RECONCILER_QUEUE": ("celery", "reconciler_queue"),
+    "CELERY_TASK_MAX_PAYLOAD_BYTES": ("celery", "task_max_payload_bytes"),
+    "ENDPOINT_GUARD_ENABLED": ("endpoint_guard", "enabled"),
+    "ENDPOINT_GUARD_SOURCE": ("endpoint_guard", "source"),
+    "ENDPOINT_GUARD_RULES": ("endpoint_guard", "rules"),
+    "ENDPOINT_GUARD_REDIS_KEY": ("endpoint_guard", "redis_key"),
+    "ENDPOINT_GUARD_CACHE_TTL_SECONDS": ("endpoint_guard", "cache_ttl_seconds"),
+    "ENDPOINT_GUARD_FAIL_OPEN": ("endpoint_guard", "fail_open"),
+}
+
+
+def _field_annotation(path: str):
+    model = Settings
+    annotation = None
+    for part in path.split("."):
+        field = model.model_fields.get(part)
+        if field is None:
+            return None
+        annotation = field.annotation
+        if isinstance(annotation, type) and hasattr(annotation, "model_fields"):
+            model = annotation
+    return annotation
+
+
+def _write_app_config(path: Path, values: dict[str, object]) -> None:
+    root_lines: list[str] = []
+    sections: dict[str, list[str]] = {}
+    for key, value in values.items():
+        path_parts = _FIELD_PATHS.get(key)
+        if path_parts is None:
+            section, leaf = None, key
+            annotation = None
+        else:
+            section, leaf = path_parts
+            annotation = _field_annotation(".".join(path_parts))
+        if isinstance(value, str):
+            if annotation is bool:
+                normalized = value.lower()
+                if normalized not in {"true", "false"}:
+                    raise ValueError(f"{key}: expected true/false, got {value!r}")
+                value = normalized == "true"
+            elif annotation is int:
+                value = int(value)
+            elif get_origin(annotation) is list:
+                value = json.loads(value)
+        rendered = f"{leaf} = {_toml_literal(value)}"
+        if section:
+            sections.setdefault(section, []).append(rendered)
+        else:
+            root_lines.append(rendered)
+    lines = list(root_lines)
+    for section, section_lines in sections.items():
+        lines.append(f"[{section}]")
+        lines.extend(section_lines)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def _base_env_values() -> dict[str, str]:
@@ -127,8 +284,12 @@ def _secret_values() -> dict[str, str]:
     }
 
 
-def _new_settings(*env_files: Path) -> Settings:
-    return Settings(APP_ENV="test", _env_file=list(env_files))  # type: ignore[call-arg]
+def _new_settings(app_config_path: Path, secrets_path: Path) -> Settings:
+    return config_module._load_settings_from_files(
+        "test",
+        app_config_path,
+        secrets_path,
+    )
 
 
 def test_startup_logger_uses_stderr_without_creating_log_file(
@@ -210,12 +371,12 @@ def test_load_config_uses_app_env_outside_secrets(
         config_module, "_setup_startup_logger", MagicMock(return_value=MagicMock())
     )
     _write_env_file(tmp_path / ".env", {"APP_ENV": "test"})
-    _write_env_file(configs_dir / ".env.test", _base_env_values())
+    _write_app_config(configs_dir / "app.test.toml", _base_env_values())
     _write_env_file(tmp_path / ".secrets", _secret_values())
 
     settings = config_module.load_config()
 
-    assert settings.APP_ENV == "test"
+    assert settings.app_env == "test"
     assert "APP_ENV" not in _secret_values()
 
 
@@ -240,9 +401,9 @@ def test_load_config_rejects_non_secret_key_in_secrets(
 def test_shell_environment_cannot_override_explicit_files(
     monkeypatch, tmp_path: Path
 ) -> None:
-    env_path = tmp_path / ".env.test"
+    env_path = tmp_path / "app.test.toml"
     secrets_path = tmp_path / ".secrets"
-    _write_env_file(env_path, _base_env_values())
+    _write_app_config(env_path, _base_env_values())
     _write_env_file(secrets_path, _secret_values())
 
     monkeypatch.setenv("DEBUG", "release")
@@ -251,24 +412,24 @@ def test_shell_environment_cannot_override_explicit_files(
 
     settings = _new_settings(env_path, secrets_path)
 
-    assert settings.DEBUG is True
-    assert settings.DB_HOST == "dotenv-db"
-    assert settings.REDIS_PASSWORD.get_secret_value() == "dotenv-redis-password"
+    assert settings.debug is True
+    assert settings.db.host == "dotenv-db"
+    assert settings.secrets.redis_password.get_secret_value() == "dotenv-redis-password"
 
 
 def test_shell_environment_is_not_a_fallback_for_missing_config(
     monkeypatch, tmp_path: Path
 ) -> None:
-    env_path = tmp_path / ".env.test"
+    env_path = tmp_path / "app.test.toml"
     secrets_path = tmp_path / ".secrets"
     env_values = _base_env_values()
     env_values.pop("REDIS_HOST")
-    _write_env_file(env_path, env_values)
+    _write_app_config(env_path, env_values)
     _write_env_file(secrets_path, _secret_values())
 
     monkeypatch.setenv("REDIS_HOST", "shell-redis")
 
-    with pytest.raises(ValidationError, match="REDIS_HOST"):
+    with pytest.raises(ValidationError, match=r"redis\.host"):
         _new_settings(env_path, secrets_path)
 
 
@@ -284,8 +445,8 @@ def test_load_config_rejects_secret_key_in_environment_file(
         config_module, "_setup_startup_logger", MagicMock(return_value=MagicMock())
     )
     _write_env_file(tmp_path / ".env", {"APP_ENV": "test"})
-    _write_env_file(
-        configs_dir / ".env.test",
+    _write_app_config(
+        configs_dir / "app.test.toml",
         {**_base_env_values(), "JWT_SECRET": "misplaced-secret"},
     )
     _write_env_file(tmp_path / ".secrets", _secret_values())
@@ -294,28 +455,130 @@ def test_load_config_rejects_secret_key_in_environment_file(
         config_module.load_config()
 
 
+def test_load_config_rejects_app_env_in_toml(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    configs_dir = tmp_path / "configs"
+    configs_dir.mkdir()
+    monkeypatch.delenv("APP_ENV", raising=False)
+    monkeypatch.setattr(config_module, "BASE_DIR", tmp_path)
+    monkeypatch.setattr(
+        config_module, "_setup_startup_logger", MagicMock(return_value=MagicMock())
+    )
+    _write_env_file(tmp_path / ".env", {"APP_ENV": "test"})
+    _write_app_config(
+        configs_dir / "app.test.toml",
+        {**_base_env_values(), "APP_ENV": "test"},
+    )
+    _write_env_file(tmp_path / ".secrets", _secret_values())
+
+    with pytest.raises(ValueError, match="APP_ENV must be configured in the root .env"):
+        config_module.load_config()
+
+
 def test_unknown_configuration_key_is_rejected(tmp_path: Path) -> None:
-    env_path = tmp_path / ".env.test"
+    env_path = tmp_path / "app.test.toml"
     secrets_path = tmp_path / ".secrets"
-    _write_env_file(env_path, {**_base_env_values(), "DB_HSOT": "typo"})
+    _write_app_config(env_path, {**_base_env_values(), "DB_HSOT": "typo"})
     _write_env_file(secrets_path, _secret_values())
 
     with pytest.raises(ValidationError, match="DB_HSOT"):
         _new_settings(env_path, secrets_path)
 
 
+@pytest.mark.parametrize(
+    ("section", "key"),
+    [
+        ("", "unrecognized_setting"),
+        ("db", "DB_PASSWORD"),
+        ("db", "db_password"),
+        ("db", "password"),
+        ("llm.mimo", "api_key"),
+        ("db", "type"),
+    ],
+)
+def test_load_config_validation_errors_hide_values(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    section: str,
+    key: str,
+) -> None:
+    configs_dir = tmp_path / "configs"
+    configs_dir.mkdir()
+    monkeypatch.delenv("APP_ENV", raising=False)
+    monkeypatch.setattr(config_module, "BASE_DIR", tmp_path)
+    startup_logger = MagicMock()
+    monkeypatch.setattr(
+        config_module,
+        "_setup_startup_logger",
+        MagicMock(return_value=startup_logger),
+    )
+    _write_env_file(tmp_path / ".env", {"APP_ENV": "test"})
+    _write_env_file(tmp_path / ".secrets", _secret_values())
+
+    sensitive_value = "synthetic-config-secret-7821"
+    env_values = _base_env_values()
+    if (section, key) == ("db", "type"):
+        env_values["DB_TYPE"] = sensitive_value
+    config_path = configs_dir / "app.test.toml"
+    _write_app_config(config_path, env_values)
+    if key != "type":
+        config_text = config_path.read_text(encoding="utf-8")
+        misplaced_field = f"{key} = {json.dumps(sensitive_value)}\n"
+        if section:
+            table_header = f"[{section}]\n"
+            config_text = config_text.replace(
+                table_header,
+                table_header + misplaced_field,
+                1,
+            )
+        else:
+            config_text = misplaced_field + config_text
+        config_path.write_text(config_text, encoding="utf-8")
+
+    with pytest.raises(ValidationError) as exc_info:
+        config_module.load_config()
+
+    expected_location = (*section.split("."), key) if section else (key,)
+    assert expected_location in {error["loc"] for error in exc_info.value.errors()}
+    logged_errors = "\n".join(
+        call.args[0] for call in startup_logger.critical.call_args_list
+    )
+    assert "Config load failed" in logged_errors
+    assert key in logged_errors
+    assert sensitive_value not in logged_errors
+    assert sensitive_value not in str(exc_info.value)
+
+
+@pytest.mark.parametrize("model_type", [DatabaseSettings, SecretsSettings])
+def test_group_validation_errors_hide_values(model_type: type[BaseModel]) -> None:
+    sensitive_value = "synthetic-config-secret-7821"
+
+    with pytest.raises(ValidationError) as exc_info:
+        model_type.model_validate({"password": sensitive_value})
+
+    assert "password" in str(exc_info.value)
+    assert sensitive_value not in str(exc_info.value)
+
+
 def test_repository_environment_files_define_every_required_config_key() -> None:
     repository_root = Path(__file__).resolve().parents[2]
-    required_keys = _required_config_keys()
     secrets_template = repository_root / ".secrets.example"
 
     for app_env in ("local", "dev", "test", "prod"):
-        env_path = repository_root / "configs" / f".env.{app_env}"
-        values = dotenv_values(env_path)
+        env_path = repository_root / "configs" / f"app.{app_env}.toml"
+        with env_path.open("rb") as env_file:
+            values = tomllib.load(env_file)
 
-        assert required_keys <= set(values), app_env
         assert not (set(values) & SECRET_FILE_KEYS), app_env
-        Settings(APP_ENV=app_env, _env_file=[env_path, secrets_template])  # type: ignore[call-arg]
+        settings = config_module._load_settings_from_files(
+            app_env, env_path, secrets_template
+        )
+        assert isinstance(settings.debug, bool)
+        assert isinstance(settings.db.port, int)
+        assert isinstance(settings.cors.origins, list)
+        assert isinstance(settings.endpoint_guard.rules, list)
 
 
 def test_secret_template_defines_every_required_secret_key() -> None:
@@ -327,43 +590,34 @@ def test_secret_template_defines_every_required_secret_key() -> None:
 
 
 def test_settings_defaults_are_limited_to_conditional_fields() -> None:
-    conditional_fields = {
-        "DB_READ_DATABASE",
-        "DB_READ_HOST",
-        "DB_READ_PASSWORD",
-        "DB_READ_PORT",
-        "DB_READ_USERNAME",
-        "LOG_BASE_DIR",
-        "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
-    }
-
-    fields_with_defaults = {
-        name for name, field in Settings.model_fields.items() if not field.is_required()
-    }
-
-    assert fields_with_defaults == conditional_fields
+    assert not LogSettings.model_fields["base_dir"].is_required()
+    assert not OtelSettings.model_fields["exporter_otlp_traces_endpoint"].is_required()
+    assert not DatabaseSettings.model_fields["read_replica"].is_required()
+    assert not DatabaseReadReplicaSettings.model_fields["port"].is_required()
+    assert not DatabaseReadReplicaSettings.model_fields["username"].is_required()
+    assert not DatabaseReadReplicaSettings.model_fields["database"].is_required()
 
 
 def test_otlp_exporter_config_values_are_loaded(tmp_path: Path) -> None:
-    env_path = tmp_path / ".env.test"
+    env_path = tmp_path / "app.test.toml"
     secrets_path = tmp_path / ".secrets"
-    _write_env_file(env_path, _base_env_values())
+    _write_app_config(env_path, _base_env_values())
     _write_env_file(secrets_path, _secret_values())
 
     settings = _new_settings(env_path, secrets_path)
 
     assert (
-        str(settings.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT)
+        str(settings.otel.exporter_otlp_traces_endpoint)
         == "http://collector:4318/v1/traces"
     )
-    assert settings.OTEL_EXPORTER_OTLP_TIMEOUT_SECONDS == 7
+    assert settings.otel.exporter_otlp_timeout_seconds == 7
 
 
 def test_telemetry_switches_are_loaded_independently_from_files(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    env_path = tmp_path / ".env.test"
+    env_path = tmp_path / "app.test.toml"
     secrets_path = tmp_path / ".secrets"
     env_values = _base_env_values()
     env_values.update(
@@ -381,26 +635,26 @@ def test_telemetry_switches_are_loaded_independently_from_files(
         monkeypatch.setenv(name, "true")
     monkeypatch.setenv("OTEL_METRICS_ENABLED", "false")
     monkeypatch.setenv("OTEL_LOGS_ENABLED", "false")
-    _write_env_file(env_path, env_values)
+    _write_app_config(env_path, env_values)
     _write_env_file(secrets_path, _secret_values())
 
     settings = _new_settings(env_path, secrets_path)
 
-    assert settings.OTEL_TRACING_ENABLED is False
-    assert settings.OTEL_OPERATION_SPANS_ENABLED is False
-    assert settings.OTEL_METRICS_ENABLED is True
-    assert settings.OTEL_LOGS_ENABLED is True
-    assert settings.OTEL_AUTO_CONFIGURE is False
+    assert settings.otel.tracing_enabled is False
+    assert settings.otel.operation_spans_enabled is False
+    assert settings.otel.metrics_enabled is True
+    assert settings.otel.logs_enabled is True
+    assert settings.otel.auto_configure is False
 
 
 def test_automatic_exporter_setup_is_rejected_in_settings_managed_mode(
     tmp_path: Path,
 ) -> None:
-    env_path = tmp_path / ".env.test"
+    env_path = tmp_path / "app.test.toml"
     secrets_path = tmp_path / ".secrets"
     env_values = _base_env_values()
     env_values["OTEL_AUTO_CONFIGURE"] = "true"
-    _write_env_file(env_path, env_values)
+    _write_app_config(env_path, env_values)
     _write_env_file(secrets_path, _secret_values())
 
     with pytest.raises(ValidationError, match="OTEL_AUTO_CONFIGURE must be false"):
@@ -421,20 +675,20 @@ def test_telemetry_switches_require_an_explicit_file_value(
     monkeypatch: pytest.MonkeyPatch,
     name: str,
 ) -> None:
-    env_path = tmp_path / ".env.test"
+    env_path = tmp_path / "app.test.toml"
     secrets_path = tmp_path / ".secrets"
     env_values = _base_env_values()
     env_values.pop(name)
     monkeypatch.setenv(name, "false")
-    _write_env_file(env_path, env_values)
+    _write_app_config(env_path, env_values)
     _write_env_file(secrets_path, _secret_values())
 
-    with pytest.raises(ValidationError, match=name):
+    with pytest.raises(ValidationError, match=name.removeprefix("OTEL_").lower()):
         _new_settings(env_path, secrets_path)
 
 
 def test_log_output_config_values_are_loaded(tmp_path: Path) -> None:
-    env_path = tmp_path / ".env.test"
+    env_path = tmp_path / "app.test.toml"
     secrets_path = tmp_path / ".secrets"
     env_values = _base_env_values()
     env_values.update(
@@ -444,21 +698,21 @@ def test_log_output_config_values_are_loaded(tmp_path: Path) -> None:
             "LOG_WRITE_TO_CONSOLE": "true",
         }
     )
-    _write_env_file(env_path, env_values)
+    _write_app_config(env_path, env_values)
     _write_env_file(secrets_path, _secret_values())
 
     settings = _new_settings(env_path, secrets_path)
 
-    assert settings.LOG_BASE_DIR == Path("/var/log/agent-backend")
-    assert settings.LOG_WRITE_TO_FILE is False
-    assert settings.LOG_WRITE_TO_CONSOLE is True
+    assert settings.log.base_dir == Path("/var/log/agent-backend")
+    assert settings.log.write_to_file is False
+    assert settings.log.write_to_console is True
 
 
 def test_relative_log_base_dir_is_resolved_from_project_root(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    env_path = tmp_path / ".env.test"
+    env_path = tmp_path / "app.test.toml"
     secrets_path = tmp_path / ".secrets"
     env_values = _base_env_values()
     env_values.update(
@@ -467,33 +721,33 @@ def test_relative_log_base_dir_is_resolved_from_project_root(
             "LOG_WRITE_TO_FILE": "true",
         }
     )
-    _write_env_file(env_path, env_values)
+    _write_app_config(env_path, env_values)
     _write_env_file(secrets_path, _secret_values())
     monkeypatch.setattr(config_module, "BASE_DIR", tmp_path)
 
     settings = _new_settings(env_path, secrets_path)
 
-    assert settings.LOG_BASE_DIR == tmp_path / "logs"
+    assert settings.log.base_dir == tmp_path / "logs"
 
 
 def test_log_output_targets_must_be_explicit(tmp_path: Path) -> None:
-    env_path = tmp_path / ".env.test"
+    env_path = tmp_path / "app.test.toml"
     secrets_path = tmp_path / ".secrets"
     env_values = _base_env_values()
     env_values.pop("LOG_WRITE_TO_FILE")
-    _write_env_file(env_path, env_values)
+    _write_app_config(env_path, env_values)
     _write_env_file(secrets_path, _secret_values())
 
-    with pytest.raises(ValidationError, match="LOG_WRITE_TO_FILE"):
+    with pytest.raises(ValidationError, match=r"log\.write_to_file"):
         _new_settings(env_path, secrets_path)
 
 
 def test_file_logging_requires_base_log_dir(tmp_path: Path) -> None:
-    env_path = tmp_path / ".env.test"
+    env_path = tmp_path / "app.test.toml"
     secrets_path = tmp_path / ".secrets"
     env_values = _base_env_values()
     env_values["LOG_WRITE_TO_FILE"] = "true"
-    _write_env_file(env_path, env_values)
+    _write_app_config(env_path, env_values)
     _write_env_file(secrets_path, _secret_values())
 
     with pytest.raises(
@@ -504,7 +758,7 @@ def test_file_logging_requires_base_log_dir(tmp_path: Path) -> None:
 
 
 def test_log_output_requires_at_least_one_target(tmp_path: Path) -> None:
-    env_path = tmp_path / ".env.test"
+    env_path = tmp_path / "app.test.toml"
     secrets_path = tmp_path / ".secrets"
     env_values = _base_env_values()
     env_values.update(
@@ -513,7 +767,7 @@ def test_log_output_requires_at_least_one_target(tmp_path: Path) -> None:
             "LOG_WRITE_TO_CONSOLE": "false",
         }
     )
-    _write_env_file(env_path, env_values)
+    _write_app_config(env_path, env_values)
     _write_env_file(secrets_path, _secret_values())
 
     with pytest.raises(
@@ -524,12 +778,12 @@ def test_log_output_requires_at_least_one_target(tmp_path: Path) -> None:
 
 
 def test_tracing_requires_otlp_traces_endpoint(tmp_path: Path) -> None:
-    env_path = tmp_path / ".env.test"
+    env_path = tmp_path / "app.test.toml"
     secrets_path = tmp_path / ".secrets"
     env_values = _base_env_values()
     env_values["OTEL_TRACING_ENABLED"] = "true"
     env_values.pop("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
-    _write_env_file(env_path, env_values)
+    _write_app_config(env_path, env_values)
     _write_env_file(secrets_path, _secret_values())
 
     with pytest.raises(
@@ -540,24 +794,24 @@ def test_tracing_requires_otlp_traces_endpoint(tmp_path: Path) -> None:
 
 
 def test_milvus_config_values_are_loaded(tmp_path: Path) -> None:
-    env_path = tmp_path / ".env.test"
+    env_path = tmp_path / "app.test.toml"
     secrets_path = tmp_path / ".secrets"
-    _write_env_file(env_path, _base_env_values())
+    _write_app_config(env_path, _base_env_values())
     _write_env_file(secrets_path, _secret_values())
 
     settings = _new_settings(env_path, secrets_path)
 
-    assert str(settings.MILVUS_URI) == "http://milvus:19530/"
-    assert settings.MILVUS_DB_NAME == "test_database"
-    assert settings.MILVUS_TIMEOUT_SECONDS == 7
+    assert str(settings.milvus.uri) == "http://milvus:19530/"
+    assert settings.milvus.db_name == "test_database"
+    assert settings.milvus.timeout_seconds == 7
 
 
 def test_milvus_database_name_cannot_be_empty(tmp_path: Path) -> None:
-    env_path = tmp_path / ".env.test"
+    env_path = tmp_path / "app.test.toml"
     secrets_path = tmp_path / ".secrets"
     env_values = _base_env_values()
     env_values["MILVUS_DB_NAME"] = "  "
-    _write_env_file(env_path, env_values)
+    _write_app_config(env_path, env_values)
     _write_env_file(secrets_path, _secret_values())
 
     with pytest.raises(ValidationError, match="MILVUS_DB_NAME cannot be empty"):
@@ -578,7 +832,7 @@ def test_sqlalchemy_database_urls_use_sqlalchemy_escaping(
     driver: str,
     query: str,
 ) -> None:
-    env_path = tmp_path / ".env.test"
+    env_path = tmp_path / "app.test.toml"
     secrets_path = tmp_path / ".secrets"
     env_values = _base_env_values()
     env_values.update(
@@ -602,7 +856,7 @@ def test_sqlalchemy_database_urls_use_sqlalchemy_escaping(
             "DB_READ_PASSWORD": "reader@pass:/?[]",
         }
     )
-    _write_env_file(env_path, env_values)
+    _write_app_config(env_path, env_values)
     _write_env_file(secrets_path, secret_values)
 
     settings = _new_settings(env_path, secrets_path)
@@ -618,7 +872,7 @@ def test_sqlalchemy_database_urls_use_sqlalchemy_escaping(
 
 
 def test_redis_url_escapes_password_and_supports_ipv6(tmp_path: Path) -> None:
-    env_path = tmp_path / ".env.test"
+    env_path = tmp_path / "app.test.toml"
     secrets_path = tmp_path / ".secrets"
     env_values = _base_env_values()
     env_values.update(
@@ -630,7 +884,7 @@ def test_redis_url_escapes_password_and_supports_ipv6(tmp_path: Path) -> None:
     )
     secret_values = _secret_values()
     secret_values["REDIS_PASSWORD"] = "redis@pass:/?#[]%"
-    _write_env_file(env_path, env_values)
+    _write_app_config(env_path, env_values)
     _write_env_file(secrets_path, secret_values)
 
     settings = _new_settings(env_path, secrets_path)
@@ -646,7 +900,7 @@ def test_redis_url_escapes_password_and_supports_ipv6(tmp_path: Path) -> None:
 
 
 def test_oracle_database_type_is_rejected(tmp_path: Path) -> None:
-    env_path = tmp_path / ".env.test"
+    env_path = tmp_path / "app.test.toml"
     secrets_path = tmp_path / ".secrets"
     env_values = _base_env_values()
     env_values.update(
@@ -655,7 +909,7 @@ def test_oracle_database_type_is_rejected(tmp_path: Path) -> None:
             "CELERY_IDEMPOTENCY_ENABLED": "false",
         }
     )
-    _write_env_file(env_path, env_values)
+    _write_app_config(env_path, env_values)
     _write_env_file(secrets_path, _secret_values())
 
     with pytest.raises(ValidationError, match="DB_TYPE must be one of"):
@@ -665,7 +919,7 @@ def test_oracle_database_type_is_rejected(tmp_path: Path) -> None:
 def test_celery_publish_confirmation_timeout_exceeds_reconciler_interval(
     tmp_path: Path,
 ) -> None:
-    env_path = tmp_path / ".env.test"
+    env_path = tmp_path / "app.test.toml"
     secrets_path = tmp_path / ".secrets"
     env_values = _base_env_values()
     env_values.update(
@@ -674,7 +928,7 @@ def test_celery_publish_confirmation_timeout_exceeds_reconciler_interval(
             "CELERY_PUBLISH_RECONCILER_INTERVAL_SECONDS": "10",
         }
     )
-    _write_env_file(env_path, env_values)
+    _write_app_config(env_path, env_values)
     _write_env_file(secrets_path, _secret_values())
 
     with pytest.raises(
@@ -690,7 +944,7 @@ def test_celery_publish_confirmation_timeout_exceeds_reconciler_interval(
 def test_celery_queue_start_timeout_exceeds_reconciler_interval(
     tmp_path: Path,
 ) -> None:
-    env_path = tmp_path / ".env.test"
+    env_path = tmp_path / "app.test.toml"
     secrets_path = tmp_path / ".secrets"
     env_values = _base_env_values()
     env_values.update(
@@ -699,7 +953,7 @@ def test_celery_queue_start_timeout_exceeds_reconciler_interval(
             "CELERY_RECONCILER_INTERVAL_SECONDS": "60",
         }
     )
-    _write_env_file(env_path, env_values)
+    _write_app_config(env_path, env_values)
     _write_env_file(secrets_path, _secret_values())
 
     with pytest.raises(
@@ -712,16 +966,58 @@ def test_celery_queue_start_timeout_exceeds_reconciler_interval(
         _new_settings(env_path, secrets_path)
 
 
-def test_celery_state_machine_removes_legacy_timing_settings() -> None:
-    fields = Settings.model_fields
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("CELERY_EXECUTION_DEADLINE_GRACE_SECONDS", "301"),
+        ("CELERY_QUEUE_START_TIMEOUT_SECONDS", "1"),
+        ("CELERY_PUBLISH_CONFIRM_TIMEOUT_SECONDS", "1"),
+        ("CELERY_RECONCILER_QUEUE", " "),
+    ],
+)
+def test_celery_idempotency_constraints_apply_only_when_enabled(
+    tmp_path: Path,
+    enabled: bool,
+    key: str,
+    value: str,
+) -> None:
+    env_path = tmp_path / "app.test.toml"
+    secrets_path = tmp_path / ".secrets"
+    env_values = _base_env_values()
+    env_values.update(
+        {
+            "DB_TYPE": "postgresql" if enabled else "mysql",
+            "CELERY_IDEMPOTENCY_ENABLED": str(enabled).lower(),
+            "CELERY_RECONCILER_BEAT_ENABLED": "false",
+            key: value,
+        }
+    )
+    _write_app_config(env_path, env_values)
+    _write_env_file(secrets_path, _secret_values())
 
-    assert "CELERY_EXECUTION_DEADLINE_GRACE_SECONDS" in fields
-    assert "CELERY_QUEUE_START_TIMEOUT_SECONDS" in fields
-    assert "CELERY_ORPHAN_FENCE_SECONDS" in fields
-    assert "CELERY_EXECUTION_LEASE_GRACE_SECONDS" not in fields
-    assert "CELERY_TASK_DELIVERY_GRACE_SECONDS" not in fields
-    assert "CELERY_PUBLISHED_ORPHAN_SECONDS" not in fields
-    assert "CELERY_TASK_IDEMPOTENCY_DAYS" not in fields
+    if enabled:
+        with pytest.raises(ValidationError, match=key):
+            _new_settings(env_path, secrets_path)
+        return
+
+    settings = _new_settings(env_path, secrets_path)
+
+    assert settings.celery.idempotency_enabled is False
+    assert settings.celery.reconciler_beat_enabled is False
+    assert settings.db.type == "mysql"
+
+
+def test_celery_state_machine_removes_legacy_timing_settings() -> None:
+    fields = CelerySettings.model_fields
+
+    assert "execution_deadline_grace_seconds" in fields
+    assert "queue_start_timeout_seconds" in fields
+    assert "orphan_fence_seconds" in fields
+    assert "execution_lease_grace_seconds" not in fields
+    assert "task_delivery_grace_seconds" not in fields
+    assert "published_orphan_seconds" not in fields
+    assert "task_idempotency_days" not in fields
 
 
 def test_sensitive_secret_config_keys_only_match_sensitive_names() -> None:
@@ -738,7 +1034,7 @@ def test_sensitive_secret_config_keys_only_match_sensitive_names() -> None:
 
 
 def test_embedding_config_values_are_loaded(tmp_path: Path) -> None:
-    env_path = tmp_path / ".env.test"
+    env_path = tmp_path / "app.test.toml"
     secrets_path = tmp_path / ".secrets"
     env_values = _base_env_values()
     env_values.update(
@@ -752,52 +1048,49 @@ def test_embedding_config_values_are_loaded(tmp_path: Path) -> None:
     )
     secret_values = _secret_values()
     secret_values["EMBEDDING_API_KEY"] = "embedding-api-key"
-    _write_env_file(env_path, env_values)
+    _write_app_config(env_path, env_values)
     _write_env_file(secrets_path, secret_values)
 
     settings = _new_settings(env_path, secrets_path)
 
-    assert settings.EMBEDDING_PROVIDER == "openai_compatible"
-    assert settings.EMBEDDING_BASE_URL == "http://embedding.example/v1"
-    assert settings.EMBEDDING_MODEL == "bge-m3"
-    assert settings.EMBEDDING_API_KEY.get_secret_value() == "embedding-api-key"
-    assert settings.EMBEDDING_DIMENSION == 1024
-    assert settings.EMBEDDING_TIMEOUT_SECONDS == 30
+    assert settings.embedding.provider == "openai_compatible"
+    assert settings.embedding.base_url == "http://embedding.example/v1"
+    assert settings.embedding.model == "bge-m3"
+    assert settings.secrets.embedding_api_key.get_secret_value() == "embedding-api-key"
+    assert settings.embedding.dimension == 1024
+    assert settings.embedding.timeout_seconds == 30
 
 
 def test_config_echo_masks_sensitive_secret_values(tmp_path: Path) -> None:
-    env_path = tmp_path / ".env.test"
+    env_path = tmp_path / "app.test.toml"
     secrets_path = tmp_path / ".secrets"
-    _write_env_file(env_path, _base_env_values())
+    _write_app_config(env_path, _base_env_values())
     _write_env_file(secrets_path, _secret_values())
     settings = _new_settings(env_path, secrets_path)
 
     assert (
         _config_echo_value(
-            settings,
-            "JWT_SECRET",
-            settings.model_dump()["JWT_SECRET"],
-            sensitive_keys={"JWT_SECRET"},
+            "secrets.jwt_secret",
+            settings.secrets.jwt_secret,
+            sensitive_keys={"secrets.jwt_secret"},
             reveal_sensitive=False,
         )
         == "test...cret (len=15)"
     )
     assert (
         _config_echo_value(
-            settings,
-            "DB_HOST",
-            settings.model_dump()["DB_HOST"],
-            sensitive_keys={"JWT_SECRET"},
+            "db.host",
+            settings.db.host,
+            sensitive_keys={"secrets.jwt_secret"},
             reveal_sensitive=False,
         )
         == "dotenv-db"
     )
     assert (
         _config_echo_value(
-            settings,
-            "JWT_SECRET",
-            settings.model_dump()["JWT_SECRET"],
-            sensitive_keys={"JWT_SECRET"},
+            "secrets.jwt_secret",
+            settings.secrets.jwt_secret,
+            sensitive_keys={"secrets.jwt_secret"},
             reveal_sensitive=True,
         )
         == "test-jwt-secret"
@@ -805,9 +1098,9 @@ def test_config_echo_masks_sensitive_secret_values(tmp_path: Path) -> None:
 
 
 def test_config_echo_fully_masks_short_sensitive_values(tmp_path: Path) -> None:
-    env_path = tmp_path / ".env.test"
+    env_path = tmp_path / "app.test.toml"
     secrets_path = tmp_path / ".secrets"
-    _write_env_file(env_path, _base_env_values())
+    _write_app_config(env_path, _base_env_values())
     secret_values = _secret_values()
     secret_values["JWT_SECRET"] = "abc"
     _write_env_file(secrets_path, secret_values)
@@ -815,10 +1108,9 @@ def test_config_echo_fully_masks_short_sensitive_values(tmp_path: Path) -> None:
 
     assert (
         _config_echo_value(
-            settings,
-            "JWT_SECRET",
-            settings.model_dump()["JWT_SECRET"],
-            sensitive_keys={"JWT_SECRET"},
+            "secrets.jwt_secret",
+            settings.secrets.jwt_secret,
+            sensitive_keys={"secrets.jwt_secret"},
             reveal_sensitive=False,
         )
         == "*** (len=3)"
@@ -826,20 +1118,19 @@ def test_config_echo_fully_masks_short_sensitive_values(tmp_path: Path) -> None:
 
 
 def test_config_echo_reports_empty_sensitive_values(tmp_path: Path) -> None:
-    env_path = tmp_path / ".env.test"
+    env_path = tmp_path / "app.test.toml"
     secrets_path = tmp_path / ".secrets"
     secret_values = _secret_values()
     secret_values["JWT_SECRET"] = ""
-    _write_env_file(env_path, _base_env_values())
+    _write_app_config(env_path, _base_env_values())
     _write_env_file(secrets_path, secret_values)
     settings = _new_settings(env_path, secrets_path)
 
     assert (
         _config_echo_value(
-            settings,
-            "JWT_SECRET",
-            settings.model_dump()["JWT_SECRET"],
-            sensitive_keys={"JWT_SECRET"},
+            "secrets.jwt_secret",
+            settings.secrets.jwt_secret,
+            sensitive_keys={"secrets.jwt_secret"},
             reveal_sensitive=False,
         )
         == "<empty>"

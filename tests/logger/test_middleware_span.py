@@ -117,12 +117,15 @@ def _build_app(
         app_module,
         "settings",
         SimpleNamespace(
-            DEBUG=True,
-            OTEL_TRACING_ENABLED=tracing,
-            OTEL_OPERATION_SPANS_ENABLED=operation_spans,
-            OTEL_METRICS_ENABLED=metrics,
-            OTEL_LOGS_ENABLED=logs,
-            OTEL_AUTO_CONFIGURE=False,
+            debug=True,
+            otel=SimpleNamespace(
+                tracing_enabled=tracing,
+                operation_spans_enabled=operation_spans,
+                metrics_enabled=metrics,
+                logs_enabled=logs,
+                auto_configure=False,
+            ),
+            cors=SimpleNamespace(origins=[]),
         ),
     )
     monkeypatch.setattr(app_module, "register_router", lambda app: None)
@@ -487,7 +490,9 @@ async def test_traceparent_preserves_remote_sampling_and_trace_state(
         assert root.parent.is_remote is True
         assert root.parent.span_id == int(remote_span_id, 16)
         assert root.parent.trace_state.get("vendor") == "test"
-        assert all(span.context.trace_id == int(remote_trace_id, 16) for span in finished)
+        assert all(
+            span.context.trace_id == int(remote_trace_id, 16) for span in finished
+        )
     else:
         assert finished == ()
 
@@ -512,7 +517,9 @@ async def test_x_trace_id_is_ignored_when_traceparent_is_invalid(
 
     assert _response_trace_id(response) != _PUBLIC_TRACE_ID
     roots = [
-        span for span in tracing_runtime.get_finished_spans() if span.kind is SpanKind.SERVER
+        span
+        for span in tracing_runtime.get_finished_spans()
+        if span.kind is SpanKind.SERVER
     ]
     assert len(roots) == 1
     assert roots[0].parent is None
@@ -636,7 +643,9 @@ async def test_concurrent_requests_keep_independent_trace_ids(
 
     assert returned_trace_ids == trace_ids
     roots = [
-        span for span in tracing_runtime.get_finished_spans() if span.kind is SpanKind.SERVER
+        span
+        for span in tracing_runtime.get_finished_spans()
+        if span.kind is SpanKind.SERVER
     ]
     assert len(roots) == 3
     assert {f"{span.context.trace_id:032x}" for span in roots} == trace_ids
@@ -701,7 +710,9 @@ async def test_context_can_be_injected_independently_of_collection(
             headers={"traceparent": incoming, "tracestate": "vendor=test"},
         )
 
-    forwarded = TraceContextTextMapPropagator().extract(response.json(), context=Context())
+    forwarded = TraceContextTextMapPropagator().extract(
+        response.json(), context=Context()
+    )
     forwarded_span_context = trace.get_current_span(forwarded).get_span_context()
     assert forwarded_span_context.is_valid
     assert forwarded_span_context.trace_id == _response_context(response).trace_id
@@ -752,7 +763,9 @@ async def test_cancelled_requests_restore_caller_and_request_contexts(
                 patched_request_context.get_trace_id()
 
     roots = [
-        span for span in tracing_runtime.get_finished_spans() if span.kind is SpanKind.SERVER
+        span
+        for span in tracing_runtime.get_finished_spans()
+        if span.kind is SpanKind.SERVER
     ]
     assert len(roots) == (1 if tracing else 0)
     if tracing:
@@ -790,7 +803,10 @@ async def test_operation_spans_can_be_disabled_without_disabling_business_spans(
     assert _response_trace_id(response) == _PUBLIC_TRACE_ID
     finished = {span.name: span for span in tracing_runtime.get_finished_spans()}
     assert set(finished) == {"GET /secure", "middleware.auth.token"}
-    assert finished["middleware.auth.token"].parent.span_id == finished["GET /secure"].context.span_id
+    assert (
+        finished["middleware.auth.token"].parent.span_id
+        == finished["GET /secure"].context.span_id
+    )
 
 
 @pytest.mark.asyncio

@@ -21,6 +21,7 @@ from collections.abc import AsyncGenerator, Generator
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -28,6 +29,7 @@ import pytest
 import pytest_asyncio
 from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
+from pydantic import SecretStr
 from redis.asyncio import ConnectionPool, Redis
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -447,16 +449,42 @@ def app():
     """
     # Mock 配置
     with patch("internal.config.settings") as mock_settings:
-        # 配置基础属性
-        mock_settings.DEBUG = True
-        mock_settings.APP_ENV = "test"
-        mock_settings.JWT_SECRET = "test-jwt-secret-key-for-testing-only"
-        mock_settings.JWT_ALGORITHM = "HS256"
-        mock_settings.ACCESS_TOKEN_EXPIRE_SECONDS = 3600
-        mock_settings.BACKEND_CORS_ORIGINS = ["*"]
-        mock_settings.DB_ECHO = False
-        mock_settings.SLOW_SQL_THRESHOLD = 0.5
-        mock_settings.DB_TYPE = "mysql"
+        mock_settings.debug = True
+        mock_settings.app_env = "test"
+        mock_settings.secrets = SimpleNamespace(
+            jwt_secret=SecretStr("test-jwt-secret-key-for-testing-only"),
+            aes_secret=SecretStr("test-aes-secret"),
+            db_password=SecretStr(""),
+            db_read_password=None,
+            redis_password=SecretStr(""),
+            wechat_app_id="",
+            wechat_app_secret=SecretStr(""),
+            llm_mimo_api_key=SecretStr(""),
+            llm_deepseek_api_key=SecretStr(""),
+            embedding_api_key=SecretStr(""),
+        )
+        mock_settings.auth = SimpleNamespace(
+            jwt=SimpleNamespace(algorithm="HS256"),
+            access_token=SimpleNamespace(expire_seconds=3600),
+        )
+        mock_settings.cors = SimpleNamespace(origins=["*"])
+        mock_settings.db = SimpleNamespace(type="mysql", echo=False)
+        mock_settings.log = SimpleNamespace(
+            format="text",
+            base_dir=None,
+            write_to_file=False,
+            write_to_console=True,
+        )
+        mock_settings.otel = SimpleNamespace(
+            tracing_enabled=False,
+            operation_spans_enabled=True,
+            metrics_enabled=False,
+            logs_enabled=False,
+            auto_configure=False,
+            service_name="test-agent-backend",
+            exporter_otlp_traces_endpoint=None,
+            exporter_otlp_timeout_seconds=10,
+        )
         mock_settings.sqlalchemy_database_uri = TEST_DATABASE_URL
         mock_settings.redis_url = TEST_REDIS_URL
 
@@ -603,13 +631,14 @@ def mock_config():
     可以自定义配置值进行测试。
     """
     config = MagicMock()
-    config.DEBUG = True
-    config.APP_ENV = "test"
-    config.JWT_SECRET = "test-secret"
-    config.JWT_ALGORITHM = "HS256"
-    config.ACCESS_TOKEN_EXPIRE_SECONDS = 3600
-    config.DB_ECHO = False
-    config.SLOW_SQL_THRESHOLD = 0.5
+    config.debug = True
+    config.app_env = "test"
+    config.secrets = SimpleNamespace(jwt_secret=SecretStr("test-secret"))
+    config.auth = SimpleNamespace(
+        jwt=SimpleNamespace(algorithm="HS256"),
+        access_token=SimpleNamespace(expire_seconds=3600),
+    )
+    config.db = SimpleNamespace(echo=False)
 
     return config
 

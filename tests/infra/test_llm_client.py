@@ -22,11 +22,15 @@ def test_new_default_llm_client_uses_default_provider_config(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     settings = SimpleNamespace(
-        LLM_DEFAULT_PROVIDER="deepseek",
-        LLM_DEEPSEEK_BASE_URL="https://api.deepseek.com",
-        LLM_DEEPSEEK_MODEL="deepseek-chat",
-        LLM_DEEPSEEK_API_KEY=SecretStr("test-api-key"),
-        AGENT_LLM_TIMEOUT_SECONDS=60,
+        llm=SimpleNamespace(
+            default_provider="deepseek",
+            deepseek=SimpleNamespace(
+                base_url="https://api.deepseek.com",
+                model="deepseek-chat",
+            ),
+        ),
+        secrets=SimpleNamespace(llm_deepseek_api_key=SecretStr("test-api-key")),
+        agent=SimpleNamespace(llm_timeout_seconds=60),
     )
     monkeypatch.setattr(llm_client_module, "settings", settings)
     monkeypatch.setattr(
@@ -46,10 +50,12 @@ def test_new_default_llm_client_rejects_missing_provider_config(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     settings = SimpleNamespace(
-        LLM_DEFAULT_PROVIDER="deepseek",
-        LLM_DEEPSEEK_BASE_URL="",
-        LLM_DEEPSEEK_MODEL="deepseek-chat",
-        LLM_DEEPSEEK_API_KEY=SecretStr("test-api-key"),
+        llm=SimpleNamespace(
+            default_provider="deepseek",
+            deepseek=SimpleNamespace(base_url="", model="deepseek-chat"),
+        ),
+        secrets=SimpleNamespace(llm_deepseek_api_key=SecretStr("test-api-key")),
+        agent=SimpleNamespace(llm_timeout_seconds=60),
     )
     monkeypatch.setattr(llm_client_module, "settings", settings)
 

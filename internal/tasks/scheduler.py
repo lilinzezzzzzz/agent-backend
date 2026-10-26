@@ -33,9 +33,9 @@ CELERY_TASK_ROUTES = {
     # Celery 任务统一走 celery_queue
     "internal.tasks.celery_tasks.*": {"queue": "celery_queue"},
     "internal.tasks.celery_idempotency_demo.*": {"queue": "celery_queue"},
-    EXECUTION_RECONCILER_TASK_NAME: {"queue": settings.CELERY_RECONCILER_QUEUE},
-    QUEUED_RECONCILER_TASK_NAME: {"queue": settings.CELERY_RECONCILER_QUEUE},
-    SUBMITTING_RECONCILER_TASK_NAME: {"queue": settings.CELERY_RECONCILER_QUEUE},
+    EXECUTION_RECONCILER_TASK_NAME: {"queue": settings.celery.reconciler_queue},
+    QUEUED_RECONCILER_TASK_NAME: {"queue": settings.celery.reconciler_queue},
+    SUBMITTING_RECONCILER_TASK_NAME: {"queue": settings.celery.reconciler_queue},
     # 定时任务统一走 cron_queue
     "task_sum_every_15_min": {"queue": "cron_queue"},
 }
@@ -61,23 +61,23 @@ STATIC_BEAT_SCHEDULE = {
     },
 }
 
-if settings.CELERY_RECONCILER_BEAT_ENABLED:
+if settings.celery.reconciler_beat_enabled:
     STATIC_BEAT_SCHEDULE.update(
         {
             "celery_task_submitting_reconciler": {
                 "task": SUBMITTING_RECONCILER_TASK_NAME,
-                "schedule": float(settings.CELERY_PUBLISH_RECONCILER_INTERVAL_SECONDS),
-                "options": {"queue": settings.CELERY_RECONCILER_QUEUE},
+                "schedule": float(settings.celery.publish_reconciler_interval_seconds),
+                "options": {"queue": settings.celery.reconciler_queue},
             },
             "celery_task_queued_reconciler": {
                 "task": QUEUED_RECONCILER_TASK_NAME,
-                "schedule": float(settings.CELERY_RECONCILER_INTERVAL_SECONDS),
-                "options": {"queue": settings.CELERY_RECONCILER_QUEUE},
+                "schedule": float(settings.celery.reconciler_interval_seconds),
+                "options": {"queue": settings.celery.reconciler_queue},
             },
             "celery_task_execution_reconciler": {
                 "task": EXECUTION_RECONCILER_TASK_NAME,
-                "schedule": float(settings.CELERY_RECONCILER_INTERVAL_SECONDS),
-                "options": {"queue": settings.CELERY_RECONCILER_QUEUE},
+                "schedule": float(settings.celery.reconciler_interval_seconds),
+                "options": {"queue": settings.celery.reconciler_queue},
             },
         }
     )

@@ -45,7 +45,7 @@ def init_async_db(echo: bool | None = None) -> None:
         return
 
     # 使用传入的 echo 参数，如果为 None 则使用配置
-    db_echo = echo if echo is not None else settings.DB_ECHO
+    db_echo = echo if echo is not None else settings.db.echo
 
     # 1. 创建主库 Engine
     _engine = new_async_engine(
@@ -156,7 +156,9 @@ async def get_read_session(autoflush: bool = True) -> AsyncGenerator[AsyncSessio
     如果未配置只读副本，自动 fallback 到主库（优雅降级）。
     """
     # 优雅降级：未配置读库时使用主库
-    session_maker = _read_session_maker if _read_session_maker is not None else _session_maker
+    session_maker = (
+        _read_session_maker if _read_session_maker is not None else _session_maker
+    )
 
     if session_maker is None:
         raise RuntimeError("Database is not initialized. Call init_db() first.")
@@ -201,7 +203,7 @@ def _after_cursor_execute(conn, cursor, statement, parameters, context, executem
 
     # 获取配置 (带有默认值防止报错)
     slow_threshold = getattr(settings, "SLOW_SQL_THRESHOLD", 0.5)
-    is_debug = getattr(settings, "DEBUG", False)
+    is_debug = settings.debug
 
     if elapsed > slow_threshold:
         sql_str = _get_formatted_sql(context, statement, parameters)
@@ -214,7 +216,9 @@ def _after_cursor_execute(conn, cursor, statement, parameters, context, executem
 def _get_formatted_sql(context, statement, parameters) -> str:
     try:
         if context and context.compiled:
-            return context.compiled.statement.compile(dialect=context.dialect, compile_kwargs={"literal_binds": True})
+            return context.compiled.statement.compile(
+                dialect=context.dialect, compile_kwargs={"literal_binds": True}
+            )
         if parameters:
             return f"{statement} | Params: {parameters}"
         return str(statement)

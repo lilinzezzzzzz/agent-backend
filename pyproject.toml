@@ -71,6 +71,7 @@ dependencies = [
     "opentelemetry-api>=1.44.0,<2",
     "opentelemetry-exporter-otlp-proto-http>=1.44.0,<2",
     "opentelemetry-sdk>=1.44.0,<2",
+    "alembic>=1.18,<2",
 ]
 
 # 分组依赖 —— 开发环境才需要

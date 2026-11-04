@@ -14,8 +14,9 @@
   表示旧 Worker 是否仍在产生外部副作用未知；最终 `FAILED` / `CANCELLED` 必须等 fence 到期且业务核对完成后再写入。
 - `cancel_allowed` 是运行中任务的取消门禁；进入不可取消阶段后由持有 `execution_token` 的 Worker CAS 为 `false`。
 
-`celery_task_record` 的建表定义位于脚手架 PostgreSQL 初始化脚本 `ddl/postgresql/init.sql`，并与
-`internal.models.celery_task.CeleryTaskRecord` 保持一致。
+`celery_task_record` 的建表和升级由 `migrations/versions/` 管理，并与
+`internal.models.celery_task.CeleryTaskRecord` 保持一致；`ddl/postgresql/init.sql` 是迁移的 SQL 导出产物。
+使用方式见 [数据库迁移指南](../development/database_migrations.md)。
 
 ## 状态机
 

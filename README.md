@@ -11,6 +11,7 @@ README 只记录当前仓库可直接核对的能力；更细的设计约束和�
 - FastAPI + Starlette
 - Pydantic v2 + `pydantic-settings`
 - SQLAlchemy 2.x Async ORM
+- Alembic（PostgreSQL schema 版本管理）
 - Redis
 - Celery + Beat
 - anyio
@@ -23,7 +24,8 @@ README 只记录当前仓库可直接核对的能力；更细的设计约束和�
 - 进程入口：`entrypoints/main.py` 导出 FastAPI `app`，`internal.infra.celery.application` 导出 Celery `celery_app`，`internal/app.py` 负责路由、中间件和 lifespan。
 - 配置加载：`APP_ENV` 只在根目录 `.env` 维护；应用据此加载 `configs/app.{APP_ENV}.toml` 和
   `.secrets`，并严格隔离非敏感配置与凭据字段。
-- 数据库：异步 SQLAlchemy 连接池，支持主库和可选只读副本；配置层支持 PostgreSQL、MySQL DSN。
+- 数据库：异步 SQLAlchemy 连接池，支持主库和可选只读副本；配置层支持 PostgreSQL、MySQL DSN，
+  Alembic 迁移当前只支持 PostgreSQL。
 - Redis：连接池、业务缓存封装、认证 token metadata、Agent action confirmation / idempotency 缓存。
 - 认证：Token 认证、内部签名认证、匿名路由分组、微信登录接入点。
 - 中间件：请求日志、CORS、Endpoint Guard、统一异常处理、GZip。
@@ -122,7 +124,24 @@ EMBEDDING_API_KEY=
 - `embedding.dimension` 必须与向量模型输出维度和向量 collection schema 保持一致。
 - `endpoint_guard.rules` 是 TOML 数组，可按 method、path、match type 禁用或拒绝指定 endpoint。
 
-### 3. 启动 API
+### 3. 初始化全新 PostgreSQL 数据库
+
+先创建空数据库，再让 `configs/app.{APP_ENV}.toml` 的 `[db]` 和 `.secrets` 的 `DB_PASSWORD` 指向它。
+在仓库根目录执行：
+
+```bash
+uv run alembic upgrade head
+uv run alembic current
+uv run alembic check
+```
+
+Alembic 创建当前全部业务表并通过 `alembic_version` 记录版本。迁移是独立步骤，API 和 Worker
+启动时不自动执行。当前仅支持 PostgreSQL 新库初始化；已有数据库暂不接管，不应直接执行 initial revision
+或用 `stamp head` 跳过结构差异。
+
+后续结构变更、离线 SQL 与隔离数据库验证见 [数据库迁移指南](docs/development/database_migrations.md)。
+
+### 4. 启动 API
 
 开发模式：
 
@@ -141,7 +160,7 @@ uv run uvicorn entrypoints.main:app --host 0.0.0.0 --port 8000
 - `http://127.0.0.1:8000/docs`
 - `http://127.0.0.1:8000/redoc`
 
-### 4. 启动 Celery
+### 5. 启动 Celery
 
 Worker：
 
@@ -153,8 +172,8 @@ uv run celery -A internal.infra.celery.application:celery_app worker -l info --p
 `internal/tasks/scheduler.py` 的默认队列、任务路由和 Beat 投递配置派生并去重，维护队列名称来自
 环境配置中的 `celery.reconciler_queue`。修改维护队列后需重启相关 Worker 和 Beat，使投递与订阅一致。
 
-初始化 PostgreSQL 时执行 `ddl/postgresql/init.sql`，该脚本根据 `internal/models` 创建脚手架所需的全部表、
-约束和索引。API 先登记 `SUBMITTING` 记录，再调用 `CeleryClient.submit()`；Worker 可从
+启动前先按上面的步骤执行 `alembic upgrade head`；`ddl/postgresql/init.sql` 是迁移导出的全新建库 SQL，
+不再手工维护。API 先登记 `SUBMITTING` 记录，再调用 `CeleryClient.submit()`；Worker 可从
 `SUBMITTING` 或 `QUEUED` claim，从而避免快速消费竞态。Beat 会分别收敛发布确认超时、排队启动超时和
 执行 deadline 超时；运行中任务超过 hard deadline 后先进入 `ORPHANED`，等待 fence 过期和业务核对后再进入
 `FAILED/CANCELLED`，不会自动重新提交任务。运行中任务可通过 `cancel_allowed=false` 进入不可取消阶段。取消接口先持久化
@@ -283,7 +302,8 @@ AgentScope 2.0 的推荐接入路线是嵌入官方 Agent Service，而不是自
 - `configs/`：非敏感 TOML 环境配置。
 - `docs/`：补充文档。
 - `tests/`：pytest 测试。
-- `ddl/`、`dml/`：数据库 SQL。
+- `migrations/`、`alembic.ini`：PostgreSQL schema 迁移历史与迁移配置。
+- `ddl/`：迁移导出的数据库 SQL；`dml/`：业务 seed 和数据修复 SQL。
 
 更细的目录职责和修改约束见各目录下的 `AGENTS.md`；模块级使用说明优先看对应 `README.md`。
 

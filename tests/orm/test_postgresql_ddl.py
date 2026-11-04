@@ -1,78 +1,97 @@
-import re
+import subprocess
+import sys
 from pathlib import Path
 
-from sqlalchemy.dialects import postgresql
-from sqlalchemy.schema import CreateIndex, CreateTable
+import pytest
+from alembic import command
+from alembic.config import Config
+from alembic.script import ScriptDirectory
+from alembic.util import CommandError
+from sqlalchemy import create_engine
 
-from internal.models.agent_audit import AgentAudit
-from internal.models.agent_conversation import (
-    AgentMessage,
-    AgentRun,
-    AgentRunAttempt,
-    AgentRunCheckpoint,
-    AgentRunStep,
-    AgentSession,
-)
-from internal.models.celery_task import CeleryTaskRecord
-from internal.models.external_identity import ExternalIdentity
-from internal.models.scoped_operation_lock import ScopedOperationLock
-from internal.models.user import User
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DDL_PATH = PROJECT_ROOT / "ddl/postgresql/init.sql"
 
 
-DDL_PATH = Path("ddl/postgresql/init.sql")
-MODEL_TABLES = tuple(
-    sorted(
-        (
-            AgentAudit.__table__,
-            AgentMessage.__table__,
-            AgentRun.__table__,
-            AgentRunAttempt.__table__,
-            AgentRunCheckpoint.__table__,
-            AgentRunStep.__table__,
-            AgentSession.__table__,
-            CeleryTaskRecord.__table__,
-            ExternalIdentity.__table__,
-            ScopedOperationLock.__table__,
-            User.__table__,
-        ),
-        key=lambda table: table.name,
+def test_migrations_have_a_single_head_and_base() -> None:
+    scripts = ScriptDirectory.from_config(Config(str(PROJECT_ROOT / "alembic.ini")))
+    assert len(scripts.get_heads()) == 1
+    assert len(scripts.get_bases()) == 1
+
+
+def test_model_registry_includes_every_model_module() -> None:
+    script = (
+        "import importlib\n"
+        "import pkgutil\n"
+        "from internal import models\n"
+        "registered = set(models.Base.metadata.tables)\n"
+        "for module in pkgutil.iter_modules(models.__path__, models.__name__ + '.'):\n"
+        "    importlib.import_module(module.name)\n"
+        "assert set(models.Base.metadata.tables) == registered\n"
     )
-)
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            script,
+        ],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=30,
+    )
 
 
-def _normalize_sql(value: str) -> str:
-    return " ".join(value.split())
+def test_online_migrations_reject_other_dialects() -> None:
+    config = Config(str(PROJECT_ROOT / "alembic.ini"))
+    engine = create_engine("sqlite://")
+    try:
+        with engine.connect() as connection:
+            config.attributes["connection"] = connection
+            with pytest.raises(CommandError, match="PostgreSQL only"):
+                command.upgrade(config, "head")
+    finally:
+        engine.dispose()
 
 
-def test_postgresql_init_ddl_matches_registered_model_metadata() -> None:
-    ddl = DDL_PATH.read_text(encoding="utf-8")
-    normalized_ddl = _normalize_sql(ddl)
-    dialect = postgresql.dialect()
+def test_offline_migrations_do_not_load_application_config(tmp_path: Path) -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; sys.modules['internal.config'] = None; "
+            "from alembic.config import main; main()",
+            "-c",
+            str(PROJECT_ROOT / "alembic.ini"),
+            "upgrade",
+            "head",
+            "--sql",
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=30,
+    )
+    assert "CREATE TABLE agent_run" in result.stdout
+    assert "INSERT INTO alembic_version" in result.stdout
+    assert "Loading configuration" not in result.stderr
 
-    for table in MODEL_TABLES:
-        expected_table = _normalize_sql(
-            str(CreateTable(table).compile(dialect=dialect))
-        )
-        assert expected_table in normalized_ddl, table.name
 
-        for index in table.indexes:
-            expected_index = _normalize_sql(
-                str(CreateIndex(index).compile(dialect=dialect))
-            )
-            assert expected_index in normalized_ddl, index.name
-
-
-def test_postgresql_init_ddl_contains_exactly_the_registered_model_tables() -> None:
-    ddl = DDL_PATH.read_text(encoding="utf-8")
-    ddl_tables = {
-        quoted_name or plain_name
-        for quoted_name, plain_name in re.findall(
-            r'CREATE TABLE\s+(?:"([^"]+)"|([a-zA-Z_][a-zA-Z0-9_]*))\s*\(',
-            ddl,
-        )
-    }
-
-    assert ddl_tables == {table.name for table in MODEL_TABLES}
-    assert "BIGSERIAL" not in ddl
-    assert "ALTER TABLE" not in ddl
-    assert "DROP TABLE" not in ddl
+def test_schema_export_is_reproducible(tmp_path: Path) -> None:
+    exported = tmp_path / "init.sql"
+    subprocess.run(
+        [
+            sys.executable,
+            str(PROJECT_ROOT / "scripts/export_postgresql_schema.py"),
+            "--output",
+            str(exported),
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=30,
+    )
+    assert exported.read_text(encoding="utf-8") == DDL_PATH.read_text(encoding="utf-8")

@@ -36,8 +36,10 @@
 
 ## 数据与验证
 
-- 当前仓库以全新建库基线 DDL 为主。只有任务明确涉及已存在环境时才新增迁移，并评估历史数据、锁表、
-  部署顺序、兼容窗口和回滚；部署状态发生变化时必须重新审视本规则。
+- PostgreSQL 建库和升级以 `migrations/versions/` 的 Alembic revision 为准；结构变更同步 ORM 与新增
+  revision，`ddl/postgresql/init.sql` 只能由导出脚本生成。当前仅支持新库初始化，不自动接管已有数据库。
+- 已用于共享环境的 revision 不改写，修正通过新增 revision 完成；涉及已有数据的变更必须评估历史数据、
+  锁表、部署顺序、兼容窗口和回滚，不能把自动生成或 `alembic check` 通过视为完整正确性证明。
 - Python 版本、Ruff 和测试配置以 `pyproject.toml` 为准。运行能覆盖改动行为的最小验证，再按共享 contract
   的影响范围扩大；不得声称未实际运行的检查通过。
 - 默认不假设数据库、Redis、Celery Worker、Milvus 或外部模型可用；依赖这些服务的测试标记为

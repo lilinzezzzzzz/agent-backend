@@ -1,7 +1,8 @@
 # Agent 受管理运行（打断与恢复）使用说明
 
 本文记录当前已实现的行为，不是目标设计。协议、状态机和存储事实分别以
-`pkg/agents/`、`internal/services/agents/conversation.py` 与 `ddl/postgresql/init.sql` 为准；
+`pkg/agents/`、`internal/services/agents/conversation.py` 与 `migrations/versions/` 为准
+（`ddl/postgresql/init.sql` 为迁移导出产物）；
 更完整的取舍与验证矩阵见
 [Agent 打断与原 run 恢复技术设计](../../plans/pending/AGENT_INTERRUPT_RESUME_DESIGN.md)。
 

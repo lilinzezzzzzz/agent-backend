@@ -3,10 +3,11 @@ from collections.abc import AsyncGenerator
 from contextlib import AsyncExitStack, asynccontextmanager
 
 import anyio
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 
 from internal.config import init_settings, settings
+from internal.core import AppException
 from internal.infra.database import close_async_db, init_async_db
 from internal.infra.redis import close_async_redis, init_async_redis
 from internal.utils.background_tasks import (
@@ -55,10 +56,10 @@ def register_router(app: FastAPI):
 
 
 def register_exception(app: FastAPI):
-    @app.exception_handler(RequestValidationError)
-    async def validation_exception_handler(_: Request, exc: RequestValidationError):
-        # 重新抛出异常，让外层中间件统一处理
-        raise exc
+    from internal.middlewares.exceptions import request_exception_handler
+
+    app.add_exception_handler(AppException, request_exception_handler)
+    app.add_exception_handler(RequestValidationError, request_exception_handler)
 
 
 def register_middleware(app: FastAPI):

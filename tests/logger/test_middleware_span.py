@@ -12,7 +12,8 @@ from uuid import UUID
 import anyio
 import pytest
 import pytest_asyncio
-from fastapi import BackgroundTasks, Depends, FastAPI
+from fastapi import BackgroundTasks, Depends, FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from httpx import ASGITransport, AsyncClient, Response
 from loguru import logger as loguru_logger
 from opentelemetry import _logs, propagate, trace
@@ -30,11 +31,14 @@ from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.trace import SpanContext, SpanKind, StatusCode
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
+from starlette.responses import Response as StarletteResponse
+from starlette.responses import StreamingResponse
+from starlette.types import Message, Scope
 
 import internal.app as app_module
 import pkg.logger as logger_module
 import pkg.tracing.otel as otel_runtime
-from internal.core import errors
+from internal.core import AppException, errors
 from pkg import request_context as context
 from pkg.logger import LogFormat, init_logger
 from pkg.tracing import (
@@ -322,13 +326,12 @@ async def middleware_client(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("path", "headers", "handler_message", "auth_span_name"),
+    ("path", "headers", "handler_message"),
     [
         (
             "/v1/public/ping",
             {"traceparent": _traceparent(_PUBLIC_TRACE_ID)},
             "handler.public",
-            None,
         ),
         (
             "/v1/internal/ping",
@@ -339,7 +342,6 @@ async def middleware_client(
                 "X-Nonce": "nonce",
             },
             "handler.internal",
-            "middleware.auth.internal",
         ),
         (
             "/secure",
@@ -348,7 +350,6 @@ async def middleware_client(
                 "Authorization": "Bearer token-123",
             },
             "handler.secure",
-            "middleware.auth.token",
         ),
     ],
 )
@@ -361,10 +362,9 @@ async def test_request_and_route_auth_create_expected_spans(
     path: str,
     headers: dict[str, str],
     handler_message: str,
-    auth_span_name: str | None,
 ) -> None:
     internal_auth_module, _ = middleware_modules
-    if auth_span_name == "middleware.auth.internal":
+    if path == "/v1/internal/ping":
         monkeypatch.setattr(
             internal_auth_module,
             "signature_auth_handler",
@@ -387,12 +387,7 @@ async def test_request_and_route_auth_create_expected_spans(
     assert "middleware.request" not in finished
     for name in ("fastapi.dependencies", "fastapi.endpoint", "fastapi.serialization"):
         assert finished[name].parent.span_id == root.context.span_id
-    if auth_span_name is None:
-        assert all(not name.startswith("middleware.auth.") for name in finished)
-    else:
-        auth = finished[auth_span_name]
-        assert auth.parent is not None
-        assert auth.parent.span_id == finished["fastapi.dependencies"].context.span_id
+    assert all(not name.startswith("middleware.auth.") for name in finished)
 
     loguru_logger.complete()
     records = _read_json_records(configured_logger)
@@ -406,7 +401,7 @@ async def test_request_and_route_auth_create_expected_spans(
 
 
 @pytest.mark.asyncio
-async def test_missing_token_marks_auth_and_request_spans_as_error(
+async def test_missing_token_marks_native_dependency_and_request_spans_as_error(
     configured_logger: Path,
     middleware_client: AsyncClient,
     tracing_runtime: InMemorySpanExporter,
@@ -422,17 +417,83 @@ async def test_missing_token_marks_auth_and_request_spans_as_error(
 
     finished = {span.name: span for span in tracing_runtime.get_finished_spans()}
     root = finished["GET /secure"]
-    auth = finished["middleware.auth.token"]
+    dependencies = finished["fastapi.dependencies"]
     assert root.status.status_code is StatusCode.ERROR
-    assert auth.status.status_code is StatusCode.ERROR
+    assert dependencies.status.status_code is StatusCode.ERROR
     assert [event.name for event in root.events].count("exception") == 1
-    assert [event.name for event in auth.events].count("exception") == 1
+    assert all(not name.startswith("middleware.auth.") for name in finished)
 
     loguru_logger.complete()
     records = _read_json_records(configured_logger)
     exception_record = _find_record_prefix(records, "Business exception,")
     assert exception_record["trace_id"] == _MISSING_TOKEN_TRACE_ID
     assert "span_id" not in exception_record
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tracing", [True, False])
+@pytest.mark.parametrize(
+    ("path", "exception_type", "expected_code"),
+    [
+        ("/secure", AppException, errors.Unauthorized.code),
+        ("/validated?value=invalid", RequestValidationError, errors.BadRequest.code),
+    ],
+)
+async def test_expected_errors_use_fastapi_handlers_and_keep_request_correlation(
+    configured_logger: Path,
+    middleware_modules: tuple[ModuleType, ModuleType],
+    tracing_runtime: InMemorySpanExporter,
+    monkeypatch: pytest.MonkeyPatch,
+    tracing: bool,
+    path: str,
+    exception_type: type[Exception],
+    expected_code: int,
+) -> None:
+    if not tracing:
+        shutdown_tracing()
+        init_tracing(enabled=False, service_name="test-agent-backend")
+    auth_module, recorder_module = middleware_modules
+    app = _build_app(
+        internal_auth_dependency=auth_module.require_internal_signature,
+        monkeypatch=monkeypatch,
+        record_middleware=recorder_module.ASGIRecordMiddleware,
+        token_auth_dependency=auth_module.require_authenticated_user,
+        tracing=tracing,
+    )
+    original_handler = app.exception_handlers[exception_type]
+    handled_trace_ids: list[str] = []
+
+    async def capture_handler(request: Request, exc: Exception) -> StarletteResponse:
+        response = await original_handler(request, exc)
+        handled_trace_ids.append(context.get_trace_id())
+        return response
+
+    app.add_exception_handler(exception_type, capture_handler)
+    # 路由错误应在 FastAPI 内完成处理，不再落到 recorder 的兜底转换。
+    fallback = MagicMock(side_effect=AssertionError("unexpected middleware fallback"))
+    monkeypatch.setattr(recorder_module, "exception_response", fallback)
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.get(
+            path, headers={"traceparent": _traceparent(_PUBLIC_TRACE_ID)}
+        )
+
+    assert response.status_code == 200
+    assert response.json()["code"] == expected_code
+    assert _response_trace_id(response) == _PUBLIC_TRACE_ID
+    assert handled_trace_ids == [_PUBLIC_TRACE_ID]
+    fallback.assert_not_called()
+    roots = [
+        span
+        for span in tracing_runtime.get_finished_spans()
+        if span.kind is SpanKind.SERVER
+    ]
+    assert len(roots) == (1 if tracing else 0)
+    if tracing:
+        assert roots[0].status.status_code is StatusCode.ERROR
+        assert [event.name for event in roots[0].events].count("exception") == 1
 
 
 @pytest.mark.asyncio
@@ -787,6 +848,12 @@ async def test_operation_spans_can_be_disabled_without_disabling_business_spans(
         token_auth_dependency=auth_module.require_authenticated_user,
         operation_spans=False,
     )
+
+    @app.get("/business")
+    async def business() -> dict[str, bool]:
+        async with span_context("business.step"):
+            return {"ok": True}
+
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="http://testserver",
@@ -798,14 +865,16 @@ async def test_operation_spans_can_be_disabled_without_disabling_business_spans(
                 "Authorization": "Bearer token-123",
             },
         )
+        business_response = await client.get("/business")
 
     assert response.status_code == 200
     assert _response_trace_id(response) == _PUBLIC_TRACE_ID
     finished = {span.name: span for span in tracing_runtime.get_finished_spans()}
-    assert set(finished) == {"GET /secure", "middleware.auth.token"}
+    assert business_response.status_code == 200
+    assert set(finished) == {"GET /secure", "GET /business", "business.step"}
     assert (
-        finished["middleware.auth.token"].parent.span_id
-        == finished["GET /secure"].context.span_id
+        finished["business.step"].parent.span_id
+        == finished["GET /business"].context.span_id
     )
 
 
@@ -896,6 +965,8 @@ async def test_metrics_and_logs_are_independent_of_tracing_and_preserve_correlat
     assert ("http.server.request.duration" in metric_names) is metrics_enabled
     assert bool(logs) is logs_enabled
     if logs_enabled:
+        assert len(logs) == 1
+        assert logs[0].instrumentation_scope.name == "fastapi"
         record = logs[0].log_record
         assert record.event_name == "fastapi.validation.failed"
         assert f"{record.trace_id:032x}" == response_trace_id
@@ -903,15 +974,20 @@ async def test_metrics_and_logs_are_independent_of_tracing_and_preserve_correlat
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("logs_enabled", [True, False])
+@pytest.mark.parametrize("tracing", [True, False])
+@pytest.mark.parametrize("with_parent", [True, False])
 async def test_unhandled_exception_emits_otel_log_when_enabled(
     configured_logger: Path,
     middleware_modules: tuple[ModuleType, ModuleType],
     tracing_runtime: InMemorySpanExporter,
     monkeypatch: pytest.MonkeyPatch,
     logs_enabled: bool,
+    tracing: bool,
+    with_parent: bool,
 ) -> None:
-    shutdown_tracing()
-    init_tracing(enabled=False, service_name="test-agent-backend")
+    if not tracing:
+        shutdown_tracing()
+        init_tracing(enabled=False, service_name="test-agent-backend")
     log_exporter = InMemoryLogRecordExporter()
     logger_provider = LoggerProvider(shutdown_on_exit=False)
     logger_provider.add_log_record_processor(SimpleLogRecordProcessor(log_exporter))
@@ -923,7 +999,7 @@ async def test_unhandled_exception_emits_otel_log_when_enabled(
         monkeypatch=monkeypatch,
         record_middleware=recorder_module.ASGIRecordMiddleware,
         token_auth_dependency=auth_module.require_authenticated_user,
-        tracing=False,
+        tracing=tracing,
         logs=logs_enabled,
     )
 
@@ -938,7 +1014,9 @@ async def test_unhandled_exception_emits_otel_log_when_enabled(
         ) as client:
             response = await client.get(
                 "/boom",
-                headers={"traceparent": _traceparent(_PUBLIC_TRACE_ID)},
+                headers={"traceparent": _traceparent(_PUBLIC_TRACE_ID)}
+                if with_parent
+                else {},
             )
         logs = log_exporter.get_finished_logs()
     finally:
@@ -946,9 +1024,91 @@ async def test_unhandled_exception_emits_otel_log_when_enabled(
 
     assert response.status_code == 200
     assert response.json()["code"] == errors.InternalServerError.code
-    assert tracing_runtime.get_finished_spans() == ()
+    response_trace_id = _response_trace_id(response)
+    if with_parent:
+        assert response_trace_id == _PUBLIC_TRACE_ID
+    roots = [
+        span
+        for span in tracing_runtime.get_finished_spans()
+        if span.kind is SpanKind.SERVER
+    ]
+    assert len(roots) == (1 if tracing else 0)
+    if tracing:
+        assert roots[0].status.status_code is StatusCode.ERROR
+        assert [event.name for event in roots[0].events].count("exception") == 1
     assert bool(logs) is logs_enabled
     if logs_enabled:
+        assert len(logs) == 1
+        assert logs[0].instrumentation_scope.name == "internal.middlewares.exceptions"
         record = logs[0].log_record
         assert record.event_name == "http.server.request.exception"
-        assert f"{record.trace_id:032x}" == _PUBLIC_TRACE_ID
+        assert f"{record.trace_id:032x}" == response_trace_id
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tracing", [True, False])
+async def test_stream_failure_does_not_start_a_second_response_and_clears_context(
+    configured_logger: Path,
+    middleware_modules: tuple[ModuleType, ModuleType],
+    tracing_runtime: InMemorySpanExporter,
+    monkeypatch: pytest.MonkeyPatch,
+    tracing: bool,
+) -> None:
+    if not tracing:
+        shutdown_tracing()
+        init_tracing(enabled=False, service_name="test-agent-backend")
+    auth_module, recorder_module = middleware_modules
+    app = _build_app(
+        internal_auth_dependency=auth_module.require_internal_signature,
+        monkeypatch=monkeypatch,
+        record_middleware=recorder_module.ASGIRecordMiddleware,
+        token_auth_dependency=auth_module.require_authenticated_user,
+        tracing=tracing,
+    )
+
+    @app.get("/stream")
+    async def stream() -> StreamingResponse:
+        async def chunks() -> AsyncGenerator[bytes, None]:
+            yield b"partial"
+            raise RuntimeError("stream failed")
+
+        return StreamingResponse(chunks())
+
+    scope: Scope = {
+        "type": "http",
+        "asgi": {"version": "3.0", "spec_version": "2.4"},
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "http",
+        "path": "/stream",
+        "query_string": b"",
+        "headers": [(b"traceparent", _traceparent(_PUBLIC_TRACE_ID).encode())],
+    }
+    messages: list[Message] = []
+
+    async def receive() -> Message:
+        return {"type": "http.request", "body": b""}
+
+    async def send(message: Message) -> None:
+        messages.append(message)
+
+    with trace.get_tracer("caller").start_as_current_span("caller") as caller:
+        await app(scope, receive, send)
+        assert trace.get_current_span() is caller
+        with pytest.raises(LookupError):
+            context.get_trace_id()
+
+    assert [message["type"] for message in messages] == [
+        "http.response.start",
+        "http.response.body",
+    ]
+    assert messages[1]["body"] == b"partial"
+    assert messages[1]["more_body"] is True
+    roots = [
+        span
+        for span in tracing_runtime.get_finished_spans()
+        if span.kind is SpanKind.SERVER
+    ]
+    assert len(roots) == (1 if tracing else 0)
+    if tracing:
+        assert roots[0].status.status_code is StatusCode.ERROR

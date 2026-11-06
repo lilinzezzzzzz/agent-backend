@@ -13,6 +13,7 @@ Collector pipeline、持久化后端和真实 Trace 查询链路尚未在本仓�
 | --- | --- | --- |
 | Trace 生成 | 已实现 | `pkg.tracing` 提供进程级 runtime 和 `span_context` |
 | FastAPI 请求与框架 Span | 已实现 | FastAPI 原生 telemetry 创建 `SERVER` Span，以及依赖解析、endpoint、序列化和 `BackgroundTasks` Span |
+| 业务与校验错误响应 | 已实现 | FastAPI exception handler 返回现有错误信封；请求 Span 仍显式标记错误，校验失败日志使用框架原生采集 |
 | 业务 Span | 已实现 | 业务代码使用 `async with span_context(...)` 手动埋点 |
 | Celery Worker tracing runtime | 已实现 | Worker 启动和关闭 hook 初始化、关闭 runtime |
 | OTLP Trace 上报 | 已实现 | `BatchSpanProcessor + OTLPSpanExporter` 使用 OTLP/HTTP 上报 |
@@ -173,9 +174,25 @@ OpenTelemetry 导出；当前 Log 仍走项目既有日志处理链路。
 
 升级后的请求 Span 名称采用 FastAPI 的 `GET /route/{id}` 等模板形式，替代 `middleware.request`。
 框架操作使用 `fastapi.dependencies`、`fastapi.endpoint`、`fastapi.serialization` 和
-`fastapi.background_task`；业务 Span 名称保留原值，认证 Span 会位于依赖解析 Span 之下。
+`fastapi.background_task`；业务 Span 名称保留原值。Token 和内部签名认证作为 FastAPI 依赖，
+其执行和错误归入原生 `fastapi.dependencies`，不再单独生成 `middleware.auth.token` 和
+`middleware.auth.internal` Span。依赖解析 Span 覆盖整个解析阶段，不提供原有两个认证 Span 的独立耗时；
+关闭 `operation_spans` 后也不再生成认证 Span，显式业务 Span 仍可使用。
 现有仪表盘或查询若按旧名称、父子层级过滤，需要同步适配。FastAPI 的 BackgroundTasks 在响应 Span 结束后
 继续保持同一 Trace；项目自管后台 TaskGroup 和 Celery 的生命周期保持各自原有边界。
+
+路由内的 `AppException` 和 `RequestValidationError` 通过
+[`internal/middlewares/exceptions.py`](../../internal/middlewares/exceptions.py) 中的 FastAPI exception handler
+转换为现有错误信封，不再重新抛给 recorder。FastAPI 已在校验失败时生成 `fastapi.validation.failed` 日志，
+应用不重复发送该日志。错误信封仍可能使用 HTTP 200，因此保留对当前请求 Span 的 exception event 和
+`ERROR` 状态标记，避免将业务失败误判为正常请求。
+
+recorder 只兜底未处理异常和用户 middleware 抛出的异常，并保留响应开始后不发送第二个错误响应的行为。
+这类异常被转换后不会再到达 FastAPI 外层的异常观察器，因此开启 `logs_enabled` 时仍补发一次
+`http.server.request.exception`，instrumentation scope 使用记录所在模块的
+`internal.middlewares.exceptions`。错误信封使用 HTTP 200，显式错误标记和异常日志是该响应语义所需的
+当前功能；关闭 tracing 后仍保持日志与响应的 Trace ID 一致。
+其余框架采集继续交给 FastAPI，Provider/exporter、业务 Span、Celery runtime 和无采集传播保留现有实现。
 
 ### 2.6 logger-span 演示接口边界
 

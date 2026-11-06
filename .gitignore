@@ -177,5 +177,8 @@ cython_debug/
 # Codex workspace metadata
 .codex
 
+# Worktree metadata
+.worktreeinclude
+
 # Runtime data
 runtime/

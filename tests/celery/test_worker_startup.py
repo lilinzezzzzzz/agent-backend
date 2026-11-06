@@ -148,7 +148,7 @@ def test_script_uses_app_queue_configuration_by_default(
         "run",
         "celery",
         "-A",
-        "internal.infra.celery.application:celery_app",
+        "entrypoints.celery_app:celery_app",
         "worker",
         "-l",
         "warning",

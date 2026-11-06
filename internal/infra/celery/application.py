@@ -32,7 +32,7 @@ celery_client = CeleryClient(
 
 register_worker_hooks(on_startup=worker_startup, on_shutdown=worker_shutdown)
 
-# Celery CLI 通过该模块级对象启动 Worker 或 Beat。
+# entrypoints.celery_app 导出该对象，供 Celery CLI 启动 Worker 或 Beat。
 celery_app: Celery = celery_client.app
 
 __all__ = ["celery_app", "celery_client"]

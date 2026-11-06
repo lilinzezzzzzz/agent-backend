@@ -12,19 +12,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    # 显式声明生产启动命令，避免 Worker 拓扑依赖 Dockerfile 的默认命令。
+    # 复用 API 启动脚本，Uvicorn worker 数量由部署参数显式传入。
     command:
-      - uvicorn
-      - entrypoints.main:app
-      - --host
-      - 0.0.0.0
-      - --port
-      - "8000"
-      - --loop
-      - uvloop
-      - --http
-      - httptools
-      - --access-log
+      - /app/entrypoints/run_api.sh
       - --workers
       - ${API_WORKERS:?set API_WORKERS in .env}
     # 异常退出或 Docker daemon/主机重启后自动恢复，但尊重运维人员的显式停止操作。

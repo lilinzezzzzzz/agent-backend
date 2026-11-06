@@ -33,7 +33,7 @@
 
 当前项目已有以下边界，AgentScope Service 接入必须复用或避开：
 
-- 进程入口由 `entrypoints/main.py` 导出 `internal.app.create_app()` 创建的 FastAPI app。
+- 进程入口由 `entrypoints/api.py` 导出 `internal.app.create_app()` 创建的 FastAPI app。
 - `internal/app.py` 负责路由、中间件和 lifespan；基础设施初始化发生在主应用 lifespan。
 - `/v1` 默认 token 认证，`/v1/public` 无认证，`/v1/internal` 签名认证。
 - 配置由 `internal/config.py` 管理，`APP_ENV` 只在仓库根目录 `.env` 维护；应用据此加载

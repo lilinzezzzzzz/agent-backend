@@ -21,7 +21,8 @@ README 只记录当前仓库可直接核对的能力；更细的设计约束和�
 
 ## 当前能力
 
-- 进程入口：`entrypoints/main.py` 导出 FastAPI `app`，`internal.infra.celery.application` 导出 Celery `celery_app`，`internal/app.py` 负责路由、中间件和 lifespan。
+- 进程入口：`entrypoints/api.py` 导出 FastAPI `app`，`entrypoints/celery_app.py` 为 Worker / Beat 导出
+  Celery `celery_app`；应用装配分别位于 `internal/app.py` 和 `internal/infra/celery/application.py`。
 - 配置加载：`APP_ENV` 只在根目录 `.env` 维护；应用据此加载 `configs/app.{APP_ENV}.toml` 和
   `.secrets`，并严格隔离非敏感配置与凭据字段。
 - 数据库：异步 SQLAlchemy 连接池，支持主库和可选只读副本；配置层支持 PostgreSQL、MySQL DSN，
@@ -146,13 +147,13 @@ Alembic 创建当前全部业务表并通过 `alembic_version` 记录版本。�
 开发模式：
 
 ```bash
-uv run uvicorn entrypoints.main:app --reload --host 0.0.0.0 --port 8000
+uv run uvicorn entrypoints.api:app --reload --host 0.0.0.0 --port 8000
 ```
 
 非热重载模式：
 
 ```bash
-uv run uvicorn entrypoints.main:app --host 0.0.0.0 --port 8000
+uv run uvicorn entrypoints.api:app --host 0.0.0.0 --port 8000
 ```
 
 当 `DEBUG=true` 时，FastAPI 文档可访问：
@@ -165,7 +166,7 @@ uv run uvicorn entrypoints.main:app --host 0.0.0.0 --port 8000
 Worker：
 
 ```bash
-uv run celery -A internal.infra.celery.application:celery_app worker -l info --pool prefork
+uv run celery -A entrypoints.celery_app:celery_app worker -l info --pool prefork
 ```
 
 未指定 `-Q/--queues` 时，Worker 消费应用 `task_queues` 中的全部队列。队列列表从
@@ -193,7 +194,7 @@ uv run celery -A internal.infra.celery.application:celery_app worker -l info --p
 Beat：
 
 ```bash
-uv run celery -A internal.infra.celery.application:celery_app beat -l info
+uv run celery -A entrypoints.celery_app:celery_app beat -l info
 ```
 
 也可以使用脚本启动 Worker：
@@ -295,7 +296,7 @@ AgentScope 2.0 的推荐接入路线是嵌入官方 Agent Service，而不是自
 
 ## 项目结构
 
-- `entrypoints/`：进程入口，包含 FastAPI、Celery Worker / Beat 启动入口。
+- `entrypoints/`：进程入口，包含 FastAPI 入口、Worker / Beat 共用的 Celery 入口，以及 API 和 Worker 启动脚本。
 - `internal/`：业务应用代码，包含路由、中间件、配置、服务、DAO、缓存、模型、Schema、任务和业务 Agent。
 - `pkg/`：可复用基础包，包含通用 Agent、数据库、日志、OSS、第三方登录、加解密、toolkit 和向量检索抽象。
 - `examples/`：可运行示例代码，不作为生产运行时基础包。
@@ -389,10 +390,12 @@ docker run --rm -p 8000:8000 \
   -v "$PWD/.secrets:/app/.secrets:ro" \
   -v "$PWD/configs/app.local.toml:/app/configs/app.local.toml:ro" \
   agent-backend \
-  uvicorn entrypoints.main:app --host 0.0.0.0 --port 8000
+  /app/entrypoints/run_api.sh --workers 1
 ```
 
-镜像不声明默认启动命令，`docker run` 需显式传入 Uvicorn 命令；生产部署由 compose.yaml 的 `api.command` 提供。
+镜像不声明默认启动命令，`docker run` 和 Compose 均显式调用 `entrypoints/run_api.sh`。脚本使用镜像已有的
+Python 环境启动 Uvicorn，默认监听 `0.0.0.0:8000`，使用 `uvloop` 和 `httptools` 并开启 access log。
+额外命令行参数原样透传给 Uvicorn，最后通过 `exec` 替换 Shell 进程。
 
 如果容器内无法访问宿主机服务，需要把 `db.host`、`redis.host` 等配置改成容器网络可解析的地址。
 
@@ -400,7 +403,8 @@ docker run --rm -p 8000:8000 \
 
 `compose.yaml` 使用 Docker journald 驱动，要求目标 Linux 主机运行 systemd-journald 并启用持久化。
 应用在 `configs/app.prod.toml` 中关闭文件输出、开启 JSON 控制台日志；不再部署 logrotate sidecar 或挂载应用日志目录。
-API 支持 `API_WORKERS` 配置，默认 1；多 worker 数量结合 CPU、内存、下游连接预算和压测结果调整。
+API 支持 `API_WORKERS` 配置，默认 1；Compose 将其展开为启动脚本的 `--workers` 参数，不注入应用环境。
+多 worker 数量结合 CPU、内存、下游连接预算和压测结果调整。
 
 日志标签为 `<COMPOSE_PROJECT_NAME>-<APP_ENV>-api`，默认 `agent-backend-prod-api`。项目名跨发布保持不变，
 容器 ID 或镜像更新不改变标签。宿主机 journal 独立保留历史，可按需导出 `.log`，不提供跨主机备份或零丢失保证。

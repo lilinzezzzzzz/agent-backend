@@ -6,6 +6,7 @@ from collections.abc import AsyncGenerator, Callable, Generator
 from contextvars import ContextVar
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock
 from uuid import UUID
 
@@ -192,17 +193,17 @@ def _build_app(
     return app
 
 
-def _read_json_records(base_log_dir: Path) -> list[dict[str, object]]:
+def _read_json_records(base_log_dir: Path) -> list[dict[str, Any]]:
     files = list(base_log_dir.glob("*.log"))
     assert len(files) == 1
     return [
-        json.loads(line)
+        json.loads(line)["record"]
         for line in files[0].read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
 
 
-def _find_record(records: list[dict[str, object]], message: str) -> dict[str, object]:
+def _find_record(records: list[dict[str, Any]], message: str) -> dict[str, Any]:
     for record in records:
         if record.get("message") == message:
             return record
@@ -210,9 +211,9 @@ def _find_record(records: list[dict[str, object]], message: str) -> dict[str, ob
 
 
 def _find_record_prefix(
-    records: list[dict[str, object]],
+    records: list[dict[str, Any]],
     prefix: str,
-) -> dict[str, object]:
+) -> dict[str, Any]:
     for record in records:
         message = record.get("message")
         if isinstance(message, str) and message.startswith(prefix):
@@ -394,10 +395,10 @@ async def test_request_and_route_auth_create_expected_spans(
     handler_record = _find_record(records, handler_message)
     access_record = _find_record_prefix(records, "access log,")
     response_record = _find_record_prefix(records, "response log,")
-    assert handler_record["trace_id"] == expected_trace_id
-    assert "span_id" not in handler_record
-    assert "span_id" not in access_record
-    assert "span_id" not in response_record
+    assert handler_record["extra"]["trace_id"] == expected_trace_id
+    assert "span_id" not in handler_record["extra"]
+    assert "span_id" not in access_record["extra"]
+    assert "span_id" not in response_record["extra"]
 
 
 @pytest.mark.asyncio
@@ -426,8 +427,8 @@ async def test_missing_token_marks_native_dependency_and_request_spans_as_error(
     loguru_logger.complete()
     records = _read_json_records(configured_logger)
     exception_record = _find_record_prefix(records, "Business exception,")
-    assert exception_record["trace_id"] == _MISSING_TOKEN_TRACE_ID
-    assert "span_id" not in exception_record
+    assert exception_record["extra"]["trace_id"] == _MISSING_TOKEN_TRACE_ID
+    assert "span_id" not in exception_record["extra"]
 
 
 @pytest.mark.asyncio
@@ -559,7 +560,9 @@ async def test_traceparent_preserves_remote_sampling_and_trace_state(
 
     loguru_logger.complete()
     records = _read_json_records(configured_logger)
-    assert _find_record(records, "handler.public")["trace_id"] == remote_trace_id
+    assert (
+        _find_record(records, "handler.public")["extra"]["trace_id"] == remote_trace_id
+    )
     with pytest.raises(LookupError):
         patched_request_context.get_trace_id()
     assert trace.get_current_span().get_span_context().is_valid is False
@@ -641,7 +644,10 @@ async def test_request_correlation_works_without_telemetry(
     assert tracing_runtime.get_finished_spans() == ()
     loguru_logger.complete()
     records = _read_json_records(configured_logger)
-    assert _find_record(records, "handler.secure")["trace_id"] == returned_trace_id
+    assert (
+        _find_record(records, "handler.secure")["extra"]["trace_id"]
+        == returned_trace_id
+    )
 
 
 @pytest.mark.asyncio
@@ -736,7 +742,10 @@ async def test_background_tasks_keep_the_request_trace_after_response(
     assert root.end_time <= background.end_time
     loguru_logger.complete()
     records = _read_json_records(configured_logger)
-    assert _find_record(records, "handler.background")["trace_id"] == _PUBLIC_TRACE_ID
+    assert (
+        _find_record(records, "handler.background")["extra"]["trace_id"]
+        == _PUBLIC_TRACE_ID
+    )
 
 
 @pytest.mark.asyncio

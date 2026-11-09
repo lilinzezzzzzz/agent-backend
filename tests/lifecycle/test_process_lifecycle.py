@@ -58,8 +58,12 @@ def lifecycle_events(monkeypatch: pytest.MonkeyPatch) -> list[str]:
         await anyio.sleep(0)
         events.append("logger.complete")
 
+    monkeypatch.setattr(
+        app_module,
+        "complete_api_logging",
+        AsyncMock(side_effect=complete),
+    )
     logger = MagicMock()
-    logger.complete = AsyncMock(side_effect=complete)
     monkeypatch.setattr(app_module, "logger", logger)
     return events
 
@@ -300,7 +304,7 @@ async def test_fastapi_finishes_resource_close_before_propagating_task_cancel(
         lifecycle_events.append(close_name)
 
     if close_name == "logger.complete":
-        monkeypatch.setattr(app_module.logger, "complete", close_resource)
+        monkeypatch.setattr(app_module, "complete_api_logging", close_resource)
     else:
         monkeypatch.setattr(app_module, close_name, close_resource)
 

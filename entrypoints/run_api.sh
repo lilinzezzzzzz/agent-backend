@@ -9,5 +9,6 @@ exec python -m uvicorn entrypoints.api:app \
   --port 8000 \
   --loop uvloop \
   --http httptools \
+  --log-config entrypoints/uvicorn_logging.json \
   --access-log \
   "$@"

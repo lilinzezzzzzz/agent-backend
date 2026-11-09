@@ -25,6 +25,7 @@ from pkg.logger.handler import (
     LoggerHandler,
     TimezoneType,
 )
+from pkg.logger.intercept import InterceptHandler
 from pkg.lazy_proxy import lazy_proxy
 
 if TYPE_CHECKING:
@@ -99,6 +100,7 @@ logger = lazy_proxy(_get_logger)
 __all__ = [
     # 类
     "LoggerHandler",
+    "InterceptHandler",
     # 枚举
     "LogFormat",
     # 类型别名

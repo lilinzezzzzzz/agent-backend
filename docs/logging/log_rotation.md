@@ -69,27 +69,70 @@ text 格式用于本地阅读，字段顺序为：
 time | level | location | trace_id | message
 ```
 
-JSON Lines 格式用于平台采集，每条日志是一个独立 JSON 对象且实际落盘只占一行。
-下面为便于阅读而格式化展示：
+JSON 模式使用 Loguru 的 `serialize=True`，每条日志是一个独立 JSON 对象，实际落盘只占一行。
+顶层为 `text` 和 `record`；`text` 保留消息和格式化的异常栈，结构化字段由 Loguru 原生序列化。
+下面为便于阅读而格式化展示的部分字段：
 
 ```json
 {
-  "timestamp": "2026-07-24T11:32:10.123Z",
-  "severity_text": "INFO",
-  "trace_id": "019f9223fc8a72fca871cca296801911",
-  "message": "request completed",
-  "code": {
-    "namespace": "internal.middlewares.recorder",
+  "text": "request completed\n",
+  "record": {
+    "message": "request completed",
+    "level": {"icon": "ℹ️", "name": "INFO", "no": 20},
+    "name": "internal.middlewares.recorder",
     "function": "__call__",
-    "lineno": 194
+    "line": 194,
+    "extra": {
+      "trace_id": "019f9223fc8a72fca871cca296801911",
+      "json_content": null
+    },
+    "exception": null
   }
 }
 ```
 
-- `code` 拆分保留 namespace、function 和 lineno，便于日志平台按字段查询。
-- 调用方附加的上下文放入 `attributes`；`json_content` 保留原有结构。
-- 异常日志的 `exception` 包含 type、message 和 stacktrace。
-- 普通日志只使用 `trace_id` 关联 Trace，不输出 `span_id`。
+- `record.time.repr` 使用目标时区，`record.time.timestamp` 是同一时刻的 Unix 时间戳。
+- `record.extra.trace_id` 用于关联 Trace；没有请求上下文时为 `-`。普通日志不自动注入 `span_id`。
+- 调用方绑定的上下文保存在 `record.extra`，`json_content` 的字典、数组等结构由 Loguru 序列化。
+- 异常信息位于 `record.exception`，字段为 `type`、`value` 和布尔型 `traceback`；完整异常栈位于 `text`。
+  `diagnose=False` 继续生效，异常诊断不展开局部变量值。
+- 原生记录还包含文件、进程、线程等元数据，不再维护项目自定义的 JSON 字段集合。
+
+此前使用顶层 `timestamp`、`severity_text`、`trace_id`、`code`、`attributes` 或
+`exception.stacktrace` 的采集和查询规则需要迁移：
+
+| 原字段 | 当前字段 |
+| --- | --- |
+| `message` | `record.message` |
+| `timestamp` | `record.time.repr` / `record.time.timestamp` |
+| `severity_text` | `record.level.name` |
+| `trace_id` | `record.extra.trace_id` |
+| `code.namespace` / `code.function` / `code.lineno` | `record.name` / `record.function` / `record.line` |
+| `attributes.*` / `json_content` | `record.extra.*` / `record.extra.json_content` |
+| `exception.type` / `exception.message` | `record.exception.type` / `record.exception.value` |
+| `exception.stacktrace` | `text` 中的格式化异常栈 |
+
+### Uvicorn 日志接入
+
+`entrypoints/run_api.sh` 默认传入 `--log-config entrypoints/uvicorn_logging.json`。
+从仓库根目录直接使用 Uvicorn CLI 时也应传入该参数，才能统一启动早期和 reload / 多 Worker
+父进程的日志。省略该参数时，Uvicorn 继续使用自身的默认日志配置。
+
+该配置只将 `uvicorn`、`uvicorn.error` 和 `uvicorn.access` 接入通用 `InterceptHandler`，
+保留原始级别、异常和调用位置，原 logger 名称保存在 JSON 的 `record.extra.logger_name` 中。
+Loguru 的格式、时区、stderr 与 `app.log` 输出仍由 `LoggerHandler` 集中管理。
+转发日志先经过标准 logging 的源级别过滤，再受 Loguru sink 的 `level` 阈值限制（默认 `INFO`）。
+`--log-level debug` / `trace` 不会降低 sink 阈值，因此较低级别的日志仍会被丢弃；应用直接写入
+Loguru 的日志同样遵守 sink 阈值。
+
+Uvicorn 在加载 ASGI 应用之前，按同一组 `log.*` 配置建立同步输出；API lifespan 再通过
+`init_logger()` 切换到现有队列输出，资源清理完毕后刷出队列并恢复同步输出，保证 lifespan 结束后的
+Uvicorn 停止日志在退出信号到来前写出。没有 lifespan 的 reload / 多 Worker 父进程保持同步输出。
+配置加载期间的诊断仍使用原有启动 stderr logger；配置无法加载时不能建立正式输出目标。
+
+access log 默认保留，`--no-access-log` 仍可关闭它。现有请求中间件日志包含 trace ID 和耗时，
+Uvicorn access log 补充响应状态码，两者会对同一请求分别记录。仅在存在请求上下文时注入
+trace ID；进程启动和停止日志的 `record.extra.trace_id` 为 `-`。
 
 ## 本地开发
 

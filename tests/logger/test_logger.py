@@ -1,5 +1,6 @@
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
@@ -47,8 +48,7 @@ def find_json_log(file_path, target_message: str) -> dict[str, Any] | None:
             continue
         try:
             data = json.loads(line)
-            # 5. 结构调整：新格式没有外层的 "record" 包装，直接是扁平字典
-            if data.get("message") == target_message:
+            if data["record"].get("message") == target_message:
                 return data
         except json.JSONDecodeError:
             continue
@@ -211,45 +211,62 @@ def test_text_formatter_keeps_braces_in_dynamic_values():
     assert record["extra"]["_formatted_trace_id"] == "trace-{raw}"
 
 
-def test_json_formatter_excludes_span_id():
-    handler = LoggerHandler()
-    record = {
-        "time": datetime(2026, 4, 20, 2, 51, 41, 837000, tzinfo=UTC),
-        "level": type("Level", (), {"name": "INFO"})(),
-        "name": "pkg.logger.handler",
-        "function": "setup",
-        "line": 1,
-        "message": "initialized",
-        "extra": {
-            "trace_id": "019da8cd058b76ed8a4a52141c1c6b38",
-            "span_id": "00f067aa0ba902b7",
-            "request_id": "request-123",
-            "json_content": None,
-        },
+@pytest.mark.parametrize(
+    "timezone_name,offset_hours",
+    [("UTC", 0), ("Asia/Shanghai", 8)],
+)
+@pytest.mark.parametrize("enqueue", [False, True])
+def test_json_logging_uses_loguru_serialization(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    timezone_name: str,
+    offset_hours: int,
+    enqueue: bool,
+) -> None:
+    logger = LoggerHandler(
+        base_log_dir=tmp_path,
+        log_format=LogFormat.JSON,
+        timezone=timezone_name,
+        enqueue=enqueue,
+    ).setup(write_to_file=True, write_to_console=True)
+    trace_id = "019da8cd058b76ed8a4a52141c1c6b38"
+    payload = {"value": "{raw}\nsecond line"}
+    with patch("pkg.logger.handler.context.get_trace_id", return_value=trace_id):
+        logger.bind(
+            request_id="request-123",
+            json_content=payload,
+        ).info("message-{raw}")
+    logger.complete()
+
+    file_lines = (tmp_path / "app.log").read_text().splitlines()
+    console_lines = capsys.readouterr().err.splitlines()
+    assert len(file_lines) == len(console_lines) == 2
+    serialized = json.loads(file_lines[-1])
+    assert serialized == json.loads(console_lines[-1])
+    assert set(serialized) == {"text", "record"}
+    assert serialized["text"] == "message-{raw}\n"
+    record = serialized["record"]
+    assert record["message"] == "message-{raw}"
+    assert record["level"]["name"] == "INFO"
+    assert record["name"] == __name__
+    assert record["function"] == "test_json_logging_uses_loguru_serialization"
+    assert isinstance(record["line"], int)
+    assert record["extra"] == {
+        "trace_id": trace_id,
+        "request_id": "request-123",
+        "json_content": payload,
     }
-
-    formatted = handler._json_formatter(record)
-    serialized = json.loads(record["extra"]["_json_out"])
-
-    assert formatted == "{extra[_json_out]}\n"
-    assert serialized["trace_id"] == "019da8cd058b76ed8a4a52141c1c6b38"
-    assert serialized["timestamp"] == "2026-04-20T02:51:41.837Z"
-    assert serialized["severity_text"] == "INFO"
-    assert serialized["message"] == "initialized"
-    assert serialized["code"] == {
-        "namespace": "pkg.logger.handler",
-        "function": "setup",
-        "lineno": 1,
-    }
-    assert serialized["attributes"] == {"request_id": "request-123"}
-    assert "time" not in serialized
-    assert "level" not in serialized
-    assert "location" not in serialized
-    assert "text" not in serialized
-    assert "span_id" not in serialized
+    assert record["exception"] is None
+    timestamp = datetime.fromisoformat(record["time"]["repr"])
+    assert timestamp.utcoffset() == timedelta(hours=offset_hours)
+    assert timestamp.timestamp() == pytest.approx(
+        record["time"]["timestamp"],
+        rel=0,
+        abs=0.000001,
+    )
 
 
-def test_json_logging_keeps_exception_in_single_json_line(tmp_path):
+def test_json_logging_keeps_exception_in_single_json_line(tmp_path: Path) -> None:
     base_log_dir = tmp_path / "logs"
     manager = LoggerHandler(
         base_log_dir=base_log_dir,
@@ -266,13 +283,17 @@ def test_json_logging_keeps_exception_in_single_json_line(tmp_path):
     lines = (base_log_dir / "app.log").read_text(encoding="utf-8").splitlines()
     records = [json.loads(line) for line in lines]
     exception_record = next(
-        record for record in records if record["message"] == "operation failed"
+        entry for entry in records if entry["record"]["message"] == "operation failed"
     )
 
     assert all(line.strip() for line in lines)
-    assert exception_record["exception"]["type"] == "ValueError"
-    assert exception_record["exception"]["message"] == "invalid value"
-    assert "ValueError: invalid value" in exception_record["exception"]["stacktrace"]
+    assert exception_record["record"]["exception"] == {
+        "type": "ValueError",
+        "value": "invalid value",
+        "traceback": True,
+    }
+    assert "Traceback (most recent call last)" in exception_record["text"]
+    assert "ValueError: invalid value" in exception_record["text"]
 
 
 def test_text_logging_keeps_exception_traceback(tmp_path):

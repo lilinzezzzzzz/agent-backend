@@ -69,11 +69,11 @@ def _configure_json_logger(tmp_path: Path) -> Path:
     return base_log_dir
 
 
-def _read_records(base_log_dir: Path) -> list[dict]:
+def _read_records(base_log_dir: Path) -> list[dict[str, Any]]:
     files = list(base_log_dir.glob("*.log"))
     assert len(files) == 1
     return [
-        json.loads(line)
+        json.loads(line)["record"]
         for line in files[0].read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
@@ -195,10 +195,10 @@ async def test_json_logs_use_request_context_trace_id_without_span_id(
 
     records = {record["message"]: record for record in _read_records(base_log_dir)}
     assert span_trace_id == _TRACE_ID
-    assert records["inside"]["trace_id"] == _LOG_TRACE_ID
-    assert "span_id" not in records["inside"]
-    assert records["outside"]["trace_id"] == _LOG_TRACE_ID
-    assert "span_id" not in records["outside"]
+    assert records["inside"]["extra"]["trace_id"] == _LOG_TRACE_ID
+    assert "span_id" not in records["inside"]["extra"]
+    assert records["outside"]["extra"]["trace_id"] == _LOG_TRACE_ID
+    assert "span_id" not in records["outside"]["extra"]
     assert "span.start" not in records
     assert "span.end" not in records
 

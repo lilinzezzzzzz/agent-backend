@@ -115,6 +115,8 @@ EMBEDDING_API_KEY=
 - 设置 `db.read_replica.host` 后会初始化只读副本；未设置时读会话自动 fallback 到主库。
 - `config_echo.reveal_secrets=true` 会在启动配置回显中显示敏感值，只应临时用于本地诊断。
 - Logger 只负责控制台输出和向 `log.base_dir/app.log` 追加日志，不在应用内执行轮转、保留或压缩。
+- `log.format="json"` 使用 Loguru 原生 `serialize=True`，输出 `text` / `record` 结构；trace ID 位于
+  `record.extra.trace_id`，字段说明和旧格式迁移见[日志格式](docs/logging/log_rotation.md#日志格式)。
 - Logger 默认只输出到控制台；各环境的日志输出目标统一在 `configs/app.{APP_ENV}.toml` 中显式配置。各部署
   形态的 `log.write_to_file` / `log.write_to_console` 取值见
   [`docs/logging/log_rotation.md`](docs/logging/log_rotation.md#输出目标的选择原则)。
@@ -147,14 +149,19 @@ Alembic 创建当前全部业务表并通过 `alembic_version` 记录版本。�
 开发模式：
 
 ```bash
-uv run uvicorn entrypoints.api:app --reload --host 0.0.0.0 --port 8000
+uv run uvicorn entrypoints.api:app --reload --host 0.0.0.0 --port 8000 \
+  --log-config entrypoints/uvicorn_logging.json
 ```
 
 非热重载模式：
 
 ```bash
-uv run uvicorn entrypoints.api:app --host 0.0.0.0 --port 8000
+uv run uvicorn entrypoints.api:app --host 0.0.0.0 --port 8000 \
+  --log-config entrypoints/uvicorn_logging.json
 ```
+
+`--log-config` 让 Uvicorn 的启动、停止、异常和 access log 复用应用的 Loguru 输出配置，
+包括 reload 父进程；详见[日志部署文档](docs/logging/log_rotation.md#uvicorn-日志接入)。
 
 当 `DEBUG=true` 时，FastAPI 文档可访问：
 
@@ -395,6 +402,7 @@ docker run --rm -p 8000:8000 \
 
 镜像不声明默认启动命令，`docker run` 和 Compose 均显式调用 `entrypoints/run_api.sh`。脚本使用镜像已有的
 Python 环境启动 Uvicorn，默认监听 `0.0.0.0:8000`，使用 `uvloop` 和 `httptools` 并开启 access log。
+脚本通过 `entrypoints/uvicorn_logging.json` 将 Uvicorn 日志转发到应用的 Loguru 输出目标。
 额外命令行参数原样透传给 Uvicorn，最后通过 `exec` 替换 Shell 进程。
 
 如果容器内无法访问宿主机服务，需要把 `db.host`、`redis.host` 等配置改成容器网络可解析的地址。

@@ -1,5 +1,4 @@
 import sys
-import traceback
 from datetime import timezone as dt_timezone
 from enum import StrEnum
 from pathlib import Path
@@ -38,7 +37,7 @@ class LoggerHandler:
         timezone: TimezoneType = "UTC",
         enqueue: bool = True,
         log_format: LogFormat = LogFormat.TEXT,
-    ):
+    ) -> None:
         """
         构造函数：接收所有配置参数并存储为实例属性。
 
@@ -58,12 +57,10 @@ class LoggerHandler:
         self.log_format = log_format
 
         # --- 根据 log_format 确定格式化器 ---
-        is_json = self.log_format == LogFormat.JSON
-        self.console_format = (
-            self._json_formatter if is_json else self._console_formatter
-        )
-        self.file_format = self._json_formatter if is_json else self._text_formatter
-        self.colorize = not is_json
+        self.serialize = self.log_format == LogFormat.JSON
+        self.console_format = "{message}" if self.serialize else self._console_formatter
+        self.file_format = "{message}" if self.serialize else self._text_formatter
+        self.colorize = not self.serialize
 
         # --- 时区处理 ---
         self.timezone = self._normalize_timezone(timezone)
@@ -139,6 +136,7 @@ class LoggerHandler:
                 sink=sys.stderr,
                 level=self.level,
                 enqueue=self.enqueue,
+                serialize=self.serialize,
                 colorize=self.colorize,
                 diagnose=False,
                 format=self.console_format,
@@ -157,6 +155,7 @@ class LoggerHandler:
                 sink=sink_path,
                 level=self.level,
                 enqueue=self.enqueue,
+                serialize=self.serialize,
                 diagnose=False,
                 format=self.file_format,
             )
@@ -175,7 +174,7 @@ class LoggerHandler:
         """
         格式化日志记录的时间戳。
 
-        注意：_make_timezone_patcher 已经将 record["time"] 转换为目标时区。
+        注意：_make_record_patcher 已经将 record["time"] 转换为目标时区。
         此方法直接格式化时间，统一使用 ISO 8601 格式。
 
         Args:
@@ -196,7 +195,7 @@ class LoggerHandler:
     # --- 格式化器 ---
 
     def _console_formatter(self, record: Any) -> str:
-        """控制台格式化器，仅输出纯文本，不包含 json_content"""
+        """控制台文本格式化器，按需追加 json_content。"""
         self._populate_text_format_extra(record)
 
         fmt = (
@@ -239,51 +238,6 @@ class LoggerHandler:
 
         return fmt + "\n{exception}"
 
-    def _json_formatter(self, record: Any) -> str:
-        """JSON Lines 格式化器 (log_format='json' 时使用)"""
-        formatted_time = self._format_record_time(record)
-
-        extra_data = record["extra"].copy()
-        json_content = extra_data.pop("json_content", None)
-        extra_data.pop("_console_json", None)
-        extra_data.pop("_json_out", None)
-        extra_data.pop("_text_json", None)
-        extra_data.pop("_formatted_time", None)
-        extra_data.pop("_formatted_trace_id", None)
-
-        trace_id = extra_data.pop("trace_id", "-") or "-"
-        # Span ID 属于 Trace 内部身份，普通日志只保留 trace_id 用于关联查询。
-        extra_data.pop("span_id", None)
-
-        if not isinstance(json_content, (dict, list, str, type(None))):
-            raise TypeError(
-                f"json_content must be types or None. Got {type(json_content)}"
-            )
-
-        log_record: dict[str, Any] = {
-            "timestamp": formatted_time,
-            "severity_text": record["level"].name,
-            "trace_id": trace_id,
-            "message": record["message"],
-            "code": {
-                "namespace": record["name"],
-                "function": record["function"],
-                "lineno": record["line"],
-            },
-        }
-
-        if extra_data:
-            log_record["attributes"] = extra_data
-        if json_content is not None:
-            log_record["json_content"] = json_content
-        exception = self._serialize_exception(record)
-        if exception is not None:
-            log_record["exception"] = exception
-
-        serialized = orjson_dumps(log_record, default=str)
-        record["extra"]["_json_out"] = serialized
-        return "{extra[_json_out]}\n"
-
     # --- 辅助方法 ---
     def _make_record_patcher(self):
         """
@@ -308,27 +262,6 @@ class LoggerHandler:
     def _ensure_dir(path: Path):
         """确保目录存在，如果父目录不存在则自动创建"""
         path.mkdir(parents=True, exist_ok=True)
-
-    @staticmethod
-    def _serialize_exception(record: Any) -> dict[str, str] | None:
-        """将 Loguru exception 转换为单行 JSON 可序列化字段。"""
-
-        exception = record.get("exception")
-        if exception is None:
-            return None
-
-        exception_type = exception.type
-        return {
-            "type": exception_type.__name__,
-            "message": str(exception.value),
-            "stacktrace": "".join(
-                traceback.format_exception(
-                    exception_type,
-                    exception.value,
-                    exception.traceback,
-                )
-            ).rstrip(),
-        }
 
     def _populate_text_format_extra(self, record: Any) -> None:
         record["extra"]["_formatted_time"] = self._format_record_time(record)

@@ -9,6 +9,7 @@ from fastapi.exceptions import RequestValidationError
 from internal.config import init_settings, settings
 from internal.core import AppException
 from internal.infra.database import close_async_db, init_async_db
+from internal.infra.logging import complete_api_logging
 from internal.infra.redis import close_async_redis, init_async_redis
 from internal.utils.background_tasks import (
     close_background_task_manager,
@@ -110,7 +111,7 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
         write_to_console=settings.log.write_to_console,
     )
     cleanup = AsyncExitStack()
-    cleanup.push_async_callback(logger.complete)
+    cleanup.push_async_callback(complete_api_logging)
     try:
         init_tracing(
             enabled=settings.otel.tracing_enabled,

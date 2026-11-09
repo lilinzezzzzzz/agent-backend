@@ -117,6 +117,8 @@ EMBEDDING_API_KEY=
 - Logger 只负责控制台输出和向 `log.base_dir/app.log` 追加日志，不在应用内执行轮转、保留或压缩。
 - `log.format="json"` 使用 Loguru 原生 `serialize=True`，输出 `text` / `record` 结构；trace ID 位于
   `record.extra.trace_id`，字段说明和旧格式迁移见[日志格式](docs/logging/log_rotation.md#日志格式)。
+- 业务日志上下文通过 `logger.bind(...)` 添加到 `record.extra`；TEXT 模式只展示固定字段和消息，
+  不自动追加业务上下文。
 - Logger 默认只输出到控制台；各环境的日志输出目标统一在 `configs/app.{APP_ENV}.toml` 中显式配置。各部署
   形态的 `log.write_to_file` / `log.write_to_console` 取值见
   [`docs/logging/log_rotation.md`](docs/logging/log_rotation.md#输出目标的选择原则)。

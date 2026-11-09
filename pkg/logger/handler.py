@@ -8,7 +8,6 @@ from zoneinfo import ZoneInfo
 import loguru
 
 from pkg import request_context as context
-from pkg.toolkit.json import orjson_dumps
 from pkg.toolkit.timer import format_iso_datetime
 
 _ACTIVE_LOG_FILE_NAME = "app.log"
@@ -118,19 +117,13 @@ class LoggerHandler:
         """
         self._logger.remove()
 
-        # 1. 准备基础配置
-        config_params: dict[str, Any] = {
-            "extra": {
-                "json_content": None,
-            },
-        }
+        # 根据时区配置挂载 patcher，统一日志内容中的时间与关联字段。
+        self._logger.configure(
+            extra={},
+            patcher=self._make_record_patcher(),
+        )
 
-        # 2. 根据时区配置挂载 patcher，统一日志内容中的时间与关联字段
-        config_params["patcher"] = self._make_record_patcher()
-
-        self._logger.configure(**config_params)
-
-        # 3. Console 输出
+        # Console 输出
         if write_to_console:
             self._logger.add(
                 sink=sys.stderr,
@@ -142,7 +135,7 @@ class LoggerHandler:
                 format=self.console_format,
             )
 
-        # 4. File 输出 (System Log)
+        # File 输出 (System Log)
         if write_to_file:
             log_dir = self._get_log_dir()
             self._ensure_dir(log_dir)
@@ -195,24 +188,16 @@ class LoggerHandler:
     # --- 格式化器 ---
 
     def _console_formatter(self, record: Any) -> str:
-        """控制台文本格式化器，按需追加 json_content。"""
+        """控制台文本格式化器。"""
         self._populate_text_format_extra(record)
 
-        fmt = (
+        return (
             "<green>{extra[_formatted_time]}</green> | "
             "<level>{level: <8}</level> | "
             "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> | "
             "<magenta>{extra[_formatted_trace_id]}</magenta> | "
-            "<level>{message}</level>"
+            "<level>{message}</level>\n{exception}"
         )
-
-        # 检查 json_content 是否存在且不为 None
-        json_content = record["extra"].get("json_content")
-        if json_content is not None:
-            serialized = orjson_dumps(json_content, default=str)
-            record["extra"]["_console_json"] = serialized
-            fmt += " | <cyan>{extra[_console_json]}</cyan>"
-        return fmt + "\n{exception}"
 
     def _text_formatter(self, record: Any) -> str:
         """
@@ -220,23 +205,13 @@ class LoggerHandler:
         """
         self._populate_text_format_extra(record)
 
-        fmt = (
+        return (
             "{extra[_formatted_time]} | "
             "{level: <8} | "
             "{name}:{function}:{line} | "
             "{extra[_formatted_trace_id]} | "
-            "{message}"
+            "{message}\n{exception}"
         )
-
-        # 检查并追加 json_content
-        json_content = record["extra"].get("json_content")
-        if json_content is not None:
-            # 序列化为 JSON 字符串并存入 extra，避免直接输出 dict
-            serialized = orjson_dumps(json_content, default=str)
-            record["extra"]["_text_json"] = serialized
-            fmt += " | {extra[_text_json]}"
-
-        return fmt + "\n{exception}"
 
     # --- 辅助方法 ---
     def _make_record_patcher(self):

@@ -69,6 +69,9 @@ text 格式用于本地阅读，字段顺序为：
 time | level | location | trace_id | message
 ```
 
+业务上下文统一通过 `logger.bind(task_id="task-123", elapsed_ms=23)` 等方式绑定。
+TEXT 模式只展示上述字段及异常栈；需要在文本中显示的业务标识应写入消息模板，不自动追加 `extra` 数据。
+
 JSON 模式使用 Loguru 的 `serialize=True`，每条日志是一个独立 JSON 对象，实际落盘只占一行。
 顶层为 `text` 和 `record`；`text` 保留消息和格式化的异常栈，结构化字段由 Loguru 原生序列化。
 下面为便于阅读而格式化展示的部分字段：
@@ -83,8 +86,7 @@ JSON 模式使用 Loguru 的 `serialize=True`，每条日志是一个独立 JSON
     "function": "__call__",
     "line": 194,
     "extra": {
-      "trace_id": "019f9223fc8a72fca871cca296801911",
-      "json_content": null
+      "trace_id": "019f9223fc8a72fca871cca296801911"
     },
     "exception": null
   }
@@ -93,7 +95,9 @@ JSON 模式使用 Loguru 的 `serialize=True`，每条日志是一个独立 JSON
 
 - `record.time.repr` 使用目标时区，`record.time.timestamp` 是同一时刻的 Unix 时间戳。
 - `record.extra.trace_id` 用于关联 Trace；没有请求上下文时为 `-`。普通日志不自动注入 `span_id`。
-- 调用方绑定的上下文保存在 `record.extra`，`json_content` 的字典、数组等结构由 Loguru 序列化。
+- 调用方绑定的上下文保存在 `record.extra`，字典、数组等结构由 Loguru 原生序列化；
+  例如 `logger.bind(task_id="task-123", details={"elapsed_ms": 23}).info("task completed")`。
+- 日志不再预置 `json_content` 字段，也不对这个名称执行特殊处理。
 - 异常信息位于 `record.exception`，字段为 `type`、`value` 和布尔型 `traceback`；完整异常栈位于 `text`。
   `diagnose=False` 继续生效，异常诊断不展开局部变量值。
 - 原生记录还包含文件、进程、线程等元数据，不再维护项目自定义的 JSON 字段集合。
@@ -108,7 +112,8 @@ JSON 模式使用 Loguru 的 `serialize=True`，每条日志是一个独立 JSON
 | `severity_text` | `record.level.name` |
 | `trace_id` | `record.extra.trace_id` |
 | `code.namespace` / `code.function` / `code.lineno` | `record.name` / `record.function` / `record.line` |
-| `attributes.*` / `json_content` | `record.extra.*` / `record.extra.json_content` |
+| `attributes.*` | `record.extra.*` |
+| `json_content` | 已移除专用约定，通过 `bind(...)` 添加业务字段 |
 | `exception.type` / `exception.message` | `record.exception.type` / `record.exception.value` |
 | `exception.stacktrace` | `text` 中的格式化异常栈 |
 

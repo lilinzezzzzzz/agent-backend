@@ -163,7 +163,7 @@ def test_text_formatter_shows_trace_id_without_span_id():
         "extra": {
             "trace_id": "019da8cd058b76ed8a4a52141c1c6b38",
             "span_id": "00f067aa0ba902b7",
-            "json_content": {
+            "details": {
                 "elapsed_ms": 0.554,
                 "error_type": "AppException",
             },
@@ -177,7 +177,7 @@ def test_text_formatter_shows_trace_id_without_span_id():
         "{level: <8} | "
         "{name}:{function}:{line} | "
         "{extra[_formatted_trace_id]} | "
-        "{message} | {extra[_text_json]}\n{exception}"
+        "{message}\n{exception}"
     )
     assert record["extra"]["_formatted_time"] == "2026-04-20T02:51:41.837Z"
     assert record["extra"]["_formatted_trace_id"] == "019da8cd058b76ed8a4a52141c1c6b38"
@@ -195,7 +195,6 @@ def test_text_formatter_keeps_braces_in_dynamic_values():
         "message": "message-{raw}",
         "extra": {
             "trace_id": "trace-{raw}",
-            "json_content": None,
         },
     }
 
@@ -209,6 +208,38 @@ def test_text_formatter_keeps_braces_in_dynamic_values():
         "{message}\n{exception}"
     )
     assert record["extra"]["_formatted_trace_id"] == "trace-{raw}"
+
+
+@pytest.mark.parametrize("enqueue", [False, True])
+def test_text_logs_do_not_append_bound_context(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    enqueue: bool,
+) -> None:
+    logger = LoggerHandler(
+        base_log_dir=tmp_path,
+        timezone="Asia/Shanghai",
+        enqueue=enqueue,
+    ).setup(write_to_file=True, write_to_console=True)
+    trace_id = "019da8cd058b76ed8a4a52141c1c6b38"
+    with patch("pkg.logger.handler.context.get_trace_id", return_value=trace_id):
+        logger.bind(
+            task_id="context-task-123",
+            details={"state": "context-detail"},
+            json_content={"legacy": "context-legacy"},
+        ).info("task completed")
+    logger.complete()
+
+    file_content = (tmp_path / "app.log").read_text()
+    console_content = capsys.readouterr().err
+    assert file_content.splitlines()[-1].endswith(f"{trace_id} | task completed")
+    for content in (file_content, console_content):
+        assert "task completed" in content
+        assert trace_id in content
+        assert "+08:00" in content
+        assert "context-task-123" not in content
+        assert "context-detail" not in content
+        assert "context-legacy" not in content
 
 
 @pytest.mark.parametrize(
@@ -234,7 +265,7 @@ def test_json_logging_uses_loguru_serialization(
     with patch("pkg.logger.handler.context.get_trace_id", return_value=trace_id):
         logger.bind(
             request_id="request-123",
-            json_content=payload,
+            details=payload,
         ).info("message-{raw}")
     logger.complete()
 
@@ -254,7 +285,7 @@ def test_json_logging_uses_loguru_serialization(
     assert record["extra"] == {
         "trace_id": trace_id,
         "request_id": "request-123",
-        "json_content": payload,
+        "details": payload,
     }
     assert record["exception"] is None
     timestamp = datetime.fromisoformat(record["time"]["repr"])

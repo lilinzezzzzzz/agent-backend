@@ -289,6 +289,49 @@ revision 不需要手工更新测试中的版本号。
 CI 可复用上述一次性容器测试；本次不新增 CI 平台配置。面向具体变更，还需在与目标环境匹配的
 PostgreSQL 版本上验证历史数据、锁和部署顺序。
 
+### 2026-11-12 本地集成验证记录
+
+本次在一次性 PostgreSQL 容器上实际执行了完整迁移集成文件，结果如下：
+
+| 项目 | 实测记录 |
+| --- | --- |
+| 测试日期 | 2026-11-12（Asia/Shanghai） |
+| 测试提交 | `706adad73b7a54da1650ca01a924608b1df99351` |
+| 测试文件 | [`tests/orm/test_migrations_integration.py`](../../tests/orm/test_migrations_integration.py) |
+| 环境 | 本地 macOS，Docker Engine `29.9.3`，本地 `postgres:17` 镜像 |
+| PostgreSQL 镜像版本 | `PG_VERSION=17.11-1.pgdg13+2`（镜像元数据） |
+| 结果 | **9 passed，0 failed，0 skipped** |
+| 耗时 | **48.62 秒** |
+
+使用的本地镜像 ID 为 `sha256:3b0cda93be7c8dba2ed484d19393d93845dc3dafb88973e248ba8e6d99d784e1`。
+以下为仓库根目录的复现命令；本次执行额外指定了独立的 pytest 临时目录：
+
+```bash
+uv run --no-sync --group dev pytest \
+  tests/orm/test_migrations_integration.py \
+  --run-postgresql-migrations -q -ra -x
+```
+
+本次通过的范围：
+
+- **7 项迁移用例**：空库升级、重复升级与数据保留、ORM/DAO 读写和漂移检测、离线 SQL 建库、
+  跨版本升级/回退与数据保留、升级及回退失败时的结构/版本/数据回滚，以及 autogenerate、revision 模板和 JSONB 渲染。
+- **2 项事务锁竞争用例**：分别覆盖锁身份行首次插入尚未提交、身份行已提交后再次持锁两种场景。
+  竞争者的 TRY 获取返回 `False` 后仍能执行 `SELECT 1`，`lock_timeout` 恢复为原配置 `0`；
+  原持有者回滚释放锁后，竞争者重试获取成功。
+
+**隔离确认**：每个用例创建一个随机命名的 `agent-backend-migrations-<uuid>` 容器，共 9 个。
+容器均仅发布到 `127.0.0.1` 的随机端口；已核对 9 份临时 TOML 使用 9 个不同的 loopback 端口、
+测试专用数据库与凭据。Alembic CLI 使用临时配置根目录，直接连接和 ORM 结构比较也只使用测试容器；
+未连接任何现有数据库，未使用工作区数据库连接配置或真实数据库凭据。
+
+**清理确认**：除 fixture 的 `--rm` 和删除自身 volume 的清理流程外，还读取 Docker 事件核对了销毁结果：
+本次 **9 个测试容器和对应的 9 个匿名 volume 均已销毁**；按测试名称前缀查询无容器残留。
+本次测试没有修改代码，结束时工作区和暂存区干净；临时配置、日志与测试产物随后已清理。
+
+该记录补齐了上述提交在该 PostgreSQL 镜像上的迁移与 TRY 锁竞争验证，不包含现有数据库接管、
+生产数据回填、生产部署或其他外部服务的验收，也不代表所有 PostgreSQL 版本或 WAIT 模式阻塞竞争都已验证。
+
 官方说明：[Autogenerate 与检测限制](https://alembic.sqlalchemy.org/en/latest/autogenerate.html)、
 [异步引擎接入](https://alembic.sqlalchemy.org/en/latest/cookbook.html#using-asyncio-with-alembic)、
 [离线 SQL](https://alembic.sqlalchemy.org/en/latest/offline.html)、

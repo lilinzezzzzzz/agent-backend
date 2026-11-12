@@ -42,7 +42,7 @@ router = APIRouter(prefix="/agent", tags=["api agent"])
 _AGENT_STREAM_CHUNK_TIMEOUT_SECONDS = 70.0
 _SSE_MEDIA_TYPE = "text/event-stream"
 _SSE_HEADERS = {
-    "Cache-Control": "no-cache",
+    "Cache-Control": "no-store",
     "X-Accel-Buffering": "no",
 }
 _MANAGED_SSE_BUFFER_SIZE = 32

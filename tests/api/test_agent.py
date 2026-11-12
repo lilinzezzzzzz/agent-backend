@@ -548,6 +548,8 @@ async def test_agent_chat_stream_endpoint_routes_to_order_agent(agent_client) ->
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["x-accel-buffering"] == "no"
     events = _parse_sse_events(response.text)
 
     assert [event["event"] for event in events] == [
@@ -584,6 +586,8 @@ async def test_order_support_agent_stream_endpoint(agent_client) -> None:
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["x-accel-buffering"] == "no"
     events = _parse_sse_events(response.text)
 
     assert [event["event"] for event in events] == [
@@ -604,6 +608,9 @@ async def test_payment_support_agent_stream_endpoint(agent_client) -> None:
     )
 
     assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["x-accel-buffering"] == "no"
     events = _parse_sse_events(response.text)
 
     assert events[0]["event"] == AgentStreamEventName.RUN_STARTED.value

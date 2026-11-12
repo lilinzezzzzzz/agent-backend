@@ -59,6 +59,9 @@ class ASGIRecordMiddleware:
             if message["type"] == "http.response.start":
                 response_started = True
                 headers = MutableHeaders(scope=message)
+                headers["X-Content-Type-Options"] = "nosniff"
+                # 接口可显式声明缓存策略，其他响应默认禁止 HTTP 缓存存储。
+                headers.setdefault("Cache-Control", "no-store")
                 headers["X-Process-Time"] = str(time.perf_counter() - start_time)
                 headers["traceparent"] = traceparent
             await send(message)

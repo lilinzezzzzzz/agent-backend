@@ -287,6 +287,8 @@ async def test_resume_stream_endpoint_emits_sse_events(managed_run_client) -> No
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["x-accel-buffering"] == "no"
     body = response.text
     assert "event: run_resumed" in body
     assert "event: run_completed" in body

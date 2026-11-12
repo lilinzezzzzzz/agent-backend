@@ -54,7 +54,7 @@
 | `.env.compose.example` | 配置路径注释 |
 | `README.md` | 配置说明、加载顺序、TOML 示例 |
 | `docs/**/*.md` | 配置路径和 TOML 示例改为嵌套格式 |
-| `AGENTS.md`、`configs/AGENTS.md` | 嵌套配置模型和格式约束 |
+| `AGENTS.md` 的“配置与安全”章节 | 嵌套配置模型和格式约束（原配置目录规则已合并至根文件） |
 | `tests/config/test_config.py` | 嵌套 TOML writer、模型校验测试、配置回显测试 |
 
 ## 4. 实施步骤

@@ -8,5 +8,13 @@
 - 默认不依赖真实数据库、Redis、Celery Worker、Milvus、模型或第三方账号；需要外部服务的测试标记
   `integration`，缺少前置条件时明确跳过。
 - 不使用真实密钥、生产连接串或生产数据。
+- 保留真实 `pkg.logger`、`pkg.request_context`、`pkg.ids` 及父包引用；替身使用局部 fixture、`monkeypatch`
+  或 `dependency_overrides`，不在收集阶段覆盖 `sys.modules`，不根据 pytest 命令行选择模块实现。
+- 配置缓存独立 reset；新增缓存 factory 同步应用清理注册。测试单独运行与完整收集后的行为应一致，
+  涉及全局状态时验证受影响的测试顺序，不只验证单个文件。
+- PostgreSQL 迁移集成测试沿用 `--run-postgresql-migrations` 和一次性容器，不连接已有数据库；SQLite
+  只覆盖基础存储，不能证明行锁、fencing 或多实例竞争正确。
+- 使用真实 Redis fixture 前核对测试目标：根 fixture 收尾会执行 `flushdb()`，默认库号不是隔离证明。
+  仅对获准且可丢弃的专用实例/数据库运行；不对共享库或未核实地址运行。
 - 新增非 package 测试目录或移动测试时，确保模块名不冲突并用 `pytest --collect-only` 检查收集。
 - 优先运行能覆盖改动的最小测试；共享基础设施或公开 contract 变化再扩大范围。

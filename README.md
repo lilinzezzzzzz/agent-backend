@@ -326,7 +326,7 @@ AgentScope 2.0 的推荐接入路线是嵌入官方 Agent Service，而不是自
 
 接入 RAG、知识库检索或混合检索前，先读：
 
-- `pkg/vectors/AGENTS.md`
+- [`pkg/AGENTS.md` 的向量检索约束](pkg/AGENTS.md#向量检索)
 - `pkg/vectors/backends/milvus/README.md`
 
 ## 测试与质量检查

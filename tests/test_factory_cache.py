@@ -1,6 +1,6 @@
 from internal.dao.rag import new_rag_metadata_dao
-from internal.factory_cache import reset_factory_caches
 from internal.services.user import new_user_service
+from tests.support.factory_cache import reset_factory_caches
 
 
 def test_reset_factory_caches_rebuilds_cached_dependencies() -> None:

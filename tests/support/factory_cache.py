@@ -1,4 +1,4 @@
-"""进程级 dependency factory 缓存的统一清理入口。"""
+"""用于测试隔离的应用 dependency factory 缓存清理入口。"""
 
 from typing import Protocol
 

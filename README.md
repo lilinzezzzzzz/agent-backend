@@ -23,8 +23,8 @@ README 只记录当前仓库可直接核对的能力；更细的设计约束和�
 
 ## 当前能力
 
-- 进程入口：`entrypoints/api.py` 导出 FastAPI `app`，`entrypoints/celery_app.py` 为 Worker / Beat 导出
-  Celery `celery_app`；应用装配分别位于 `internal/app.py` 和 `internal/infra/celery/application.py`。
+- 进程入口：`entrypoints/api.py` 导出 FastAPI `app`，应用工厂位于 `internal/app.py`；Worker / Beat
+  直接引用 `internal.infra.celery.application:celery_app`，与应用内部共用同一 Celery 实例。
 - 配置加载：`APP_ENV` 只在根目录 `.env` 维护；应用据此加载 `configs/app.{APP_ENV}.toml` 和
   `.secrets`，并严格隔离非敏感配置与凭据字段。
 - 数据库：仅支持 PostgreSQL 与 SQLite。PostgreSQL 用于部署、Alembic 迁移和强并发，可配置只读副本；
@@ -178,7 +178,7 @@ uv run uvicorn entrypoints.api:app --host 0.0.0.0 --port 8000 \
 Worker：
 
 ```bash
-uv run celery -A entrypoints.celery_app:celery_app worker -l info --pool prefork
+uv run celery -A internal.infra.celery.application:celery_app worker -l info --pool prefork
 ```
 
 未指定 `-Q/--queues` 时，Worker 消费应用 `task_queues` 中的全部队列。队列列表从
@@ -205,7 +205,7 @@ uv run celery -A entrypoints.celery_app:celery_app worker -l info --pool prefork
 Beat：
 
 ```bash
-uv run celery -A entrypoints.celery_app:celery_app beat -l info
+uv run celery -A internal.infra.celery.application:celery_app beat -l info
 ```
 
 也可以使用脚本启动 Worker：
@@ -304,7 +304,7 @@ AgentScope 2.0 的推荐接入路线是嵌入官方 Agent Service，而不是自
 
 ## 项目结构
 
-- `entrypoints/`：进程入口，包含 FastAPI 入口、Worker / Beat 共用的 Celery 入口，以及 API 和 Worker 启动脚本。
+- `entrypoints/`：FastAPI 入口、Uvicorn 日志配置，以及 API 和 Worker 启动脚本。
 - `internal/`：业务应用代码，包含路由、中间件、配置、服务、DAO、缓存、模型、Schema、任务和业务 Agent。
 - `internal/services/agents/`：`conversation.py` 为会话用例入口，`storage.py` 统一持有数据库事务，
   `runtime.py` 适配执行协议，`execution.py` 编排受管理运行。

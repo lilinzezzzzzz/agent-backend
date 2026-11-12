@@ -526,7 +526,7 @@ def cleanup_after_test():
 
     # 仅清理当前进程已使用的资源，不为清理而导入业务模块。
     for module_name, reset_name in (
-        ("internal.factory_cache", "reset_factory_caches"),
+        ("tests.support.factory_cache", "reset_factory_caches"),
         ("internal.infra.database", "reset_async_db"),
         ("internal.infra.redis", "reset_async_redis"),
     ):

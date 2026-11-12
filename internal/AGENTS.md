@@ -27,8 +27,8 @@
   不要求固定章节模板。
 - Service、DAO 和 Cache 优先沿用现有 `new_*()` factory。只有生命周期与测试隔离允许时才复用模块级实例，
   不把单例作为新增实现的硬性要求。
-- 新增缓存 factory 时同步 `internal/factory_cache.py` 的清理注册；reset factory 只清理引用，不能代替
-  连接、日志或 tracing 的关闭。
+- 新增缓存 factory 时同步 `tests/support/factory_cache.py` 的测试清理注册；应用代码不得反向依赖测试辅助代码。
+  reset factory 只清理引用，不能代替连接、日志或 tracing 的关闭。
 - 错误码、HTTP 状态映射、公开字段、DTO 映射、缓存 key/TTL 和任务参数属于兼容性边界。
 
 ## 数据、配置与生命周期
@@ -79,7 +79,8 @@
 ## Celery 装配与任务
 
 - `internal/infra/celery/application.py` 唯一创建应用 `celery_client` / `celery_app` 并注册 Worker hook；
-  包 `__init__.py` 不实例化或 re-export runtime 对象，调用方从职责模块显式导入。
+  Worker / Beat CLI 直接引用该模块的 `celery_app`，包 `__init__.py` 不实例化或 re-export runtime 对象，
+  调用方从职责模块显式导入。
 - `lifecycle.py` 管理子进程配置、日志与 tracing；`execution.py` 用既有 `run_in_async()` 管理任务级 loop、
   DB、Redis 和 request context，资源不跨 prefork 或多次执行复用，失败/取消也清理。退出前清理 tracing 并 drain 日志。
 - `health.py` 只检查 API 使用的 broker 健康，失败不隐式改变 Worker 或业务任务状态。

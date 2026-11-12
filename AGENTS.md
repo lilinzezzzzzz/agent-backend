@@ -42,8 +42,8 @@
 - 新增配置时同步模型、适用环境文件、provider 和测试；保持 `extra="forbid"`、跨分组约束及默认脱敏，
   不绕过 `Settings.settings_customise_sources()`。`config_echo.reveal_secrets` 默认关闭。
 - `entrypoints/` 保持薄层，不复制应用装配、配置加载或业务逻辑，import 时不启动连接、线程或后台任务；
-  Shell 入口切到仓库根目录并用 `exec` 启动最终进程。Celery CLI 共用 `entrypoints.celery_app:celery_app`，
-  应用内部从 `internal.infra.celery.application` 导入同一实例；路径、pool、队列及 CLI 参数变更同步部署入口。
+  Shell 入口切到仓库根目录并用 `exec` 启动最终进程。Worker / Beat 的 Celery CLI 直接引用
+  `internal.infra.celery.application:celery_app`，与应用内部共用实例；路径、pool、队列及 CLI 参数变更同步部署入口。
 - Uvicorn 日志配置与 `internal/infra/logging.py` 配套维护，验证主进程、子进程及 lifespan 前后的输出。
 
 ## 数据与验证

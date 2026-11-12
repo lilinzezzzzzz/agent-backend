@@ -5,11 +5,21 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_settings_cache_then_demo_routes_without_factory_cache(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "preload_factory_cache",
+    [False, True],
+    ids=["without_factory_cache", "with_factory_cache"],
+)
+def test_settings_cache_then_demo_routes_with_lazy_factory_cleanup(
+    tmp_path: Path,
+    preload_factory_cache: bool,
+) -> None:
     project = tmp_path / "project"
     (project / "configs").mkdir(parents=True)
     (project / "configs/app.test.toml").write_text(
@@ -39,14 +49,26 @@ import internal.config as config_module
 
 config_module.BASE_DIR = Path({str(project)!r})
 
+if {preload_factory_cache!r}:
+    import tests.support.factory_cache
+
 class VerifyCollection:
     def pytest_collection_finish(self, session):
-        assert "internal.factory_cache" not in sys.modules
+        assert ("tests.support.factory_cache" in sys.modules) is {preload_factory_cache!r}
         assert [item.nodeid for item in session.items] == {arguments[:2]!r}
 
+    def pytest_runtest_call(self, item):
+        factory_cache = sys.modules.get("tests.support.factory_cache")
+        if factory_cache is not None:
+            factory_cache.new_user_service()
+            assert factory_cache.new_user_service.cache_info().currsize == 1
+
     def pytest_runtest_logfinish(self, nodeid, location):
+        factory_cache = sys.modules.get("tests.support.factory_cache")
+        assert (factory_cache is not None) is {preload_factory_cache!r}
+        if factory_cache is not None:
+            assert factory_cache.new_user_service.cache_info().currsize == 0
         if nodeid == {arguments[0]!r}:
-            assert "internal.factory_cache" not in sys.modules
             assert config_module.get_settings.cache_info().currsize == 0
 
 raise SystemExit(pytest.main({arguments!r}, plugins=[VerifyCollection()]))

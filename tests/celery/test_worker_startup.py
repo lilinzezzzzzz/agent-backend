@@ -7,8 +7,11 @@ from types import SimpleNamespace
 
 import click
 import pytest
+from celery.app.utils import find_app
 from celery.bin.base import CLIContext
+from celery.bin.celery import celery as celery_command
 from celery.bin.worker import worker
+from click.testing import CliRunner
 
 import internal.config as config_module
 from internal.infra.celery.application import celery_app
@@ -16,6 +19,18 @@ from internal.tasks import scheduler
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 WORKER_SCRIPT = PROJECT_ROOT / "entrypoints" / "run_celery_worker.sh"
+
+
+@pytest.mark.parametrize("command", ["worker", "beat"])
+def test_worker_and_beat_cli_load_shared_application(command: str) -> None:
+    application_path = "internal.infra.celery.application:celery_app"
+    result = CliRunner().invoke(
+        celery_command,
+        ["-A", application_path, command, "--help"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert find_app(application_path) is celery_app
 
 
 def test_app_subscribes_to_all_configured_routes_and_beat_queues() -> None:
@@ -148,7 +163,7 @@ def test_script_uses_app_queue_configuration_by_default(
         "run",
         "celery",
         "-A",
-        "entrypoints.celery_app:celery_app",
+        "internal.infra.celery.application:celery_app",
         "worker",
         "-l",
         "warning",

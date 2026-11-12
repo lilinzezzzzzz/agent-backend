@@ -222,7 +222,10 @@ def _find_record_prefix(
 
 
 @pytest.fixture
-def configured_logger(tmp_path: Path) -> Path:
+def configured_logger(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> Path:
     previous_logger = logger_module._logger
     previous_manager = logger_module._logger_manager
     base_log_dir = tmp_path / "logs"
@@ -233,6 +236,9 @@ def configured_logger(tmp_path: Path) -> Path:
         write_to_file=True,
         write_to_console=False,
     )
+    # 全量收集时异常模块可能已绑定共享 mock；日志断言必须使用当前真实输出。
+    exception_module = importlib.import_module("internal.middlewares.exceptions")
+    monkeypatch.setattr(exception_module, "logger", loguru_logger)
     yield base_log_dir
     loguru_logger.remove()
     logger_module._logger = previous_logger

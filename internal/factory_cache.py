@@ -33,7 +33,6 @@ from internal.services.agents import (
 )
 from internal.services.auth import new_auth_service
 from internal.services.celery_task import new_celery_task_service
-from internal.services.logger_span import new_logger_span_service
 from internal.services.order import new_order_service
 from internal.services.rag import new_rag_service
 from internal.services.scoped_operation_lock import new_scoped_operation_lock_service
@@ -68,7 +67,6 @@ _CACHED_FACTORIES: tuple[_CachedFactory, ...] = (
     new_database_agent_storage_backend,
     new_auth_service,
     new_celery_task_service,
-    new_logger_span_service,
     new_order_service,
     new_rag_service,
     new_scoped_operation_lock_service,

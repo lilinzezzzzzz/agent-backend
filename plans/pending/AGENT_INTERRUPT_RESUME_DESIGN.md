@@ -60,7 +60,7 @@ PostgreSQL 并发 / 多实例、真实客户端断连与部署 shutdown 预算�
 沿用现有 `/v1` token 认证和 `BaseResponse[T]`，DTO 放在 `internal/schemas/agent.py`。
 
 现有六个聊天/支持接口保持现有请求及响应语义；它们不会因为有 `run_id` 就自动变为可恢复。
-新增 API 复用同一订单/支付业务 Builder 和 Service 能力。前端需要切换到新生命周期才能使用本能力。
+新增 API 复用同一订单/支付业务 Builder 和 Service 能力。API 调用方需要切换到新生命周期才能使用本能力。
 不将旧接口静默改成后台任务，不扩大旧状态枚举消费者的行为范围。
 
 后续如需旧入口也受管理，应单独评估消费者兼容性，将其适配到同一 execution Service；不另写执行循环。

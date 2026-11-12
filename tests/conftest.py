@@ -88,6 +88,7 @@ if not _skip_logger_mock:
         LoggerHandler,
         TimezoneType,
     )
+    from pkg.logger.intercept import InterceptHandler  # noqa: PLC0415
 
     def init_logger(
         *,
@@ -125,6 +126,8 @@ if not _skip_logger_mock:
     mock_logger_module.LogFormat = LogFormat
     mock_logger_module.LoggerHandler = LoggerHandler
     mock_logger_module.TimezoneType = TimezoneType
+    # 保留真实转发器导出，使根目录收集与定向日志测试使用同一实现。
+    mock_logger_module.InterceptHandler = InterceptHandler
     mock_logger_module.init_logger = init_logger
     mock_logger_module.get_logger_manager = get_logger_manager
     mock_logger_module._logger_manager = None

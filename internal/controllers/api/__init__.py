@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from internal.controllers.api import agent, auth, celery_task, logger_span, rag, user
+from internal.controllers.api import agent, auth, celery_task, rag, user
 from internal.dependencies.auth import AuthenticatedUserDependency
 
 router = APIRouter(prefix="/v1")
@@ -11,7 +11,6 @@ authenticated_router = APIRouter(
 authenticated_routers = [
     agent.router,
     celery_task.router,
-    logger_span.router,
     rag.router,
     user.router,
 ]

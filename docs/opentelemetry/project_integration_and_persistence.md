@@ -23,7 +23,7 @@ Collector pipeline、持久化后端和真实 Trace 查询链路尚未在本仓�
 | Metric / Log 的 OTel pipeline | 项目尚未配置 | 采集开关已配置化，可复用外部组件提供的 MeterProvider / LoggerProvider；当前仅由项目创建 Trace Exporter |
 | Collector 部署与 pipeline | 仓库内未实现 | 仓库没有 Collector receiver、processor、exporter 配置 |
 | 可观测性数据持久化 | 仓库内未实现 | 没有存储 schema、写入配置、迁移或保留策略 |
-| 真实 Trace 查询 | 未实现 | logger-span 查询接口仍使用确定性 mock 数据 |
+| 真实 Trace 查询 | 未实现 | 仓库不提供 Trace 查询 API 或可观测性后端查询 client |
 
 因此，当前可以确认的是：启用 tracing 并配置 endpoint 后，应用会把 Span 交给 Exporter；仅凭接口返回的
 `trace_id`，不能确认 Collector 已接收、存储后端已写入，或查询索引已经可见。
@@ -194,15 +194,17 @@ recorder 只兜底未处理异常和用户 middleware 抛出的异常，并保�
 当前功能；关闭 tracing 后仍保持日志与响应的 Trace ID 一致。
 其余框架采集继续交给 FastAPI，Provider/exporter、业务 Span、Celery runtime 和无采集传播保留现有实现。
 
-### 2.6 logger-span 演示接口边界
+### 2.6 Trace 查询与验证边界
 
-`POST /v1/logger-span/simulate` 创建真实 Span 并返回 `trace_id`，但不会等待异步 Exporter、Collector 或
-存储后端完成处理。
+logger-span demo 的模拟接口、mock 查询接口和查看器页面已移除。启用 tracing 后，应用仍通过真实
+请求、业务埋点和 Celery Worker 生成 Span，由现有 runtime 上报到配置的 OTLP Receiver。
 
-`GET /v1/logger-span/traces/{trace_id}` 当前由
-[`internal/services/logger_span_mock.py`](../../internal/services/logger_span_mock.py) 根据 `trace_id` 生成
-确定性 mock Span 树，不会查询 Collector、ClickHouse 或其他可观测性后端。因此它只能验证前端展示和 API
-数据结构，不能作为持久化验收依据。
+本仓库不提供 Trace 查询 API。需要查看 Trace 时，应使用外部可观测性后端的查询 API 或 UI，
+不能把响应头中的 Trace ID 或本地测试通过视为外部存储已持久化的证据。
+
+本地回归分别由 `tests/tracing/`、`tests/logger/test_middleware_span.py` 和
+`tests/lifecycle/test_process_lifecycle.py` 验证埋点、请求传播及资源生命周期；这些测试不替代真实
+Receiver 接收、存储写入和查询可见性的验收。
 
 ## 3. 可观测性数据持久化
 
@@ -234,13 +236,13 @@ flowchart LR
     Batch --> Queue[Exporter Queue]
     Queue --> Backend[Trace 持久化后端]
     Backend --> QueryAPI[查询 API]
-    QueryAPI --> Demo[logger-span 查询与前端]
+    QueryAPI --> UI[外部可观测性 UI / 调用方]
 ```
 
 Collector 应承担接收、批处理、重试、脱敏、路由和背压保护；存储后端承担持久化、索引、保留策略和查询。
 应用侧只配置 Collector endpoint，不持有存储数据库连接，也不在 Controller 中直接查询存储。
 
-代码注释目前提到 ClickHouse，但仓库没有 ClickHouse exporter、表结构、查询 client 或部署配置，
+仓库没有 ClickHouse exporter、表结构、查询 client 或部署配置，
 因此 ClickHouse 只能视为候选目标，不能视为已经确定或实现的持久化方案。正式选型时有两种边界：
 
 - 使用支持 OTLP 和 Trace 查询的专用后端，由后端管理 Span 存储模型和查询 API。
@@ -311,21 +313,21 @@ OpenTelemetry 链路失败不应使正常业务请求失败。项目需要通过
 将 `otel.exporter_otlp_traces_endpoint` 指向已验证的 Receiver，并分别验证 FastAPI 与 Celery Worker：
 
 - 启动时 tracing runtime 初始化成功。
-- `simulate` 产生的所有 Span 被 Receiver 接收。
+- 使用受控请求和任务触发真实埋点，确认所生成的 Span 被 Receiver 接收。
 - 正常关闭时批处理数据完成 flush；强制终止场景的丢失边界已记录。
 - 使用同一 `trace_id` 能在后端还原父子关系、时间顺序、状态、属性和异常事件。
 
-### 4.3 用真实查询替换 mock
+### 4.3 验证外部 Trace 查询
 
-持久化后端稳定后，再替换 `LoggerSpanService.get_trace()` 的 mock 实现：
+持久化后端稳定后，使用其查询 API 或 UI 验证真实 Trace：
 
-- 在 infra 层提供受超时、认证和连接生命周期控制的查询 client。
-- Service 负责按 `trace_id` 查询、组装 DTO，并处理未命中、查询超时和数据不完整。
-- Controller 保持薄层，不直接访问 ClickHouse、Collector 或第三方查询 API。
-- 查询接口需要限制时间范围、Span 数量和响应大小，并按项目认证规则执行访问控制。
-- 因写入和索引可能最终一致，刚完成 `simulate` 后的短暂未命中不能被误报为数据永久丢失。
+- 从请求响应头 `traceparent` 或关联日志中取得 Trace ID，再查询外部后端。
+- 核对父子关系、时间、状态、属性和异常事件，避免只以 Trace ID 命中判断链路完整。
+- 因写入和索引可能最终一致，请求结束后的短暂未命中不能被误报为数据永久丢失。
+- 查询访问需要执行外部后端的认证、授权，并限制时间范围、Span 数量和响应大小。
 
-在真实查询完成前，应保留接口和前端中的 mock 标识，避免用户把演示数据误认为持久化数据。
+若后续确需由本项目代理 Trace 查询，应另行设计查询 client、资源生命周期、访问权限和 API contract；
+当前没有预留 demo 查询入口。
 
 ## 5. 验收标准
 
@@ -336,6 +338,6 @@ OpenTelemetry 链路失败不应使正常业务请求失败。项目需要通过
 - 应用进程关闭、Collector 重启和后端限流场景均有实际验证记录。
 - 敏感字段不会出现在 Span attributes、events、Resource 或 Collector 错误日志中。
 - 保留周期、TTL、容量告警、备份恢复和查询权限均有明确所有者。
-- logger-span 查询接口读取真实后端数据，不再调用 `MockTraceBuilder`，并已覆盖最终一致性窗口。
+- 外部查询 API 或 UI 返回真实持久化数据，且已验证最终一致性窗口。
 
 完成以上验收后，才能把项目状态从“应用侧已上报”更新为“可观测性数据已持久化且可查询”。

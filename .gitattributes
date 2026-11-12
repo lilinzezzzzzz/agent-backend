@@ -1,5 +1,5 @@
 ###############################################################################
-# GIT ATTRIBUTES FOR PYTHON & WEB PROJECTS
+# GIT ATTRIBUTES FOR PYTHON BACKEND PROJECTS
 # Best practices for cross-platform consistency (Windows/macOS/Linux)
 ###############################################################################
 
@@ -19,21 +19,10 @@
 *.pyx   text eol=lf diff=python
 *.whl   binary
 
-# Web / JavaScript / TypeScript
-*.js    text eol=lf
-*.jsx   text eol=lf
-*.ts    text eol=lf
-*.tsx   text eol=lf
+# Configs / Data / Documentation
 *.json  text eol=lf
-*.css   text eol=lf
-*.scss  text eol=lf
-*.less  text eol=lf
-*.html  text eol=lf
-*.htm   text eol=lf
 *.xml   text eol=lf
 *.svg   text eol=lf
-
-# Configs / Data / Documentation
 *.yml   text eol=lf
 *.yaml  text eol=lf
 *.toml  text eol=lf
@@ -115,9 +104,6 @@
 # 这些通常是机器生成的，Diff 看起来很乱，标记为 binary 可以抑制 diff 显示，
 # 或者标记为 linguist-generated 以在 GitHub 统计中忽略它们。
 *.lock      text eol=lf linguist-generated
-package-lock.json text eol=lf linguist-generated
-yarn.lock   text eol=lf linguist-generated
-pnpm-lock.yaml text eol=lf linguist-generated
 poetry.lock text eol=lf linguist-generated
 
 ###############################################################################

@@ -8,6 +8,10 @@
 `SpanFrame`、`span_seq`、`parent_span_seq`、`span_path` 或 `span.start` / `span.end` / `span.error`
 兼容协议。验证结果见第 9.4 节。
 
+后续范围调整：仓库已转为纯后端项目，logger-span demo 的 Controller、Service、mock 构造器、
+Schema 和查看器页面已移除；真实 tracing 基础设施保留。本文中的 demo、前端实现及其测试结果仅记录
+当时的实施和验证，不代表当前能力。当前验证入口见上述 OpenTelemetry 接入文档。
+
 ## 1. 目标与关键结论
 
 - 只保留 `span_context(...)` 作为项目统一埋点门面，业务代码统一使用

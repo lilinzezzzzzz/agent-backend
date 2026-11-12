@@ -2,6 +2,8 @@
 
 AGENT-BACKEND 是面向 Agent、RAG 与 AI 平台场景的 FastAPI demo 合集与后端脚手架。它的目标是沉淀可复用的后端工程范式和示例能力，便于快速验证 Agent 运行时、RAG、认证、异步数据库访问、Redis、Celery、请求日志、第三方登录和向量检索等基础设施；它不是一套需要长期承载真实业务流量的单一业务服务。
 
+本仓库仅提供后端代码与 API，不包含 demo 前端或静态页面托管；开启 debug 时可使用 FastAPI 自带的 API 文档调试。
+
 README 只记录当前仓库可直接核对的能力；更细的设计约束和模块说明见 `docs/`、`pkg/*/README.md` 以及各目录下的 `AGENTS.md`。
 
 ## 技术栈

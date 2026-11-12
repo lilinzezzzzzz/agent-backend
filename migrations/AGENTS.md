@@ -9,5 +9,7 @@
 - 在线迁移沿用 `internal.config` 的主库配置；不另设连接串环境变量或在 `alembic.ini` 保存凭据。
 - 迁移是独立命令，不挂到 API / Worker lifespan。新库升级、可逆变更回退和结构比较在隔离 PostgreSQL
   中验证；测试不读取工作区的真实数据库配置。
-- 修改 revision 后使用 `uv run python scripts/export_postgresql_schema.py` 更新 SQL 导出产物；
-  具体开发与验证命令见 `docs/development/database_migrations.md`。
+- 按需生成的 SQL 统一放在 `migrations/exports/ddl/` 或 `migrations/exports/dml/`，不提交到 Git，
+  不放进 `versions/`，不作为独立维护的结构或数据来源。
+- 不维护独立建库 SQL 快照；需要审阅或交付 SQL 时，使用 `uv run alembic upgrade head --sql` 按需生成。
+  修改 revision 后验证离线 SQL 与隔离数据库迁移；具体命令见 `docs/development/database_migrations.md`。

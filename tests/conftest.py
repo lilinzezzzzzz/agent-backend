@@ -14,6 +14,7 @@ Pytest 配置文件 (conftest.py)
 
 import inspect
 import os
+import subprocess
 import sys
 import types
 import uuid
@@ -290,6 +291,29 @@ def anyio_backend():
 # ==========================================
 # 6. 数据库 Fixtures
 # ==========================================
+
+
+@pytest.fixture(scope="session")
+def postgresql_migration_sql() -> str:
+    """从迁移历史按需生成 SQL，不读取应用配置或连接数据库。"""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "alembic",
+            "-c",
+            str(PROJECT_ROOT / "alembic.ini"),
+            "upgrade",
+            "head",
+            "--sql",
+        ],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=30,
+    )
+    return result.stdout
 
 
 @pytest_asyncio.fixture(scope="function")

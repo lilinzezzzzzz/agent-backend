@@ -4,8 +4,10 @@ from datetime import datetime
 from pathlib import Path
 from uuid import UUID, uuid4
 
+from alembic import command
+from alembic.config import Config
 import pytest
-from sqlalchemy import text
+from sqlalchemy import Connection, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from internal.dao.celery_task import CeleryTaskDao
@@ -22,15 +24,17 @@ def _integration_database_url() -> str:
 
 
 async def _create_test_schema(database_url: str, schema: str) -> None:
-    ddl = Path("ddl/postgresql/init.sql").read_text(encoding="utf-8")
+    def upgrade(connection: Connection) -> None:
+        config = Config(str(Path(__file__).resolve().parents[2] / "alembic.ini"))
+        config.attributes["connection"] = connection
+        command.upgrade(config, "head")
+
     engine = create_async_engine(database_url)
     try:
         async with engine.begin() as connection:
             await connection.exec_driver_sql(f'CREATE SCHEMA "{schema}"')
             await connection.exec_driver_sql(f'SET LOCAL search_path TO "{schema}"')
-            for statement in ddl.split(";"):
-                if statement.strip():
-                    await connection.exec_driver_sql(statement)
+            await connection.run_sync(upgrade)
     finally:
         await engine.dispose()
 
@@ -46,7 +50,7 @@ async def _drop_test_schema(database_url: str, schema: str) -> None:
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_postgresql_ddl_and_concurrent_claim() -> None:
+async def test_postgresql_migrations_and_concurrent_claim() -> None:
     database_url = _integration_database_url()
     schema = f"celery_task_sm_{uuid4().hex}"
     await _create_test_schema(database_url, schema)

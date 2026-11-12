@@ -37,7 +37,7 @@
 ## 数据与验证
 
 - PostgreSQL 建库和升级以 `migrations/versions/` 的 Alembic revision 为准；结构变更同步 ORM 与新增
-  revision，`ddl/postgresql/init.sql` 只能由导出脚本生成。当前仅支持新库初始化，不自动接管已有数据库。
+  revision；不维护建库 SQL 快照，离线 SQL 按需通过 Alembic 生成。当前仅支持新库初始化，不自动接管已有数据库。
 - 已用于共享环境的 revision 不改写，修正通过新增 revision 完成；涉及已有数据的变更必须评估历史数据、
   锁表、部署顺序、兼容窗口和回滚，不能把自动生成或 `alembic check` 通过视为完整正确性证明。
 - Python 版本、Ruff 和测试配置以 `pyproject.toml` 为准。运行能覆盖改动行为的最小验证，再按共享 contract

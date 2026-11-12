@@ -72,7 +72,7 @@ internal/services/kb/
 internal/services/dto/knowledge_base.py
 internal/schemas/knowledge_base.py
 internal/controllers/api/knowledge_base.py
-ddl/knowledge_base.sql
+migrations/versions/<revision>_knowledge_base.py
 tests/api/test_knowledge_base.py
 tests/services/test_knowledge_base.py
 tests/dao/test_knowledge_base.py

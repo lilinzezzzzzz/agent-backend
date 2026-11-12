@@ -1,6 +1,5 @@
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import cast
 from uuid import UUID
 
@@ -278,8 +277,10 @@ def test_reconciler_sql_uses_skip_locked_deadline_cas() -> None:
     assert "fence_expires_at = :fence_expires_at" in execution_sql
 
 
-def test_postgresql_init_ddl_matches_state_machine_contract() -> None:
-    ddl = Path("ddl/postgresql/init.sql").read_text(encoding="utf-8")
+def test_postgresql_migration_sql_matches_state_machine_contract(
+    postgresql_migration_sql: str,
+) -> None:
+    ddl = postgresql_migration_sql
     celery_table_ddl = ddl[
         ddl.index("CREATE TABLE celery_task_record") : ddl.index(
             "CREATE INDEX idx_celery_task_record_execution_deadline"
@@ -295,7 +296,6 @@ def test_postgresql_init_ddl_matches_state_machine_contract() -> None:
     assert "fence_expires_at" in ddl
     assert "cancel_allowed BOOLEAN DEFAULT true NOT NULL" in ddl
     assert "NEEDS_RECONCILIATION" not in ddl
-    assert "DROP TABLE" not in ddl.upper()
     for removed_column in (
         "idempotency_expires_at",
         "execution_timeout_seconds",
@@ -307,8 +307,10 @@ def test_postgresql_init_ddl_matches_state_machine_contract() -> None:
         assert removed_column not in celery_table_ddl
 
 
-def test_audit_actor_type_baseline_matches_model_contract() -> None:
-    ddl = Path("ddl/postgresql/init.sql").read_text(encoding="utf-8")
+def test_audit_actor_type_migration_matches_model_contract(
+    postgresql_migration_sql: str,
+) -> None:
+    ddl = postgresql_migration_sql
 
     assert "creator_type VARCHAR(32) NOT NULL" in ddl
     assert "updater_type VARCHAR(32)" in ddl

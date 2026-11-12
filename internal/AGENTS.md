@@ -9,7 +9,7 @@
 - DAO / Cache：分别封装持久化访问和业务缓存语义，不承担业务状态判断；批量场景使用批量查询和写入，
   避免循环 I/O。
 - Schema / DTO：承载传输校验、wire enum 和纯字段映射，不访问数据库、缓存、上下文、配置或外部服务。
-- Model：只描述 ORM 映射和持久化字段；字段、索引、约束及默认值与 Alembic 迁移和 SQL 导出产物保持一致，
+- Model：只描述 ORM 映射和持久化字段；字段、索引、约束及默认值与 Alembic 迁移保持一致，
   新模型在 `internal/models/__init__.py` 注册。
 - Infra：拥有数据库、Redis、LLM、Celery 和调度器等连接生命周期；业务层不自行创建重复连接池。
 - Middleware：处理请求上下文、日志、guard 和异常转换；token 与内部签名认证仍由

@@ -15,7 +15,7 @@
 - `cancel_allowed` 是运行中任务的取消门禁；进入不可取消阶段后由持有 `execution_token` 的 Worker CAS 为 `false`。
 
 `celery_task_record` 的建表和升级由 `migrations/versions/` 管理，并与
-`internal.models.celery_task.CeleryTaskRecord` 保持一致；`ddl/postgresql/init.sql` 是迁移的 SQL 导出产物。
+`internal.models.celery_task.CeleryTaskRecord` 保持一致；测试通过 Alembic 生成 SQL 或执行迁移验证结构。
 使用方式见 [数据库迁移指南](../development/database_migrations.md)。
 
 ## 状态机

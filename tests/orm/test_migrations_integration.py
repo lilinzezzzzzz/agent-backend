@@ -411,16 +411,15 @@ async def test_upgrade_preserves_data_and_detects_drift(
 
 
 @pytest.mark.asyncio
-async def test_exported_sql_builds_a_database_at_head(
+async def test_offline_sql_builds_a_database_at_head(
     postgres_project: Path,
     postgres_engine: AsyncEngine,
     orm_engine: AsyncEngine,
     model_metadata: MetaData,
 ) -> None:
-    await execute_offline_sql(
-        postgres_engine,
-        (PROJECT_ROOT / "ddl/postgresql/init.sql").read_text(encoding="utf-8"),
-    )
+    result = run_alembic(postgres_project, "upgrade", "head", "--sql")
+    assert result.returncode == 0, result.stdout + result.stderr
+    await execute_offline_sql(postgres_engine, result.stdout)
     result = run_alembic(postgres_project, "check")
     assert result.returncode == 0, result.stdout + result.stderr
     assert_current_head(postgres_project)

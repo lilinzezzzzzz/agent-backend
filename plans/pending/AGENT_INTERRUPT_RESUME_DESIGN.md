@@ -260,7 +260,7 @@ checkpoint 可能含问题、工具结果与短期 token，按业务数据限制
     `max_steps` 不重置、`final_ready` 直接完成终态、lease 失效停止、非重放工具拒绝恢复）。
 - [x] 扩展现有 Model/DAO/存储后端及 PostgreSQL 基线 DDL；实现原子 step/checkpoint/terminal 写入。
   - `internal/models/agent_conversation.py`、`internal/dao/agent_conversation.py`、
-    `internal/services/agents/conversation.py`、`ddl/postgresql/init.sql`；
+    `internal/services/agents/conversation.py`；当时同步的建库 SQL 快照现已移除，结构以 `migrations/versions/` 为准；
   - `tests/services/test_agent_managed_run.py`（步骤与现场同事务提交、终态唯一 assistant 消息、
     `complete_run` 复用已提交步骤）、`tests/orm/test_postgresql_ddl.py`。
 - [x] 实现 lease、fence 和 request_key；并发 resume 仅一个获执行权，旧 token 不能提交结果。
@@ -333,7 +333,8 @@ Redis、Milvus 或真实客户端断连实验。
 
 ## 10. 交付、回滚与未验证条件
 
-仓库当前以全新建库为基线，实施修改 `ddl/postgresql/init.sql`，不默认新增已有环境迁移。
+仓库当前以全新建库为基线，建库和结构变更统一由 `migrations/versions/` 管理，不维护建库 SQL 快照。
+结构变更应新增 Alembic revision，并同步 ORM 与测试；不自动接管已有数据库。
 若上线对象已有数据，另行补充 additive migration、表规模、锁影响、混合版本与回滚演练；本设计没有这类环境证据。
 旧 run 不回填虚构 checkpoint，不允许从审计反推执行现场。
 

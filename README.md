@@ -184,8 +184,7 @@ uv run celery -A entrypoints.celery_app:celery_app worker -l info --pool prefork
 `internal/tasks/scheduler.py` 的默认队列、任务路由和 Beat 投递配置派生并去重，维护队列名称来自
 环境配置中的 `celery.reconciler_queue`。修改维护队列后需重启相关 Worker 和 Beat，使投递与订阅一致。
 
-启动前先按上面的步骤执行 `alembic upgrade head`；`ddl/postgresql/init.sql` 是迁移导出的全新建库 SQL，
-不再手工维护。API 先登记 `SUBMITTING` 记录，再调用 `CeleryClient.submit()`；Worker 可从
+启动前先按上面的步骤执行 `alembic upgrade head`。API 先登记 `SUBMITTING` 记录，再调用 `CeleryClient.submit()`；Worker 可从
 `SUBMITTING` 或 `QUEUED` claim，从而避免快速消费竞态。Beat 会分别收敛发布确认超时、排队启动超时和
 执行 deadline 超时；运行中任务超过 hard deadline 后先进入 `ORPHANED`，等待 fence 过期和业务核对后再进入
 `FAILED/CANCELLED`，不会自动重新提交任务。运行中任务可通过 `cancel_allowed=false` 进入不可取消阶段。取消接口先持久化
@@ -315,7 +314,6 @@ AgentScope 2.0 的推荐接入路线是嵌入官方 Agent Service，而不是自
 - `docs/`：补充文档。
 - `tests/`：pytest 测试。
 - `migrations/`、`alembic.ini`：PostgreSQL schema 迁移历史与迁移配置。
-- `ddl/`：迁移导出的数据库 SQL；`dml/`：业务 seed 和数据修复 SQL。
 
 更细的目录职责和修改约束见各目录下的 `AGENTS.md`；模块级使用说明优先看对应 `README.md`。
 

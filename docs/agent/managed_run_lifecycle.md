@@ -1,9 +1,20 @@
 # Agent 受管理运行（打断与恢复）使用说明
 
 本文记录当前已实现的行为，不是目标设计。协议、状态机和存储事实分别以
-`pkg/agents/`、`internal/services/agents/conversation.py` 与 `migrations/versions/` 为准；
+`pkg/agents/`、`internal/services/agents/storage.py` 与 `migrations/versions/` 为准；
 更完整的取舍与验证矩阵见
 [Agent 打断与原 run 恢复技术设计](../../plans/pending/AGENT_INTERRUPT_RESUME_DESIGN.md)。
+
+## 实现职责
+
+- `conversation.py`：普通会话用例入口，复用数据库存储后端。
+- `storage.py`：会话与受管理运行的数据库状态机，统一执行 claim、lease/fence、checkpoint、步骤和终态事务。
+- `runtime.py`：把存储提交结果适配为通用 Agent runtime 协议，持有当前 attempt 的 fencing token。
+- `execution.py`：路由、恢复校验、Builder 选择、流式推送、取消和收尾编排。
+- `internal/schemas/agent/`：`chat.py`、`managed_run.py`、`stream.py` 和 `common.py` 分别维护相关协议；
+  应用仍通过 `internal.schemas.agent` 导入公开符号。
+
+本次职责拆分不修改 checkpoint 格式、definition version、请求/响应字段、SSE 事件、数据库结构或事务边界。
 
 ## 能力边界
 

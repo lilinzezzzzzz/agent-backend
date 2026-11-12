@@ -2,6 +2,7 @@ from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
 from typing import Any
 
+from sqlalchemy.engine import URL, make_url
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -16,7 +17,7 @@ SessionProvider = Callable[..., AbstractAsyncContextManager[AsyncSession]]
 
 def new_async_engine(
     *,
-    database_uri: str,
+    database_uri: str | URL,
     echo: bool = True,
     pool_pre_ping: bool = True,
     pool_size: int = 10,
@@ -26,17 +27,27 @@ def new_async_engine(
     json_serializer: Callable[[Any], str] = orjson_dumps,
     json_deserializer: Callable[[JsonInputType], Any] = orjson_loads,
 ) -> AsyncEngine:
-    """按项目默认连接池与 JSON 编解码配置创建异步 engine。"""
+    """创建 PostgreSQL / SQLite 异步 engine，SQLite 使用方言默认连接池。"""
+    backend = make_url(database_uri).get_backend_name()
+    if backend not in {"postgresql", "sqlite"}:
+        raise ValueError(f"Database supports PostgreSQL and SQLite only, got {backend}")
+    pool_options = (
+        {}
+        if backend == "sqlite"
+        else {
+            "pool_size": pool_size,
+            "max_overflow": max_overflow,
+            "pool_timeout": pool_timeout,
+            "pool_recycle": pool_recycle,
+        }
+    )
     return create_async_engine(
         url=database_uri,
         echo=echo,
         pool_pre_ping=pool_pre_ping,
-        pool_size=pool_size,
-        max_overflow=max_overflow,
-        pool_timeout=pool_timeout,
-        pool_recycle=pool_recycle,
         json_serializer=json_serializer,
         json_deserializer=json_deserializer,
+        **pool_options,
     )
 
 

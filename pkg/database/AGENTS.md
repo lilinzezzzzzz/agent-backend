@@ -7,5 +7,6 @@
   `count_statement`。
 - `update_stmt()` 拒绝未知或受管理字段，并要求显式业务条件；批量场景提供批量接口，避免逐条 I/O。
 - 调用方传入 session 时 helper 不得 commit、rollback 或关闭它；跨语句原子性由同一事务 session 保证。
-- 审计 actor、软删除、分页语义和数据库类型需兼容当前支持的方言及测试 SQLite。
+- 仅支持 PostgreSQL 与 SQLite；JSON 类型使用 JSONB / JSON，不为其他方言降级为 TEXT/CLOB。
+- 审计 actor、软删除和分页语义需兼容两种方言；SQLite 只验证基础存储行为，不替代 PostgreSQL 并发验证。
 - 当前脚手架不维护已删除基础 API 的兼容层，但破坏性调整必须一次性更新仓库内调用方和测试。

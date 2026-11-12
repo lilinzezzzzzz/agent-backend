@@ -1,11 +1,15 @@
+"""统一的 bcrypt 密码哈希、验证和成本检查。"""
+
 import bcrypt
 
 from pkg.concurrency import anyio_run_in_thread
 
 
 class Hasher:
-    def __init__(self, rounds: int = 12):
+    def __init__(self, rounds: int = 12, *, allow_empty: bool = False) -> None:
+        """默认拒绝空密码；调用方可显式选择兼容已有空密码行为。"""
         self.rounds = rounds
+        self.allow_empty = allow_empty
 
     def _hash_sync(self, password: str) -> str:
         salt = bcrypt.gensalt(rounds=self.rounds)
@@ -14,27 +18,43 @@ class Hasher:
     @staticmethod
     def _verify_sync(plain_password: str, hashed_password: str) -> bool:
         try:
-            return bcrypt.checkpw(plain_password.encode("utf-8"), hashed_password.encode("utf-8"))
-        except (ValueError, TypeError):
+            return bcrypt.checkpw(
+                plain_password.encode("utf-8"),
+                hashed_password.encode("utf-8"),
+            )
+        except ValueError, TypeError:
             return False
 
     async def hash(self, password: str) -> str:
-        if not password:
+        if not password and not self.allow_empty:
             raise ValueError("Password cannot be empty")
         return await anyio_run_in_thread(self._hash_sync, password)
 
     async def verify(self, plain_password: str, hashed_password: str) -> bool:
-        if not plain_password or not hashed_password:
+        if not hashed_password or (not plain_password and not self.allow_empty):
             return False
-        return await anyio_run_in_thread(self._verify_sync, plain_password, hashed_password)
+        return await anyio_run_in_thread(
+            self._verify_sync,
+            plain_password,
+            hashed_password,
+        )
+
+    def needs_rehash(self, password_hash: str | None) -> bool:
+        """检查 bcrypt 版本与成本，不修改现有哈希或触发密码写入。"""
+        if password_hash is None:
+            return True
+        try:
+            parts = password_hash.split("$")
+            if len(parts) < 4:
+                return True
+            version = parts[1]
+            rounds = int(parts[2])
+        except AttributeError, TypeError, ValueError:
+            return True
+        return version != "2b" or rounds < self.rounds
 
 
 hasher = Hasher()
-
-
-# =========================================================
-# Helpers
-# =========================================================
 
 
 async def hash_password(password: str) -> str:

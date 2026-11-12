@@ -1,27 +1,13 @@
 from __future__ import annotations
 
-import sys
-import types
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from pydantic import SecretStr
 
-if "pkg.vectors" not in sys.modules:
-    vectors_package = types.ModuleType("pkg.vectors")
-    vectors_package.__path__ = [
-        str(Path(__file__).resolve().parents[2] / "pkg" / "vectors")
-    ]
-    sys.modules["pkg.vectors"] = vectors_package
-
-infra_module = sys.modules.get("internal.infra")
-if infra_module is not None and not hasattr(infra_module, "__path__"):
-    sys.modules.pop("internal.infra", None)
-
-from internal.core import AppException, errors  # noqa: E402
-from internal.infra.embedding import client as embedding_client_module  # noqa: E402
+from internal.core import AppException, errors
+from internal.infra.embedding import client as embedding_client_module
 
 
 class FakeEmbedder:

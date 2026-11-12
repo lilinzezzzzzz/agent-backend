@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from internal.services.user import UserService
-from internal.utils.password import PasswordHandler
+import internal.services.user as user_service_module
 
 
 @pytest.fixture
@@ -44,7 +44,11 @@ async def test_password_work_offloads_without_blocking_event_loop(
             check_event_loop_progress()
             return "stored-hash"
 
-        monkeypatch.setattr(PasswordHandler, "hash_password", hash_password)
+        monkeypatch.setattr(
+            user_service_module._password_hasher,
+            "_hash_sync",
+            hash_password,
+        )
         await user_service.create_user(
             username="test-user",
             account="test-account",
@@ -59,7 +63,11 @@ async def test_password_work_offloads_without_blocking_event_loop(
             check_event_loop_progress()
             return True
 
-        monkeypatch.setattr(PasswordHandler, "verify_password", verify_password)
+        monkeypatch.setattr(
+            user_service_module._password_hasher,
+            "_verify_sync",
+            verify_password,
+        )
         user = MagicMock(password_hash="stored-hash")
         assert await user_service.verify_password(user, "test-password")
 
@@ -119,8 +127,8 @@ async def test_duplicate_phone_is_rejected_before_hashing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     user_dao.is_phone_exist.return_value = True
-    hash_password = MagicMock()
-    monkeypatch.setattr(PasswordHandler, "hash_password", hash_password)
+    hash_password = AsyncMock()
+    monkeypatch.setattr(user_service_module._password_hasher, "hash", hash_password)
     with pytest.raises(ValueError, match="已被注册"):
         await user_service.create_user(
             username="test-user",
@@ -128,6 +136,6 @@ async def test_duplicate_phone_is_rejected_before_hashing(
             phone="13800138000",
             password="test-password",
         )
-    hash_password.assert_not_called()
+    hash_password.assert_not_awaited()
     user_dao.create.assert_not_called()
     user_dao.insert.assert_not_awaited()

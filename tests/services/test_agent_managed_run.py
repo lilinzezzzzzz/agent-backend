@@ -25,8 +25,8 @@ from internal.dao.agent_conversation import (
 )
 from internal.models.agent_conversation import AgentRun, AgentRunCheckpoint
 from internal.schemas.agent import AgentStepDTO
-from internal.services.agents import conversation as conversation_module
-from internal.services.agents.conversation import (
+from internal.services.agents import storage as storage_module
+from internal.services.agents.storage import (
     MANAGED_RUN_INTERRUPTED_STATUS,
     MANAGED_RUN_RECOVERY_REQUIRED_STATUS,
     DatabaseAgentStorageBackend,
@@ -816,7 +816,7 @@ async def test_interrupt_pause_logs_wait_time_without_client_text(db_session) ->
     )
 
     # 直接 patch 模块级 logger：整套测试同时运行时 conftest 的 logger mock 会被替换。
-    with patch.object(conversation_module, "logger") as mocked_logger:
+    with patch.object(storage_module, "logger") as mocked_logger:
         await backend.commit_managed_checkpoint(
             user_id=TEST_USER_ID,
             run_id=RUN_ID,
@@ -854,7 +854,7 @@ async def test_interrupt_pause_logs_system_reason_verbatim(db_session) -> None:
         user_id=TEST_USER_ID, run_id=RUN_ID, reason="slow_client"
     )
 
-    with patch.object(conversation_module, "logger") as mocked_logger:
+    with patch.object(storage_module, "logger") as mocked_logger:
         await backend.commit_managed_checkpoint(
             user_id=TEST_USER_ID,
             run_id=RUN_ID,
@@ -884,7 +884,7 @@ async def test_normal_commit_does_not_log_interrupt_pause(db_session) -> None:
     await create_ready_run(backend)
     claimed = await claim(backend)
 
-    with patch.object(conversation_module, "logger") as mocked_logger:
+    with patch.object(storage_module, "logger") as mocked_logger:
         await backend.commit_managed_checkpoint(
             user_id=TEST_USER_ID,
             run_id=RUN_ID,
@@ -916,7 +916,7 @@ async def test_create_unique_race_returns_winner_or_payload_conflict(
 
     backend = build_backend(db_session)
     await create_ready_run(backend)
-    original = conversation_module._get_run_by_create_key_for_update
+    original = storage_module._get_run_by_create_key_for_update
     lookups = 0
 
     async def miss_first_lookup(**kwargs):
@@ -927,7 +927,7 @@ async def test_create_unique_race_returns_winner_or_payload_conflict(
         return await original(**kwargs)
 
     monkeypatch.setattr(
-        conversation_module, "_get_run_by_create_key_for_update", miss_first_lookup
+        storage_module, "_get_run_by_create_key_for_update", miss_first_lookup
     )
 
     async def create_loser():
@@ -995,11 +995,11 @@ def test_only_create_unique_constraint_is_recoverable():
     from sqlalchemy.exc import IntegrityError
 
     error = IntegrityError("insert", {}, Exception("other constraint"))
-    assert not conversation_module._is_create_key_conflict(error)
+    assert not storage_module._is_create_key_conflict(error)
     original = Exception("unique violation")
     cause = Exception("asyncpg unique violation")
     cause.constraint_name = "uq_agent_run_user_create_key"
     original.__cause__ = cause
-    assert conversation_module._is_create_key_conflict(
+    assert storage_module._is_create_key_conflict(
         IntegrityError("insert", {}, original)
     )

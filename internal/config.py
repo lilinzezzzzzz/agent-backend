@@ -45,7 +45,7 @@ from pkg.toolkit.string import mask_string
 # =========================================================
 
 # 支持的数据库类型
-DBType = Literal["mysql", "postgresql"]
+DBType = Literal["postgresql", "sqlite"]
 EndpointGuardSource = Literal["settings", "redis", "settings+redis"]
 EmbeddingProvider = Literal["openai_compatible"]
 AppEnv = Literal["local", "dev", "test", "prod"]
@@ -77,7 +77,7 @@ def _use_app_config_path(path: Path) -> Generator[None]:
 
 # 数据库驱动映射
 DB_DRIVER_MAP: dict[str, str] = {
-    "mysql": "mysql+aiomysql",
+    "sqlite": "sqlite+aiosqlite",
     "postgresql": "postgresql+asyncpg",
 }
 
@@ -278,9 +278,9 @@ class DatabaseReadReplicaSettings(_ConfigModel):
 
 class DatabaseSettings(_ConfigModel):
     type: DBType
-    host: str
-    port: int
-    username: str
+    host: str | None = None
+    port: int | None = None
+    username: str | None = None
     database: str
     echo: bool
     read_replica: DatabaseReadReplicaSettings | None = None
@@ -294,6 +294,17 @@ class DatabaseSettings(_ConfigModel):
         if value not in allowed:
             raise ValueError(f"DB_TYPE must be one of {allowed}")
         return value
+
+    @model_validator(mode="after")
+    def validate_backend_options(self) -> "DatabaseSettings":
+        if self.type == "postgresql":
+            if self.host is None or self.port is None or self.username is None:
+                raise ValueError("PostgreSQL requires db.host, db.port and db.username")
+        elif self.read_replica is not None:
+            raise ValueError("SQLite does not support db.read_replica")
+        if not self.database.strip():
+            raise ValueError("db.database cannot be empty")
+        return self
 
 
 class RedisSettings(_ConfigModel):
@@ -444,42 +455,41 @@ class Settings(BaseSettings):
         """校验 Celery PostgreSQL 幂等状态机的数据库边界。"""
         if self.celery.idempotency_enabled and self.db.type != "postgresql":
             raise ValueError("CELERY_IDEMPOTENCY_ENABLED requires DB_TYPE=postgresql")
+        if self.db.type == "sqlite" and self.celery.reconciler_beat_enabled:
+            raise ValueError(
+                "CELERY_RECONCILER_BEAT_ENABLED requires DB_TYPE=postgresql"
+            )
         return self
 
     @property
-    def sqlalchemy_database_uri(self) -> str:
-        """根据数据库类型动态生成连接 URI。"""
+    def sqlalchemy_database_uri(self) -> URL:
+        """返回原生 URL，直接保留凭据和文件名中的特殊字符。"""
         driver = DB_DRIVER_MAP.get(self.db.type)
         if not driver:
             raise ValueError(f"Unsupported database type: {self.db.type}")
 
         password = self.secrets.db_password.get_secret_value()
 
-        if self.db.type == "mysql":
-            return URL.create(
-                drivername=driver,
-                username=self.db.username,
-                password=password,
-                host=self.db.host,
-                port=self.db.port,
-                database=self.db.database,
-                query={"charset": "utf8mb4"},
-            ).render_as_string(hide_password=False)
-        elif self.db.type == "postgresql":
-            return URL.create(
-                drivername=driver,
-                username=self.db.username,
-                password=password,
-                host=self.db.host,
-                port=self.db.port,
-                database=self.db.database,
-            ).render_as_string(hide_password=False)
-        else:
-            raise ValueError(f"Unsupported database type: {self.db.type}")
+        if self.db.type == "sqlite":
+            database = self.db.database
+            if database != ":memory:":
+                path = Path(database).expanduser()
+                database = str(
+                    path if path.is_absolute() else (BASE_DIR / path).resolve()
+                )
+            return URL.create(drivername=driver, database=database)
+        return URL.create(
+            drivername=driver,
+            username=self.db.username,
+            password=password,
+            host=self.db.host,
+            port=self.db.port,
+            database=self.db.database,
+        )
 
     @property
-    def sqlalchemy_read_database_uri(self) -> str | None:
-        """根据数据库类型动态生成只读副本连接 URI。"""
+    def sqlalchemy_read_database_uri(self) -> URL | None:
+        """返回 PostgreSQL 只读副本的原生 URL。"""
         read_replica = self.db.read_replica
         if read_replica is None:
             return None
@@ -498,27 +508,14 @@ class Settings(BaseSettings):
         )
         database = read_replica.database or self.db.database
 
-        if self.db.type == "mysql":
-            return URL.create(
-                drivername=driver,
-                username=username,
-                password=password,
-                host=host,
-                port=port,
-                database=database,
-                query={"charset": "utf8mb4"},
-            ).render_as_string(hide_password=False)
-        elif self.db.type == "postgresql":
-            return URL.create(
-                drivername=driver,
-                username=username,
-                password=password,
-                host=host,
-                port=port,
-                database=database,
-            ).render_as_string(hide_password=False)
-        else:
-            raise ValueError(f"Unsupported database type: {self.db.type}")
+        return URL.create(
+            drivername=driver,
+            username=username,
+            password=password,
+            host=host,
+            port=port,
+            database=database,
+        )
 
     @property
     def redis_url(self) -> str:

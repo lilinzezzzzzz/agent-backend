@@ -1,23 +1,9 @@
 import asyncio
-import sys
-from unittest.mock import MagicMock
 
 import anyio
 import pytest
 
-# --- 取消 conftest.py 的 mock ---
-if "pkg.request_context" in sys.modules:
-    del sys.modules["pkg.request_context"]
-
-# --- Mock 依赖 ---
-mock_logger = MagicMock()
-sys.modules["pkg.async_logger"] = MagicMock()
-sys.modules["pkg.async_logger"].logger = mock_logger
-
-# --- 导入你的代码 ---
-# NOTE: 必须在 mock 之后导入，因为 async_context 依赖 async_logger
-from pkg.request_context import (  # noqa: E402
-    clear,
+from pkg.request_context import (
     get_trace_id,
     get_user_id,
     init,
@@ -26,21 +12,7 @@ from pkg.request_context import (  # noqa: E402
     set_user_id,
     set_val,
 )
-
-import pkg  # noqa: E402
-import pkg.request_context as request_context_module  # noqa: E402
-
-pkg.request_context = request_context_module
-
-
-# --- Fixture ---
-@pytest.fixture(autouse=True)
-def clean_context():
-    sys.modules["pkg.request_context"] = request_context_module
-    pkg.request_context = request_context_module
-    clear()
-    mock_logger.reset_mock()
-    yield
+import pkg.request_context as request_context_module
 
 
 # --- 测试用例 ---

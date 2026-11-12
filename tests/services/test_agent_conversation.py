@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import pytest
 from uuid import UUID
+
+import pytest
 
 from internal.core import AppException, errors
 from internal.dao.agent_conversation import (
@@ -18,11 +19,9 @@ from internal.models.agent_conversation import (
     AgentRunStep,
     AgentSession,
 )
-from internal.services.agents.conversation import (
-    AgentConversationService,
-    DatabaseAgentStorageBackend,
-)
 from internal.schemas.agent import AgentRunResultDTO, AgentStepDTO
+from internal.services.agents.conversation import AgentConversationService
+from internal.services.agents.storage import DatabaseAgentStorageBackend
 
 TEST_USER_ID = UUID("00000000-0000-7000-8000-000000000999")
 OTHER_USER_ID = UUID("00000000-0000-7000-8000-000000001000")

@@ -630,3 +630,52 @@ def test_autogenerate_freezes_json_types_and_renders_new_revisions(
     assert result.returncode == 0, result.stdout + result.stderr
     result = run_alembic(postgres_project, "check", config_path=config_path)
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("committed_identity", [False, True])
+async def test_scoped_lock_try_contention_keeps_caller_transaction_usable(
+    postgres_project: Path,
+    postgres_engine: AsyncEngine,
+    committed_identity: bool,
+) -> None:
+    """覆盖首次插入竞争和已有身份行竞争，不操作测试容器外的数据库。"""
+    from internal.dao.scoped_operation_lock import ScopedOperationLockDao
+
+    result = run_alembic(postgres_project, "upgrade", "head")
+    assert result.returncode == 0, result.stdout + result.stderr
+    sessions = async_sessionmaker(postgres_engine, expire_on_commit=False)
+    dao = ScopedOperationLockDao(session_provider=sessions)
+    async with sessions() as owner, sessions() as contender:
+        if committed_identity:
+            async with owner.begin():
+                assert await dao.acquire(
+                    session=owner, operation_scope="test", resource_key="one", wait=True
+                )
+        await owner.begin()
+        assert await dao.acquire(
+            session=owner, operation_scope="test", resource_key="one", wait=True
+        )
+        await contender.begin()
+        try:
+            assert not await dao.acquire(
+                session=contender,
+                operation_scope="test",
+                resource_key="one",
+                wait=False,
+            )
+            assert await contender.scalar(text("SELECT 1")) == 1
+            assert (
+                await contender.scalar(text("SELECT current_setting('lock_timeout')"))
+                == "0"
+            )
+            await owner.rollback()
+            assert await dao.acquire(
+                session=contender,
+                operation_scope="test",
+                resource_key="one",
+                wait=False,
+            )
+        finally:
+            await owner.rollback()
+            await contender.rollback()

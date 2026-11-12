@@ -11,10 +11,13 @@ from internal.dao.external_identity import (
 )
 from internal.dao.user import UserDao, new_user_dao
 from internal.models.user import User
-from internal.utils.password import PasswordHandler
-from pkg.concurrency import anyio_run_in_thread
 from pkg.database.audit import AuditActor
+from pkg.security import Hasher
 from pkg.toolkit.timer import utc_now_naive
+
+
+# 保留 Service 既有的空密码行为；公开请求仍由 schema 执行密码长度校验。
+_password_hasher = Hasher(allow_empty=True)
 
 
 class UserService:
@@ -49,11 +52,7 @@ class UserService:
         if not user.password_hash:
             return False
 
-        return await anyio_run_in_thread(
-            PasswordHandler.verify_password,
-            password,
-            user.password_hash,
-        )
+        return await _password_hasher.verify(password, user.password_hash)
 
     async def create_user(
         self, username: str, account: str, phone: str, password: str
@@ -74,11 +73,8 @@ class UserService:
         if await self._user_dao.is_phone_exist(phone):
             raise ValueError(f"手机号 {phone} 已被注册")
 
-        # bcrypt 在工作线程执行，避免阻塞事件循环。
-        password_hash = await anyio_run_in_thread(
-            PasswordHandler.hash_password,
-            password,
-        )
+        # Hasher 统一在线程中执行 bcrypt，避免阻塞事件循环。
+        password_hash = await _password_hasher.hash(password)
 
         # 创建用户
         user = self._user_dao.create(
@@ -125,7 +121,7 @@ class UserService:
                 nickname=nickname,
                 avatar=avatar,
             )
-        except IntegrityError:
+        except IntegrityError as exc:
             # 并发首登时仅一个事务能创建唯一身份。失败方读取获胜事务的结果。
             identity = await self._external_identity_dao.get_by_identity(
                 provider=provider,
@@ -138,7 +134,7 @@ class UserService:
             if user is None:
                 raise RuntimeError(
                     f"External identity {identity.id} references a missing user"
-                )
+                ) from exc
             return user
 
     async def _get_or_create_external_identity_in_transaction(

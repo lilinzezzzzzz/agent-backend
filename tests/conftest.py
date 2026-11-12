@@ -5,7 +5,7 @@ Pytest 配置文件 (conftest.py)
 所有 fixtures 和 hooks 在此文件定义后，可在任意测试文件中直接使用。
 
 主要功能：
-1. Mock 外部依赖（logger、UUIDv7、配置等）
+1. 使用真实基础模块，按测试隔离日志和请求上下文
 2. 提供数据库测试 fixtures（内存 SQLite）
 3. 提供 Redis 测试 fixtures
 4. 提供 FastAPI 测试客户端
@@ -16,11 +16,8 @@ import inspect
 import os
 import subprocess
 import sys
-import types
-import uuid
 from collections.abc import AsyncGenerator, Generator
 from datetime import UTC, datetime
-from enum import StrEnum
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -47,149 +44,6 @@ from sqlalchemy.ext.asyncio import (
 PROJECT_ROOT = Path(__file__).parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
-
-# ==========================================
-# 2. Mock 外部依赖 (必须在导入内部模块之前)
-# ==========================================
-
-_skip_logger_mock = False
-_skip_context_mock = False
-if sys.argv:
-    for arg in sys.argv:
-        normalized_arg = arg.replace("\\", "/")
-        if (
-            "tests/logger" in normalized_arg
-            or "logger/" in normalized_arg
-            or "test_logger" in normalized_arg
-        ):
-            _skip_logger_mock = True
-        if "test_context" in normalized_arg:
-            _skip_context_mock = True
-
-if not _skip_logger_mock:
-    # Mock logger
-    mock_logger = MagicMock()
-    mock_logger.info = MagicMock()
-    mock_logger.error = MagicMock()
-    mock_logger.warning = MagicMock()
-    mock_logger.success = MagicMock()
-    mock_logger.debug = MagicMock()
-    mock_logger.critical = MagicMock()
-    mock_logger.complete = AsyncMock()
-
-    # Mock pkg.logger 模块
-    mock_logger_module = types.ModuleType("pkg.logger")
-    mock_logger_module.__path__ = [str(PROJECT_ROOT / "pkg" / "logger")]
-    mock_logger_module.logger = mock_logger
-
-    sys.modules["pkg.logger"] = mock_logger_module
-
-    from pkg.logger.handler import (  # noqa: PLC0415
-        LogFormat,
-        LoggerHandler,
-        TimezoneType,
-    )
-    from pkg.logger.intercept import InterceptHandler  # noqa: PLC0415
-
-    def init_logger(
-        *,
-        level: str = "INFO",
-        base_log_dir: Path | None = None,
-        timezone: TimezoneType = "UTC",
-        enqueue: bool = True,
-        log_format: LogFormat = LogFormat.TEXT,
-        write_to_file: bool = False,
-        write_to_console: bool = True,
-    ):
-        logger_manager = LoggerHandler(
-            level=level,
-            base_log_dir=base_log_dir,
-            timezone=timezone,
-            enqueue=enqueue,
-            log_format=log_format,
-        )
-        logger_obj = logger_manager.setup(
-            write_to_file=write_to_file, write_to_console=write_to_console
-        )
-        mock_logger_module._logger_manager = logger_manager
-        mock_logger_module._logger = logger_obj
-        mock_logger_module.logger = logger_obj
-        return logger_obj
-
-    def get_logger_manager():
-        logger_manager = getattr(mock_logger_module, "_logger_manager", None)
-        if logger_manager is None:
-            raise RuntimeError(
-                "LoggerHandler not initialized. Call init_logger() first."
-            )
-        return logger_manager
-
-    mock_logger_module.LogFormat = LogFormat
-    mock_logger_module.LoggerHandler = LoggerHandler
-    mock_logger_module.TimezoneType = TimezoneType
-    # 保留真实转发器导出，使根目录收集与定向日志测试使用同一实现。
-    mock_logger_module.InterceptHandler = InterceptHandler
-    mock_logger_module.init_logger = init_logger
-    mock_logger_module.get_logger_manager = get_logger_manager
-    mock_logger_module._logger_manager = None
-    mock_logger_module._logger = None
-else:
-    # logger 测试需要真实的模块，创建一个简单的 mock_logger 供其他 fixture 使用
-    mock_logger = MagicMock()
-    mock_logger.info = MagicMock()
-    mock_logger.error = MagicMock()
-    mock_logger.warning = MagicMock()
-    mock_logger.success = MagicMock()
-    mock_logger.debug = MagicMock()
-    mock_logger.critical = MagicMock()
-    mock_logger.complete = AsyncMock()
-
-# Mock pkg.request_context 模块
-if not _skip_context_mock:
-
-    class MockContextKey(StrEnum):
-        USER_ID = "user_id"
-        TRACE_ID = "trace_id"
-
-    mock_context = types.ModuleType("pkg.request_context")
-    mock_context.ContextKey = MockContextKey
-    mock_context.get_user_id = MagicMock(
-        return_value=uuid.UUID("00000000-0000-7000-8000-000000000999")
-    )
-    mock_context.get_trace_id = MagicMock(return_value="test-trace-id")
-    mock_context.set_user_id = MagicMock()
-    mock_context.set_trace_id = MagicMock()
-    mock_context.init = MagicMock(return_value={})
-    mock_context.clear = MagicMock()
-    mock_context.set_val = MagicMock()
-    mock_context.get_val = MagicMock(return_value=None)
-    sys.modules["pkg.request_context"] = mock_context
-    import pkg  # noqa: PLC0415
-
-    pkg.request_context = mock_context
-    logger_handler_module = sys.modules.get("pkg.logger.handler")
-    if logger_handler_module is not None:
-        logger_handler_module.context = mock_context
-    tracing_otel_module = sys.modules.get("pkg.tracing.otel")
-    if tracing_otel_module is not None:
-        tracing_otel_module.request_context = mock_context
-
-# Mock UUIDv7 生成器
-_id_counter = 0
-
-
-def mock_gen_id() -> uuid.UUID:
-    global _id_counter
-    _id_counter += 1
-    return uuid.UUID(f"00000000-0000-7000-8000-{_id_counter:012x}")
-
-
-mock_ids_module = types.ModuleType("pkg.ids")
-mock_ids_module.uuid7_unique_id = MagicMock(side_effect=mock_gen_id)
-mock_ids_module.uuid7_unique_str_id = MagicMock(side_effect=lambda: mock_gen_id().hex)
-
-
-sys.modules["pkg.ids"] = mock_ids_module
 
 # ==========================================
 # 3. 测试配置
@@ -238,43 +92,44 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
 
 
 @pytest.fixture(autouse=True)
-def restore_default_module_mocks(request: pytest.FixtureRequest):
-    """Restore broad test mocks that individual modules may replace during collection."""
-    test_path = str(request.node.fspath).replace("\\", "/")
+def isolate_logging(monkeypatch: pytest.MonkeyPatch) -> Generator[None, None, None]:
+    """绑定真实 Loguru；每个测试自行配置输出，结束后清理自己添加的 sink。"""
+    from loguru import logger
 
-    if not _skip_context_mock and "test_context" not in test_path:
-        sys.modules["pkg.request_context"] = mock_context
-        import pkg  # noqa: PLC0415
+    import pkg.logger as logger_module
 
-        pkg.request_context = mock_context
-        database_base = sys.modules.get("pkg.database.base")
-        if database_base is not None:
-            database_base.context = mock_context
-        logger_handler_module = sys.modules.get("pkg.logger.handler")
-        if logger_handler_module is not None:
-            logger_handler_module.context = mock_context
-        tracing_otel_module = sys.modules.get("pkg.tracing.otel")
-        if tracing_otel_module is not None:
-            tracing_otel_module.request_context = mock_context
+    monkeypatch.setattr(logger_module, "_logger", logger)
+    monkeypatch.setattr(logger_module, "_logger_manager", None)
+    logger.remove()
+    try:
+        yield
+    finally:
+        logger.complete()
+        logger.remove()
 
-    restore_logger: tuple[object, object] | None = None
-    if _skip_logger_mock and "tests/logger" not in test_path:
-        from loguru import logger as real_logger  # noqa: PLC0415
 
-        import pkg.logger as pkg_logger_module  # noqa: PLC0415
+@pytest.fixture(autouse=True)
+def isolate_settings_cache() -> Generator[None, None, None]:
+    """独立清理配置缓存，不依赖 factory_cache 或其他业务模块被导入。"""
+    config_module = sys.modules.get("internal.config")
+    if config_module is not None:
+        config_module.reset_settings()
+    try:
+        yield
+    finally:
+        # 配置也可能是在当前测试中首次导入的。
+        config_module = sys.modules.get("internal.config")
+        if config_module is not None:
+            config_module.reset_settings()
 
-        restore_logger = (
-            pkg_logger_module._logger,
-            pkg_logger_module._logger_manager,
-        )
-        pkg_logger_module._logger = real_logger
 
-    yield
+@pytest.fixture(autouse=True)
+def isolate_request_context() -> Generator[None, None, None]:
+    """为每个测试建立独立上下文，离开时恢复调用方原状态。"""
+    from pkg.request_context import scoped_values
 
-    if restore_logger is not None:
-        import pkg.logger as pkg_logger_module  # noqa: PLC0415
-
-        pkg_logger_module._logger, pkg_logger_module._logger_manager = restore_logger
+    with scoped_values():
+        yield
 
 
 # ==========================================
@@ -345,7 +200,7 @@ async def db_session(
     - 自动建表
     - 事务回滚（测试隔离）
     """
-    # 导入 Base（需要在 mock 之后导入）
+    # 使用真实 ORM 基类，在内存数据库中建表。
     from pkg.database.base import Base
 
     # 创建所有表
@@ -495,7 +350,7 @@ def app():
             access_token=SimpleNamespace(expire_seconds=3600),
         )
         mock_settings.cors = SimpleNamespace(origins=["*"])
-        mock_settings.db = SimpleNamespace(type="mysql", echo=False)
+        mock_settings.db = SimpleNamespace(type="sqlite", echo=False)
         mock_settings.log = SimpleNamespace(
             format="text",
             base_dir=None,
@@ -576,17 +431,6 @@ def sample_users_data() -> list[dict[str, Any]]:
 
 
 @pytest.fixture
-def reset_id_counter():
-    """重置 Mock ID 计数器的 fixture"""
-
-    def _reset(start: int = 0):
-        global _id_counter
-        _id_counter = start
-
-    return _reset
-
-
-@pytest.fixture
 def freeze_time():
     """
     冻结时间的 fixture。
@@ -632,17 +476,13 @@ def import_modules():
 
 
 @pytest.fixture
-def logger_mock() -> MagicMock:
-    """提供 logger mock 对象，用于验证日志调用"""
-    return mock_logger
+def logger_mock(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+    """按需替换 logger 的实际目标，不替换模块或已导入的代理。"""
+    import pkg.logger as logger_module
 
-
-@pytest.fixture(autouse=True)
-def reset_logger_mock():
-    """每个测试前重置 logger mock"""
-    mock_logger.reset_mock()
-    yield
-    mock_logger.reset_mock()
+    logger = MagicMock()
+    monkeypatch.setattr(logger_module, "_logger", logger)
+    return logger
 
 
 # ==========================================
@@ -684,26 +524,12 @@ def cleanup_after_test():
     """
     yield
 
-    # 重置配置与 dependency factory 缓存
-    try:
-        from internal.factory_cache import reset_factory_caches
-
-        reset_factory_caches()
-    except ImportError, TypeError:
-        pass
-
-    # 重置数据库连接
-    try:
-        from internal.infra.database import reset_async_db
-
-        reset_async_db()
-    except ImportError, TypeError:
-        pass
-
-    # 重置 Redis 连接
-    try:
-        from internal.infra.redis import reset_async_redis
-
-        reset_async_redis()
-    except ImportError, TypeError:
-        pass
+    # 仅清理当前进程已使用的资源，不为清理而导入业务模块。
+    for module_name, reset_name in (
+        ("internal.factory_cache", "reset_factory_caches"),
+        ("internal.infra.database", "reset_async_db"),
+        ("internal.infra.redis", "reset_async_redis"),
+    ):
+        module = sys.modules.get(module_name)
+        if module is not None:
+            getattr(module, reset_name)()

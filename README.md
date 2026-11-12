@@ -27,8 +27,8 @@ README 只记录当前仓库可直接核对的能力；更细的设计约束和�
   Celery `celery_app`；应用装配分别位于 `internal/app.py` 和 `internal/infra/celery/application.py`。
 - 配置加载：`APP_ENV` 只在根目录 `.env` 维护；应用据此加载 `configs/app.{APP_ENV}.toml` 和
   `.secrets`，并严格隔离非敏感配置与凭据字段。
-- 数据库：异步 SQLAlchemy 连接池，支持主库和可选只读副本；配置层支持 PostgreSQL、MySQL DSN，
-  Alembic 迁移当前只支持 PostgreSQL。
+- 数据库：仅支持 PostgreSQL 与 SQLite。PostgreSQL 用于部署、Alembic 迁移和强并发，可配置只读副本；
+  SQLite 用于单元测试和轻量本地存储，不提供行锁、只读副本或 PostgreSQL Celery 状态机。
 - Redis：连接池、业务缓存封装、认证 token metadata、Agent action confirmation / idempotency 缓存。
 - 认证：Token 认证、内部签名认证、匿名路由分组、微信登录接入点。
 - 中间件：请求日志、CORS、Endpoint Guard、统一异常处理、GZip。
@@ -44,7 +44,8 @@ README 只记录当前仓库可直接核对的能力；更细的设计约束和�
 - Redis
 - PostgreSQL（当前依赖默认包含 `asyncpg`，仓库配置示例也默认使用 PostgreSQL）
 
-配置层支持 `mysql`、`postgresql` 两种 `db.type`，但当前 `pyproject.toml` 默认只包含 PostgreSQL 异步驱动 `asyncpg`。如果切换到 MySQL，需要先补充 `aiomysql` 运行时驱动，再同步锁文件和部署环境。
+配置层仅接受 `postgresql`、`sqlite` 两种 `db.type`，依赖已包含 `asyncpg` 和 `aiosqlite`。
+SQLite 的配置与能力边界见 [数据库迁移指南](docs/development/database_migrations.md#sqlite-轻量本地存储)。
 
 使用向量集成测试或真实向量检索时，还需要准备对应的 Milvus 后端依赖。
 
@@ -253,12 +254,9 @@ uv run celery -A entrypoints.celery_app:celery_app beat -l info
 | `POST` | `/v1/agent/chat` | 统一 Agent 聊天入口 |
 | `POST` | `/v1/agent/order/support` | 订单售后 Agent |
 | `POST` | `/v1/agent/payment/support` | 支付支持 Agent |
-| `POST` | `/v1/public/test/test_validation_error` | 请求校验异常测试 |
-| `GET` | `/v1/public/test/test_raise_exception` | 通用异常测试 |
-| `GET` | `/v1/public/test/test_raise_app_exception` | 应用异常测试 |
-| `GET` | `/v1/public/test/test_contextvars_on_asyncio_task` | contextvars 异步任务测试 |
-| `GET` | `/v1/public/test/test/sse-stream` | SSE 流式响应测试 |
-| `GET` | `/v1/public/test/chat/sse-stream/timeout` | SSE chunk timeout 测试 |
+
+实验性请求校验、异常注入、后台任务和 SSE 路由由独立 demo app 提供，不随常规 API 启动；
+启动命令与原路径见 [API 演示说明](examples/api/README.md)。
 
 认证规则：
 
@@ -308,6 +306,9 @@ AgentScope 2.0 的推荐接入路线是嵌入官方 Agent Service，而不是自
 
 - `entrypoints/`：进程入口，包含 FastAPI 入口、Worker / Beat 共用的 Celery 入口，以及 API 和 Worker 启动脚本。
 - `internal/`：业务应用代码，包含路由、中间件、配置、服务、DAO、缓存、模型、Schema、任务和业务 Agent。
+- `internal/services/agents/`：`conversation.py` 为会话用例入口，`storage.py` 统一持有数据库事务，
+  `runtime.py` 适配执行协议，`execution.py` 编排受管理运行。
+- `internal/schemas/agent/`：按聊天、受管理运行、流事件和 JSON 值分组，包入口保留公开 schema/DTO 导入。
 - `pkg/`：可复用基础包，包含通用 Agent、数据库、日志、OSS、第三方登录、加解密、toolkit 和向量检索抽象。
 - `examples/`：可运行示例代码，不作为生产运行时基础包。
 - `configs/`：非敏感 TOML 环境配置。
@@ -330,11 +331,18 @@ AgentScope 2.0 的推荐接入路线是嵌入官方 Agent Service，而不是自
 
 ## 测试与质量检查
 
-运行全部测试：
+测试使用真实的 `pkg.logger`、`pkg.request_context` 和 `pkg.ids`；根 fixture 按测试隔离日志输出与
+请求上下文，API 用例在局部 `conftest.py` 中提供测试身份。需要替身时使用局部 fixture、`monkeypatch`
+或 FastAPI `dependency_overrides`，不在收集阶段覆盖 `sys.modules`，也不根据 pytest 命令行选择模块实现。
+
+运行不依赖外部服务的回归：
 
 ```bash
-uv run pytest
+uv run pytest -m "not integration"
 ```
+
+仅检查全量收集可使用 `uv run pytest --collect-only -q`；外部服务及测试目标准备完毕后，再使用
+`uv run pytest` 运行包含 integration 的全部用例。
 
 测试默认使用 pytest 的系统临时目录。需要保留或查看测试产物时，可指定仓库内目录：
 

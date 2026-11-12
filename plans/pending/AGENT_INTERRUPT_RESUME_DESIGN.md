@@ -42,8 +42,8 @@ PostgreSQL 并发 / 多实例、真实客户端断连与部署 shutdown 预算�
 | `pkg/agents/state.py`（新增） | 运行快照、阶段、版本化 JSON 编解码；拒绝不可序列化状态 |
 | `pkg/agents/runtime.py`（新增） | 定义 `AgentRunRuntime` 协议：读取控制状态、提交 checkpoint、检查执行权限；无数据库实现 |
 | `pkg/agents/react.py` | 从新状态或已校验快照执行；在动作、工具和终态边界调用 runtime；保留原有无持久化调用方式 |
-| `internal/services/agents/execution.py`（新增） | 用户授权、claim/lease、恢复校验、Builder 选择、请求生命周期和 DTO 组装 |
-| 现有 `conversation.py`、DAO、Model | 实现协议所需事务、步骤保存及最终消息提交；拓展现有存储后端 |
+| `internal/services/agents/execution.py`、`runtime.py` | 用户授权、claim/lease、恢复校验、Builder 选择、请求生命周期和 DTO 组装 |
+| `storage.py`、DAO、Model | 实现协议所需事务、步骤保存及最终消息提交；拓展现有存储后端 |
 | 现有订单/支付 Builder | 注入冻结上下文、执行配置和工具；工具的恢复策略必须显式声明 |
 | Controller / `stream.py` | 仅做输入校验、响应与事件转换；不访问 session、不决定恢复规则 |
 
@@ -57,7 +57,7 @@ PostgreSQL 并发 / 多实例、真实客户端断连与部署 shutdown 预算�
 ### 3.2 新入口与兼容策略
 
 首期新增受管理 run API，先创建 run 再执行，保证客户端在模型调用前已经拿到可打断的 `run_id`。
-沿用现有 `/v1` token 认证和 `BaseResponse[T]`，DTO 放在 `internal/schemas/agent.py`。
+沿用现有 `/v1` token 认证和 `BaseResponse[T]`，DTO 放在 `internal/schemas/agent/`。
 
 现有六个聊天/支持接口保持现有请求及响应语义；它们不会因为有 `run_id` 就自动变为可恢复。
 新增 API 复用同一订单/支付业务 Builder 和 Service 能力。API 调用方需要切换到新生命周期才能使用本能力。
@@ -260,7 +260,7 @@ checkpoint 可能含问题、工具结果与短期 token，按业务数据限制
     `max_steps` 不重置、`final_ready` 直接完成终态、lease 失效停止、非重放工具拒绝恢复）。
 - [x] 扩展现有 Model/DAO/存储后端及 PostgreSQL 基线 DDL；实现原子 step/checkpoint/terminal 写入。
   - `internal/models/agent_conversation.py`、`internal/dao/agent_conversation.py`、
-    `internal/services/agents/conversation.py`；当时同步的建库 SQL 快照现已移除，结构以 `migrations/versions/` 为准；
+    `internal/services/agents/storage.py`；当时同步的建库 SQL 快照现已移除，结构以 `migrations/versions/` 为准；
   - `tests/services/test_agent_managed_run.py`（步骤与现场同事务提交、终态唯一 assistant 消息、
     `complete_run` 复用已提交步骤）、`tests/orm/test_postgresql_ddl.py`。
 - [x] 实现 lease、fence 和 request_key；并发 resume 仅一个获执行权，旧 token 不能提交结果。
@@ -271,7 +271,7 @@ checkpoint 可能含问题、工具结果与短期 token，按业务数据限制
   - `tests/services/test_agent_execution.py`（order / payment / chat 三种入口、冻结会话上下文、
     unsupported 降级、重复 resume 幂等）。
 - [x] 新增 create/get/interrupt/resume/resume-stream 接口、schema 与 SSE 适配，保持旧接口 contract。
-  - `internal/controllers/api/agent.py`、`internal/schemas/agent.py`、`internal/services/agents/stream.py`；
+  - `internal/controllers/api/agent.py`、`internal/schemas/agent/`、`internal/services/agents/stream.py`；
   - `tests/api/test_agent_runs.py`；`tests/api/test_agent.py` 未修改且继续通过。
 - [ ] 完成取消、慢客户端、工具超时、shutdown 和异常恢复测试；确认不可安全重放时拒绝恢复。
   - 已覆盖：不可安全重放拒绝恢复（`recovery_required` / `AgentResumeUnsafe`）、取消与慢消费转换成

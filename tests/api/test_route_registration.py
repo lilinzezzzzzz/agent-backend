@@ -39,5 +39,5 @@ def test_registered_openapi_excludes_span_demo() -> None:
     schema = app.openapi()
 
     assert "/v1/auth/login" in schema["paths"]
-    assert "/v1/public/test/test_validation_error" in schema["paths"]
+    assert not any(path.startswith("/v1/public/test/") for path in schema["paths"])
     assert not any("/logger-span" in path for path in schema["paths"])

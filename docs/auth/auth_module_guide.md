@@ -143,10 +143,14 @@ def generate_token() -> str:
 
 ### 密码验证
 
-当前实现中，密码验证逻辑标记为 TODO。实际部署时应：
+密码哈希统一由 `pkg.security.Hasher` 实现，`UserService` 负责用户与注册流程：
 
-- 使用 bcrypt 或 argon2 等加密算法存储密码
-- 在登录时校验密码哈希值
+- 默认使用 bcrypt `$2b$` 格式和成本 12；哈希、验证均 offload 到工作线程。
+- `Hasher` 默认拒绝空密码，`UserService` 显式使用 `allow_empty=True` 保留既有 Service 行为。
+  公开注册和登录请求仍由 schema 执行 6～100 字符校验，没有放宽 API 输入规则。
+- 无密码账号或非法哈希验证返回 `False`；生成哈希失败时不写入用户。
+- 既有 bcrypt 哈希可以继续验证，不自动重写；`needs_rehash()` 只比较版本与当前成本策略。
+- bcrypt 的长度限制按 UTF-8 字节计，不能用截断密码的方式绕过；超出限制的生成错误继续向调用方传播。
 
 ---
 
@@ -162,7 +166,6 @@ def generate_token() -> str:
 
 ## 扩展功能建议
 
-- [ ] 实现密码加密验证
 - [ ] 添加 refresh token 机制
 - [ ] 实现记住我功能（长期 token）
 - [ ] 添加登录失败次数限制

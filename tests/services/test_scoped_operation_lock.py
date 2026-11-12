@@ -1,10 +1,12 @@
 """Scoped operation table lock 单元测试。"""
 
+from contextlib import asynccontextmanager
 from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
-from sqlalchemy.dialects import mysql, sqlite
+from sqlalchemy import Select
+from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,7 +18,7 @@ from pkg.database.audit import AuditActor, AuditActorType
 
 
 class FakeDbapiError(Exception):
-    """模拟 DBAPI 异常，提供 MySQL error code。"""
+    """模拟 DBAPI 异常，提供 PostgreSQL SQLSTATE。"""
 
 
 class FakeResult:
@@ -48,10 +50,22 @@ class FakeSession:
             resource_key="key",
         )
         self._select_error = select_error
+        self.savepoint_rolled_back = False
         self.executions: list[tuple[Any, dict[str, Any] | None]] = []
 
     def in_transaction(self) -> bool:
         return self._in_transaction
+
+    @asynccontextmanager
+    async def begin_nested(self):
+        try:
+            yield
+        except Exception:
+            self.savepoint_rolled_back = True
+            raise
+
+    async def scalar(self, statement):
+        return "0"
 
     def get_bind(self):
         return self._bind
@@ -73,9 +87,10 @@ def lock_service(lock_dao: ScopedOperationLockDao) -> ScopedOperationLockService
     return ScopedOperationLockService(dao=lock_dao)
 
 
-def _mysql_lock_error(code: int) -> OperationalError:
+def _postgresql_lock_error(code: str) -> OperationalError:
     orig = FakeDbapiError()
-    orig.args = (code, "lock unavailable")
+    orig.sqlstate = code
+    orig.args = ("lock unavailable",)
     return OperationalError("SELECT ... FOR UPDATE NOWAIT", {}, orig)
 
 
@@ -122,7 +137,7 @@ class TestScopedOperationLockDao:
         self,
         lock_dao: ScopedOperationLockDao,
     ):
-        session = FakeSession(dialect=mysql.dialect())
+        session = FakeSession(dialect=postgresql.dialect())
 
         acquired = await lock_dao.acquire(
             session=cast(AsyncSession, session),
@@ -134,10 +149,13 @@ class TestScopedOperationLockDao:
 
         insert_stmt, insert_params = session.executions[0]
         select_stmt, select_params = session.executions[1]
-        compiled_select = str(select_stmt.compile(dialect=mysql.dialect()))
+        compiled_select = str(select_stmt.compile(dialect=postgresql.dialect()))
 
         assert acquired is True
-        assert "INSERT IGNORE INTO scoped_operation_locks" in insert_stmt.text
+        assert "INSERT INTO scoped_operation_locks" in insert_stmt.text
+        assert (
+            "ON CONFLICT (operation_scope, resource_key) DO NOTHING" in insert_stmt.text
+        )
         assert insert_params is not None
         assert insert_params["operation_scope"] == "scope"
         assert insert_params["resource_key"] == "key"
@@ -151,7 +169,7 @@ class TestScopedOperationLockDao:
     async def test_try_mode_uses_for_update_nowait(
         self, lock_dao: ScopedOperationLockDao
     ):
-        session = FakeSession(dialect=mysql.dialect())
+        session = FakeSession(dialect=postgresql.dialect())
 
         acquired = await lock_dao.acquire(
             session=cast(AsyncSession, session),
@@ -160,27 +178,33 @@ class TestScopedOperationLockDao:
             wait=False,
         )
 
-        insert_params = session.executions[0][1]
+        insert_params = next(
+            params
+            for stmt, params in session.executions
+            if getattr(stmt, "text", "").strip().startswith("INSERT")
+        )
         assert insert_params is not None
         assert insert_params["creator_id"] is None
         assert insert_params["creator_type"] == AuditActorType.SYSTEM.value
 
-        select_stmt = session.executions[1][0]
-        compiled_select = str(select_stmt.compile(dialect=mysql.dialect()))
+        select_stmt = next(
+            stmt for stmt, _ in session.executions if isinstance(stmt, Select)
+        )
+        compiled_select = str(select_stmt.compile(dialect=postgresql.dialect()))
 
         assert acquired is True
         assert "FOR UPDATE NOWAIT" in compiled_select
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("error_code", [1205, 1213, 3572])
+    @pytest.mark.parametrize("error_code", ["55P03"])
     async def test_try_mode_returns_false_when_lock_is_unavailable(
         self,
         lock_dao: ScopedOperationLockDao,
-        error_code: int,
+        error_code: str,
     ):
         session = FakeSession(
-            dialect=mysql.dialect(),
-            select_error=_mysql_lock_error(error_code),
+            dialect=postgresql.dialect(),
+            select_error=_postgresql_lock_error(error_code),
         )
 
         acquired = await lock_dao.acquire(
@@ -191,6 +215,7 @@ class TestScopedOperationLockDao:
         )
 
         assert acquired is False
+        assert session.savepoint_rolled_back
 
     @pytest.mark.asyncio
     async def test_wait_mode_reraises_database_error(
@@ -198,8 +223,8 @@ class TestScopedOperationLockDao:
         lock_dao: ScopedOperationLockDao,
     ):
         session = FakeSession(
-            dialect=mysql.dialect(),
-            select_error=_mysql_lock_error(3572),
+            dialect=postgresql.dialect(),
+            select_error=_postgresql_lock_error("55P03"),
         )
 
         with pytest.raises(OperationalError):
@@ -215,7 +240,7 @@ class TestScopedOperationLockDao:
         self,
         lock_dao: ScopedOperationLockDao,
     ):
-        session = FakeSession(dialect=mysql.dialect(), in_transaction=False)
+        session = FakeSession(dialect=postgresql.dialect(), in_transaction=False)
 
         with pytest.raises(RuntimeError, match="requires an active transaction"):
             await lock_dao.acquire(
@@ -228,10 +253,10 @@ class TestScopedOperationLockDao:
         assert session.executions == []
 
     @pytest.mark.asyncio
-    async def test_rejects_non_mysql_session(self, lock_dao: ScopedOperationLockDao):
+    async def test_rejects_sqlite_row_lock(self, lock_dao: ScopedOperationLockDao):
         session = FakeSession(dialect=sqlite.dialect())
 
-        with pytest.raises(RuntimeError, match="requires MySQL/MariaDB, got sqlite"):
+        with pytest.raises(RuntimeError, match="requires PostgreSQL, got sqlite"):
             await lock_dao.acquire(
                 session=cast(AsyncSession, session),
                 operation_scope="scope",
@@ -268,7 +293,7 @@ class TestScopedOperationLockService:
 
     @pytest.mark.asyncio
     async def test_rejects_invalid_mode(self, lock_service: ScopedOperationLockService):
-        session = FakeSession(dialect=mysql.dialect())
+        session = FakeSession(dialect=postgresql.dialect())
 
         with pytest.raises(AppException) as exc_info:
             await lock_service.acquire_lock(
@@ -294,7 +319,7 @@ class TestScopedOperationLockService:
         mode: LockMode,
         expected_nowait: bool,
     ):
-        session = FakeSession(dialect=mysql.dialect())
+        session = FakeSession(dialect=postgresql.dialect())
 
         acquired = await lock_service.acquire_lock(
             session=cast(AsyncSession, session),
@@ -304,7 +329,73 @@ class TestScopedOperationLockService:
             audit_actor=AuditActor.user(123),
         )
 
-        select_stmt = session.executions[1][0]
+        select_stmt = next(
+            stmt for stmt, _ in session.executions if isinstance(stmt, Select)
+        )
 
         assert acquired is True
         assert select_stmt._for_update_arg.nowait is expected_nowait
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("code", ["40P01", "42601"])
+async def test_try_mode_does_not_hide_other_database_errors(
+    lock_dao: ScopedOperationLockDao,
+    code: str,
+) -> None:
+    session = FakeSession(
+        dialect=postgresql.dialect(), select_error=_postgresql_lock_error(code)
+    )
+    with pytest.raises(OperationalError):
+        await lock_dao.acquire(
+            session=cast(AsyncSession, session),
+            operation_scope="scope",
+            resource_key="key",
+            wait=False,
+        )
+    assert session.savepoint_rolled_back
+
+
+@pytest.mark.asyncio
+async def test_try_mode_restores_callers_lock_timeout(
+    lock_dao: ScopedOperationLockDao,
+) -> None:
+    session = FakeSession(dialect=postgresql.dialect())
+    assert await lock_dao.acquire(
+        session=cast(AsyncSession, session),
+        operation_scope="scope",
+        resource_key="key",
+        wait=False,
+    )
+    timeout_values = [
+        params["timeout"]
+        for _, params in session.executions
+        if params is not None and "timeout" in params
+    ]
+    assert timeout_values == ["1ms", "0"]
+    assert not session.savepoint_rolled_back
+
+
+@pytest.mark.asyncio
+async def test_try_mode_does_not_hide_flush_error_before_savepoint(
+    lock_dao: ScopedOperationLockDao,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = FakeSession(dialect=postgresql.dialect())
+    error = _postgresql_lock_error("55P03")
+
+    @asynccontextmanager
+    async def fail_before_savepoint():
+        raise error
+        yield
+
+    monkeypatch.setattr(session, "begin_nested", fail_before_savepoint)
+    with pytest.raises(OperationalError) as exc:
+        await lock_dao.acquire(
+            session=cast(AsyncSession, session),
+            operation_scope="scope",
+            resource_key="key",
+            wait=False,
+        )
+    assert exc.value is error
+    assert session.executions == []

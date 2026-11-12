@@ -1,7 +1,4 @@
-import importlib
 import json
-import sys
-import types
 from collections.abc import AsyncGenerator, Callable, Generator
 from contextvars import ContextVar
 from pathlib import Path
@@ -145,6 +142,14 @@ def _build_app(
     )
     app = app_module.create_app()
 
+    from internal.services.auth import new_auth_service
+
+    class FakeAuthService:
+        async def verify_token(self, _token: str) -> dict[str, object]:
+            return {"id": _TEST_USER_ID.hex}
+
+    app.dependency_overrides[new_auth_service] = FakeAuthService
+
     @app.get("/v1/public/ping")
     async def public_ping() -> dict[str, bool]:
         await anyio.sleep(0)
@@ -222,10 +227,7 @@ def _find_record_prefix(
 
 
 @pytest.fixture
-def configured_logger(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> Path:
+def configured_logger(tmp_path: Path) -> Generator[Path, None, None]:
     previous_logger = logger_module._logger
     previous_manager = logger_module._logger_manager
     base_log_dir = tmp_path / "logs"
@@ -236,9 +238,6 @@ def configured_logger(
         write_to_file=True,
         write_to_console=False,
     )
-    # 全量收集时异常模块可能已绑定共享 mock；日志断言必须使用当前真实输出。
-    exception_module = importlib.import_module("internal.middlewares.exceptions")
-    monkeypatch.setattr(exception_module, "logger", loguru_logger)
     yield base_log_dir
     loguru_logger.remove()
     logger_module._logger = previous_logger
@@ -278,36 +277,11 @@ def tracing_runtime(
 
 
 @pytest.fixture
-def middleware_modules(
-    monkeypatch: pytest.MonkeyPatch,
-) -> Generator[tuple[ModuleType, ModuleType], None, None]:
-    fake_auth_service = types.ModuleType("internal.services.auth")
-    module_names = (
-        "internal.dependencies.auth",
-        "internal.middlewares",
-        "internal.middlewares.recorder",
-    )
-    previous_modules = {name: sys.modules.get(name) for name in module_names}
+def middleware_modules() -> tuple[ModuleType, ModuleType]:
+    from internal.dependencies import auth
+    from internal.middlewares import recorder
 
-    class FakeAuthService:
-        async def verify_token(self, _token: str) -> dict[str, object]:
-            return {"id": _TEST_USER_ID.hex}
-
-    fake_auth_service.AuthService = FakeAuthService
-    fake_auth_service.new_auth_service = lambda: FakeAuthService()
-    monkeypatch.setitem(sys.modules, "internal.services.auth", fake_auth_service)
-    for module_name in module_names:
-        sys.modules.pop(module_name, None)
-
-    internal_auth_module = importlib.import_module("internal.dependencies.auth")
-    recorder_module = importlib.import_module("internal.middlewares.recorder")
-    yield internal_auth_module, recorder_module
-
-    for module_name, previous_module in previous_modules.items():
-        if previous_module is None:
-            sys.modules.pop(module_name, None)
-        else:
-            sys.modules[module_name] = previous_module
+    return auth, recorder
 
 
 @pytest_asyncio.fixture

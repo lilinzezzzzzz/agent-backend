@@ -73,7 +73,8 @@ algorithm = "HS256"
 
 # --- 数据库（主库） ---
 
-# 数据库类型：mysql 或 postgresql，决定使用的驱动。
+# 数据库类型：postgresql（部署）或 sqlite（测试/轻量本地存储）。
+# sqlite 的 database 为文件路径或 :memory:，不使用 host/port/username，不支持只读副本。
 
 
 [auth.access_token]

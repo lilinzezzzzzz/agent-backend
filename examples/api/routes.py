@@ -7,8 +7,8 @@ from internal.core import AppException, errors
 from internal.schemas import BaseResponse
 from internal.utils.background_tasks import background_task_manager
 from internal.utils.stream import stream_with_chunk_control
-from pkg.logger import logger
 from pkg.api_response import ResponsePayload, success_response
+from pkg.logger import logger
 
 router = APIRouter(prefix="/test", tags=["public test"])
 
@@ -115,5 +115,7 @@ async def fake_stream_generator():
 
 @router.get("/chat/sse-stream/timeout", summary="测试SSE超时控制")
 async def chat_endpoint(request: Request):
-    wrapped_generator = stream_with_chunk_control(generator=fake_stream_generator(), chunk_timeout=2.0, is_sse=True)
+    wrapped_generator = stream_with_chunk_control(
+        generator=fake_stream_generator(), chunk_timeout=2.0, is_sse=True
+    )
     return StreamingResponse(wrapped_generator, media_type="text/event-stream")

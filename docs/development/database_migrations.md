@@ -7,7 +7,8 @@ PostgreSQL 的建库和升级由 [Alembic revision](../../migrations/versions/) 
 当前 initial revision 为 `20261104_0001`，创建现有 11 张业务表、约束、索引和注释。
 本次接入只覆盖全新数据库，不提供已有数据库的差异核对、版本登记或数据迁移流程。
 仓库按脚手架维护，不增加历史实现兼容层。
-配置层虽可构造 MySQL DSN，但本目录迁移只支持 PostgreSQL，在线命令遇到其他方言会明确失败。
+项目仅支持 PostgreSQL 与 SQLite；SQLite 限于测试和轻量本地存储。
+本目录 Alembic 迁移、部署及强并发能力仍只支持 PostgreSQL，在线迁移遇到 SQLite 会明确失败。
 
 ## 配置与新库初始化
 
@@ -20,6 +21,10 @@ PostgreSQL 的建库和升级由 [Alembic revision](../../migrations/versions/) 
 - 在线命令通过 `internal.config.get_settings()` 使用完整应用配置校验，因此其他必填配置也必须齐全。
   迁移不连接 Redis、Milvus、模型服务或只读副本。
 - `alembic.ini` 不保存连接串；不新增 `DATABASE_URL` 或其他数据库配置环境变量。
+
+配置入口统一构造 SQLAlchemy 原生 `URL` 对象：主库属性 `sqlalchemy_database_uri` 返回 `URL`，
+只读副本属性 `sqlalchemy_read_database_uri` 返回 `URL | None`。对象直接交给 engine 或 Alembic，
+用户名、密码、库名和 SQLite 文件名中的特殊字符不需要手工 URL 编码，也不要先渲染成字符串再传回 engine。
 
 确认目标库为空且配置正确后执行：
 
@@ -38,6 +43,44 @@ uv run alembic check
 
 已有表的数据库不适用上述初始化流程；不要直接运行 initial revision，也不要通过 `stamp head`
 声明它已经一致。已有数据库的接管需要单独核对结构、历史数据和兼容要求。
+
+## SQLite 轻量本地存储
+
+保留现有应用配置的其他必填字段，仅将数据库分组替换为：
+
+```toml
+[db]
+type = "sqlite"
+database = "runtime/local.sqlite3"
+echo = false
+```
+
+`database` 可用 `:memory:`、绝对路径或相对路径；相对路径统一基于仓库根目录解析。
+SQLite 文件名中的 `?`、`#`、百分号、空格和中文保持字面值，不会被当作连接查询参数。
+文件名仍须符合宿主操作系统规则，例如 Windows 不允许 `?`。
+
+文件模式需先创建父目录（例如 `mkdir -p runtime`）；SQLite 不使用 host、port、username 或数据库密码，
+不支持 `db.read_replica`。连接使用 `sqlite+aiosqlite`，内存模式使用方言默认连接池。
+配置仍由 `.env` 选择 TOML 和根 `.secrets` 加载，不新增连接串环境变量；SQLite 的 `DB_PASSWORD=` 可留空，
+密钥模板中的键仍需保留；SQLite 不使用网络数据库凭据，
+其他应用功能的配置与凭据要求不变。
+
+SQLite 必须关闭现有 `[celery]` 分组中的这两个 PostgreSQL 专用开关，保留该分组的其余必填参数：
+
+```toml
+[celery]
+idempotency_enabled = false
+reconciler_beat_enabled = false
+```
+
+配置校验会拒绝 SQLite 下启用这些能力。SQLite 适合隔离测试中的 ORM/DAO 和本地轻量数据读写；
+测试或独立本地脚本可通过 ORM metadata 初始化自己新建的数据库。API/Worker 启动不会自动建表，
+不要对 SQLite 运行本仓库的 PostgreSQL initial revision，也不能把 SQLite 测试作为行锁、
+`SKIP LOCKED`、多实例并发或持久化部署的验收。
+
+`JSONType` 在 PostgreSQL 使用 JSONB，在 SQLite 使用原生 JSON；保留 `none_as_null`、JSON null、
+顶层 Mutable 追踪及 SQLite 历史双重编码读取行为。其他方言被明确拒绝，没有 TEXT/CLOB 降级路径。
+SQLite 文件不作为业务数据快照提交到仓库。
 
 ## 开发结构变更
 

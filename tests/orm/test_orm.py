@@ -1,8 +1,4 @@
-import os
-import sys
-import types
 from datetime import datetime, timedelta, timezone
-from unittest.mock import MagicMock
 from uuid import UUID
 
 import pytest
@@ -12,84 +8,20 @@ from sqlalchemy.exc import MultipleResultsFound
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import Mapped, SessionTransaction, mapped_column
 
-# ==========================================
-# 1. 混合 Mock 策略 (保持不变，这部分是正确的)
-# ==========================================
-
-current_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.dirname(os.path.dirname(current_dir))
-pkg_path = os.path.join(project_root, "pkg")
-
-# 添加项目根目录到 sys.path
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
-
-mock_pkg = types.ModuleType("pkg")
-mock_pkg.__path__ = [pkg_path]
-
-mock_pkg.orjson_dumps = lambda x: "json"
-mock_pkg.orjson_loads = lambda x: {}
-mock_pkg.orjson_loads_types = (str, bytes)
-mock_pkg.utc_now_naive = lambda: datetime.utcnow()
-mock_pkg.unique_list = lambda x, exclude_none=False: list(
-    set([i for i in x if i is not None] if exclude_none else x)
+from pkg.database import (
+    Base,
+    BaseDao,
+    AuditActor,
+    AuditActorType,
+    ModelMixin,
+    new_async_session_maker,
 )
+from pkg.database import base as database_base
+from pkg.toolkit.string import escape_like_pattern
 
-# Mock context module
-mock_context = types.ModuleType("pkg.request_context")
 TEST_USER_ID = UUID("00000000-0000-7000-8000-000000000999")
 TEST_TASK_ID = UUID("00000000-0000-7000-8000-000000001001")
 TEST_SERVICE_ID = UUID("00000000-0000-7000-8000-000000001002")
-mock_context.get_user_id = lambda: TEST_USER_ID
-
-mock_logger = MagicMock()
-
-# Mock UUIDv7 generator
-_id_counter = 0
-
-
-def mock_gen_id():
-    global _id_counter
-    _id_counter += 1
-    return UUID(f"00000000-0000-7000-8000-{_id_counter:012x}")
-
-
-mock_ids_module = types.ModuleType("pkg.ids")
-mock_ids_module.uuid7_unique_id = mock_gen_id
-
-_patched_module_names = ("pkg.request_context", "pkg.logger_tool", "pkg.ids")
-_previous_modules = {name: sys.modules.get(name) for name in _patched_module_names}
-
-# 不要 mock pkg 主模块，让它正常导入
-# sys.modules["pkg"] = mock_pkg
-sys.modules["pkg.request_context"] = mock_context
-sys.modules["pkg.logger_tool"] = mock_logger
-sys.modules["pkg.ids"] = mock_ids_module
-
-# ==========================================
-# 2. 导入目标代码
-# ==========================================
-try:
-    from pkg.database import (
-        Base,
-        BaseDao,
-        AuditActor,
-        AuditActorType,
-        ModelMixin,
-        new_async_session_maker,
-    )
-    from pkg.database import base as database_base
-    from pkg.toolkit.string import escape_like_pattern
-except ImportError as e:
-    print(f"Import Error: {e}")
-    print(f"Looking for pkg at: {pkg_path}")
-    raise e
-finally:
-    for _module_name, _module in _previous_modules.items():
-        if _module is None:
-            sys.modules.pop(_module_name, None)
-        else:
-            sys.modules[_module_name] = _module
 
 
 # ==========================================
@@ -150,11 +82,8 @@ async def db_session():
 
 @pytest.fixture
 def _context_user():
-    if hasattr(database_base.context, "init"):
-        database_base.context.init(user_id=TEST_USER_ID)
-    yield
-    if hasattr(database_base.context, "clear"):
-        database_base.context.clear()
+    with database_base.context.scoped_values(user_id=TEST_USER_ID):
+        yield
 
 
 @pytest.fixture(autouse=True)

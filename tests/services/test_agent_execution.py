@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Generator, Mapping
 from typing import Any
 from uuid import UUID
 
@@ -21,13 +21,14 @@ from internal.dao.agent_conversation import (
 )
 from internal.models.agent_conversation import AgentRunCheckpoint
 from internal.schemas.agent import AgentStreamEventName
-from internal.services.agents.conversation import DatabaseAgentStorageBackend
 from internal.services.agents.execution import (
     AgentExecutionLimits,
     AgentExecutionService,
 )
+from internal.services.agents.storage import DatabaseAgentStorageBackend
 from pkg.agents import LLMActionModel
 from pkg.database.audit import AuditActor
+from pkg.request_context import scoped_values
 from pkg.toolkit.json import orjson_loads
 
 TEST_USER_ID = UUID("00000000-0000-7000-8000-000000000999")
@@ -37,6 +38,15 @@ CREATE_KEY = "create_key_exec_1"
 RESUME_KEY = "resume_key_exec_1"
 QUESTION = "订单 1001 到哪了？"
 FINAL_ANSWER = "订单 1001 已发货。"
+
+
+@pytest.fixture(autouse=True)
+def execution_request_context(
+    isolate_request_context: None,
+) -> Generator[None, None, None]:
+    """显式提供执行用例所需的 Trace ID，不依赖全局上下文 mock。"""
+    with scoped_values(trace_id="test-trace-id"):
+        yield
 
 
 class StubAuditService:
@@ -989,9 +999,10 @@ async def test_provider_failure_persists_terminal_status(db_session):
 async def test_outer_scope_cancellation_has_bounded_safe_tool_cleanup(
     db_session, expire_grace
 ):
-    import anyio
     from dataclasses import replace
     from time import monotonic
+
+    import anyio
 
     started = anyio.Event()
     tool_cancelled = False

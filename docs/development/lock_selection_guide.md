@@ -41,7 +41,7 @@ WHERE id = :id AND version = :expected_version;
 
 ## 数据库悲观锁
 
-悲观锁假设冲突需要提前阻塞或失败。项目内已有的通用实现是 `ScopedOperationLockService`，底层通过 `scoped_operation_locks` 唯一身份行上的 `SELECT ... FOR UPDATE` 获取 InnoDB 行锁：
+悲观锁假设冲突需要提前阻塞或失败。项目内已有的通用实现是 `ScopedOperationLockService`，底层通过 `scoped_operation_locks` 唯一身份行上的 `SELECT ... FOR UPDATE` 获取 PostgreSQL 行锁：
 
 - 模型：[`internal/models/scoped_operation_lock.py`](../../internal/models/scoped_operation_lock.py)
 - DAO：[`internal/dao/scoped_operation_lock.py`](../../internal/dao/scoped_operation_lock.py)
@@ -51,9 +51,17 @@ WHERE id = :id AND version = :expected_version;
 
 - `LockMode.WAIT` 使用 `SELECT ... FOR UPDATE`，等待锁释放。
 - `LockMode.TRY` 使用 `SELECT ... FOR UPDATE NOWAIT`，拿不到锁时返回 `False`。
-- 锁必须在显式 MySQL / MariaDB 事务内获取。
+  首次身份创建使用 `INSERT ... ON CONFLICT DO NOTHING`，TRY 尝试中临时设置 `lock_timeout=1ms`，
+  避免等待另一个未提交的同身份插入；成功后恢复调用方原有 timeout。
+- TRY 在 savepoint 内执行，仅将 SQLSTATE `55P03` 转为 `False`；回退 savepoint 后调用方事务仍可使用。
+  其他数据库错误继续抛出，不隐藏死锁或 SQL 错误。
+- 锁必须在显式 PostgreSQL 事务内获取。
 - 锁在事务 `commit` 或 `rollback` 后由数据库自动释放。
 - 被保护的业务读写必须使用同一个 `AsyncSession` 和同一个事务。
+
+SQLite 没有对应的行锁语义，调用该 helper 会明确失败。锁与 savepoint 的释放规则、事务局部参数说明见
+[PostgreSQL 显式锁](https://www.postgresql.org/docs/current/explicit-locking.html)和
+[SET LOCAL](https://www.postgresql.org/docs/current/sql-set.html)。
 
 适合：
 

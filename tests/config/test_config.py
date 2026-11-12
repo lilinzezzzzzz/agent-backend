@@ -6,9 +6,13 @@ from typing import get_origin
 from unittest.mock import MagicMock
 
 import pytest
+from sqlalchemy import text
+from sqlalchemy.engine import URL, make_url
 from dotenv import dotenv_values
 from pydantic import BaseModel, ValidationError
 from redis.asyncio import ConnectionPool
+
+from pkg.database import new_async_engine
 
 import internal.config as config_module
 from internal.config import (
@@ -818,57 +822,88 @@ def test_milvus_database_name_cannot_be_empty(tmp_path: Path) -> None:
         _new_settings(env_path, secrets_path)
 
 
-@pytest.mark.parametrize(
-    ("db_type", "port", "driver", "query"),
-    [
-        ("mysql", "3306", "mysql+aiomysql", "?charset=utf8mb4"),
-        ("postgresql", "5432", "postgresql+asyncpg", ""),
-    ],
-)
-def test_sqlalchemy_database_urls_use_sqlalchemy_escaping(
+def test_postgresql_database_urls_preserve_raw_connection_fields(
     tmp_path: Path,
-    db_type: str,
-    port: str,
-    driver: str,
-    query: str,
 ) -> None:
+    from sqlalchemy.dialects.postgresql.asyncpg import PGDialect_asyncpg
+
     env_path = tmp_path / "app.test.toml"
     secrets_path = tmp_path / ".secrets"
-    env_values = _base_env_values()
-    env_values.update(
+    values = _base_env_values()
+    values.update(
         {
-            "DB_TYPE": db_type,
+            "DB_TYPE": "postgresql",
             "DB_HOST": "primary-db.example",
-            "DB_PORT": port,
+            "DB_PORT": "5432",
             "DB_USERNAME": "primary@example.com",
-            "DB_DATABASE": "primary_db",
+            "DB_DATABASE": "primary?raw#数据库",
             "DB_READ_HOST": "replica-db.example",
-            "DB_READ_PORT": port,
+            "DB_READ_PORT": "5433",
             "DB_READ_USERNAME": "reader@example.com",
-            "DB_READ_DATABASE": "replica_db",
+            "DB_READ_DATABASE": "replica?raw#数据库",
             "CELERY_IDEMPOTENCY_ENABLED": "false",
         }
     )
-    secret_values = _secret_values()
-    secret_values.update(
+    secrets = _secret_values()
+    secrets.update(
         {
-            "DB_PASSWORD": "primary@pass:/?[]",
-            "DB_READ_PASSWORD": "reader@pass:/?[]",
+            "DB_PASSWORD": json.dumps("primary@pass:/?[]% #中文", ensure_ascii=False),
+            "DB_READ_PASSWORD": json.dumps(
+                "reader@pass:/?[]% #中文", ensure_ascii=False
+            ),
         }
     )
-    _write_app_config(env_path, env_values)
-    _write_env_file(secrets_path, secret_values)
-
+    _write_app_config(env_path, values)
+    _write_env_file(secrets_path, secrets)
     settings = _new_settings(env_path, secrets_path)
 
-    assert settings.sqlalchemy_database_uri == (
-        f"{driver}://primary%40example.com:primary%40pass%3A%2F%3F%5B%5D"
-        f"@primary-db.example:{port}/primary_db{query}"
-    )
-    assert settings.sqlalchemy_read_database_uri == (
-        f"{driver}://reader%40example.com:reader%40pass%3A%2F%3F%5B%5D"
-        f"@replica-db.example:{port}/replica_db{query}"
-    )
+    for url, host, port, username, password, database in (
+        (
+            settings.sqlalchemy_database_uri,
+            "primary-db.example",
+            5432,
+            "primary@example.com",
+            "primary@pass:/?[]% #中文",
+            "primary?raw#数据库",
+        ),
+        (
+            settings.sqlalchemy_read_database_uri,
+            "replica-db.example",
+            5433,
+            "reader@example.com",
+            "reader@pass:/?[]% #中文",
+            "replica?raw#数据库",
+        ),
+    ):
+        assert isinstance(url, URL)
+        assert url.drivername == "postgresql+asyncpg"
+        assert not url.query
+        args, kwargs = PGDialect_asyncpg().create_connect_args(url)
+        assert not args
+        assert kwargs["host"] == host
+        assert kwargs["port"] == port
+        assert kwargs["user"] == username
+        assert kwargs["password"] == password
+        assert kwargs["database"] == database
+
+
+def test_postgresql_read_url_inherits_main_fields(tmp_path: Path) -> None:
+    env_path = tmp_path / "app.test.toml"
+    secrets_path = tmp_path / ".secrets"
+    values = _base_env_values()
+    values.update({"DB_READ_HOST": "replica.example"})
+    _write_app_config(env_path, values)
+    _write_env_file(secrets_path, _secret_values())
+    settings = _new_settings(env_path, secrets_path)
+    primary = settings.sqlalchemy_database_uri
+    replica = settings.sqlalchemy_read_database_uri
+    assert isinstance(primary, URL)
+    assert isinstance(replica, URL)
+    assert replica.host == "replica.example"
+    assert replica.port == primary.port
+    assert replica.username == primary.username
+    assert replica.password == primary.password
+    assert replica.database == primary.database
 
 
 def test_redis_url_escapes_password_and_supports_ipv6(tmp_path: Path) -> None:
@@ -899,13 +934,14 @@ def test_redis_url_escapes_password_and_supports_ipv6(tmp_path: Path) -> None:
     assert pool.connection_kwargs["db"] == 4
 
 
-def test_oracle_database_type_is_rejected(tmp_path: Path) -> None:
+@pytest.mark.parametrize("db_type", ["mysql", "mariadb", "oracle", "mssql"])
+def test_unsupported_database_type_is_rejected(tmp_path: Path, db_type: str) -> None:
     env_path = tmp_path / "app.test.toml"
     secrets_path = tmp_path / ".secrets"
     env_values = _base_env_values()
     env_values.update(
         {
-            "DB_TYPE": "oracle",
+            "DB_TYPE": db_type,
             "CELERY_IDEMPOTENCY_ENABLED": "false",
         }
     )
@@ -987,7 +1023,7 @@ def test_celery_idempotency_constraints_apply_only_when_enabled(
     env_values = _base_env_values()
     env_values.update(
         {
-            "DB_TYPE": "postgresql" if enabled else "mysql",
+            "DB_TYPE": "postgresql" if enabled else "sqlite",
             "CELERY_IDEMPOTENCY_ENABLED": str(enabled).lower(),
             "CELERY_RECONCILER_BEAT_ENABLED": "false",
             key: value,
@@ -1005,7 +1041,7 @@ def test_celery_idempotency_constraints_apply_only_when_enabled(
 
     assert settings.celery.idempotency_enabled is False
     assert settings.celery.reconciler_beat_enabled is False
-    assert settings.db.type == "mysql"
+    assert settings.db.type == "sqlite"
 
 
 def test_celery_state_machine_removes_legacy_timing_settings() -> None:
@@ -1135,3 +1171,170 @@ def test_config_echo_reports_empty_sensitive_values(tmp_path: Path) -> None:
         )
         == "<empty>"
     )
+
+
+@pytest.mark.parametrize("database", [":memory:", "local.sqlite3", "absolute"])
+def test_sqlite_configuration_uses_database_path_only(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    database: str,
+) -> None:
+    monkeypatch.setattr(config_module, "BASE_DIR", tmp_path)
+    if database == "absolute":
+        database = str(tmp_path / "nested.sqlite3")
+    env_path = tmp_path / "app.test.toml"
+    secrets_path = tmp_path / ".secrets"
+    values = _base_env_values()
+    values.update(
+        {
+            "DB_TYPE": "sqlite",
+            "DB_DATABASE": database,
+            "CELERY_IDEMPOTENCY_ENABLED": "false",
+            "CELERY_RECONCILER_BEAT_ENABLED": "false",
+        }
+    )
+    _write_app_config(env_path, values)
+    _write_env_file(secrets_path, _secret_values())
+    settings = _new_settings(env_path, secrets_path)
+    url = make_url(settings.sqlalchemy_database_uri)
+    expected = (
+        database if database == ":memory:" else str((tmp_path / database).resolve())
+    )
+    assert url.drivername == "sqlite+aiosqlite"
+    assert url.database == expected
+    assert url.username is None
+    assert url.password is None
+    assert url.host is None
+    assert settings.sqlalchemy_read_database_uri is None
+
+
+def test_sqlite_does_not_require_network_database_fields() -> None:
+    database = config_module.DatabaseSettings(
+        type="sqlite",
+        database=":memory:",
+        echo=False,
+    )
+    assert database.host is None
+    assert database.port is None
+    assert database.username is None
+
+
+def test_sqlite_rejects_read_replica() -> None:
+    with pytest.raises(
+        ValidationError, match="SQLite does not support db.read_replica"
+    ):
+        config_module.DatabaseSettings(
+            type="sqlite",
+            database=":memory:",
+            echo=False,
+            read_replica={"host": "replica.example"},
+        )
+
+
+@pytest.mark.parametrize(
+    ("idempotency", "beat", "message"),
+    [
+        ("true", "false", "CELERY_IDEMPOTENCY_ENABLED requires DB_TYPE=postgresql"),
+        ("false", "true", "CELERY_RECONCILER_BEAT_ENABLED requires DB_TYPE=postgresql"),
+    ],
+)
+def test_sqlite_rejects_postgresql_celery_features(
+    tmp_path: Path,
+    idempotency: str,
+    beat: str,
+    message: str,
+) -> None:
+    env_path = tmp_path / "app.test.toml"
+    secrets_path = tmp_path / ".secrets"
+    values = _base_env_values()
+    values.update(
+        {
+            "DB_TYPE": "sqlite",
+            "DB_DATABASE": ":memory:",
+            "CELERY_IDEMPOTENCY_ENABLED": idempotency,
+            "CELERY_RECONCILER_BEAT_ENABLED": beat,
+        }
+    )
+    _write_app_config(env_path, values)
+    _write_env_file(secrets_path, _secret_values())
+    with pytest.raises(ValidationError, match=message):
+        _new_settings(env_path, secrets_path)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("relative", [False, True], ids=["absolute", "relative"])
+@pytest.mark.parametrize(
+    "filename",
+    [
+        "local?tenant=demo.sqlite3",
+        "local#fragment.sqlite3",
+        "local%3F&+= space.sqlite3",
+        "缓存 ?timeout=0&mode=ro#片段.sqlite3",
+    ],
+)
+async def test_sqlite_special_character_path_creates_and_reopens_exact_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    relative: bool,
+    filename: str,
+) -> None:
+    if sys.platform == "win32" and "?" in filename:
+        pytest.skip("Windows 文件名不允许问号")
+    monkeypatch.setattr(config_module, "BASE_DIR", tmp_path)
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    expected = data_dir / filename
+    env_path = tmp_path / "app.test.toml"
+    secrets_path = tmp_path / ".secrets"
+    values = _base_env_values()
+    values.update(
+        {
+            "DB_TYPE": "sqlite",
+            "DB_DATABASE": str(expected.relative_to(tmp_path))
+            if relative
+            else str(expected),
+            "CELERY_IDEMPOTENCY_ENABLED": "false",
+            "CELERY_RECONCILER_BEAT_ENABLED": "false",
+        }
+    )
+    _write_app_config(env_path, values)
+    _write_env_file(secrets_path, _secret_values())
+    settings = _new_settings(env_path, secrets_path)
+    connection_info = settings.sqlalchemy_database_uri
+
+    engine = new_async_engine(database_uri=connection_info, echo=False)
+    try:
+        async with engine.begin() as connection:
+            await connection.execute(
+                text("CREATE TABLE path_probe (value TEXT NOT NULL)"),
+            )
+            await connection.execute(
+                text("INSERT INTO path_probe (value) VALUES (:value)"),
+                {"value": "expected-database"},
+            )
+            database_list = await connection.execute(text("PRAGMA database_list"))
+            actual = next(
+                row["file"] for row in database_list.mappings() if row["name"] == "main"
+            )
+            assert Path(actual) == expected.resolve()
+    finally:
+        await engine.dispose()
+
+    assert expected.is_file()
+    assert {path.name for path in data_dir.iterdir()} == {filename}
+    url = make_url(connection_info)
+    assert url.database == str(expected.resolve())
+    assert not url.query
+
+    reopened = new_async_engine(
+        database_uri=settings.sqlalchemy_database_uri,
+        echo=False,
+    )
+    try:
+        async with reopened.connect() as connection:
+            assert (
+                await connection.scalar(text("SELECT value FROM path_probe"))
+                == "expected-database"
+            )
+    finally:
+        await reopened.dispose()

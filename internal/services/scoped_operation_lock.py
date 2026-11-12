@@ -44,7 +44,7 @@ class ScopedOperationLockService:
         session 和事务。
 
         Args:
-            session: 已开启事务的 MySQL/MariaDB AsyncSession。
+            session: 已开启事务的 PostgreSQL AsyncSession。
             operation_scope: 锁作用域，如 ``order_confirm``。
             resource_key: scope 内资源键，如 ``order:123``。
             mode: WAIT 等待获取；TRY 立即返回是否获取成功。

@@ -1,0 +1,333 @@
+"""聊天请求/响应、会话上下文与结果 DTO。"""
+
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
+
+from pydantic import BaseModel, Field, model_validator
+
+from internal.schemas.agent.common import (
+    JsonValue,
+    to_json_object,
+    to_json_value,
+)
+from internal.schemas.order import AgentActionConfirmationDTO, InvoiceRequestDTO
+from pkg.agents import (
+    AgentFinal,
+    AgentRunResult,
+    AgentStepRecord,
+    AgentToolCall,
+)
+from pkg.ids import uuid7_unique_str_id
+
+
+class AgentReqSchema(BaseModel):
+    """Agent 通用请求。"""
+
+    session_id: str | None = Field(
+        None,
+        description="会话 ID；首次普通对话可为空，继续对话时传入服务端返回值",
+        min_length=1,
+        max_length=64,
+    )
+    question: str = Field(..., description="用户问题", min_length=1, max_length=500)
+    max_steps: int = Field(4, description="Agent 最大执行步数", ge=1, le=8)
+    confirmation_token: str | None = Field(
+        None,
+        description="服务端签发的一次性动作确认 token",
+        min_length=1,
+        max_length=128,
+    )
+    idempotency_key: str | None = Field(
+        None,
+        description="确认副作用动作时必填的客户端幂等键",
+        min_length=8,
+        max_length=128,
+    )
+
+    @model_validator(mode="after")
+    def validate_confirmation_fields(self) -> AgentReqSchema:
+        """确认 token 与幂等键必须同时提供。"""
+        if (self.confirmation_token is None) != (self.idempotency_key is None):
+            raise ValueError(
+                "confirmation_token and idempotency_key must be provided together"
+            )
+        return self
+
+
+class AgentStepSchema(BaseModel):
+    """Agent 单步执行记录。"""
+
+    index: int = Field(..., description="步骤序号，从 0 开始")
+    status: str = Field(..., description="步骤状态")
+    action_type: str = Field(..., description="Agent 动作类型")
+    tool: str | None = Field(None, description="被调用的工具名")
+    args: dict[str, JsonValue] = Field(default_factory=dict, description="工具调用参数")
+    action_result: JsonValue = Field(None, description="动作执行结果")
+    error: str | None = Field(None, description="工具或执行错误")
+    elapsed_ms: float = Field(..., description="步骤耗时，单位毫秒")
+
+
+class AgentActionConfirmationSchema(BaseModel):
+    """需要客户端显式确认的服务端动作。"""
+
+    token: str = Field(..., description="短期、一次性的服务端确认 token")
+    action: str = Field(..., description="待确认动作名")
+    summary: str = Field(..., description="展示给用户确认的动作摘要")
+    expires_in_seconds: int = Field(..., description="确认 token 有效期，单位秒")
+
+
+class AgentRunRespSchema(BaseModel):
+    """业务 Agent 运行响应。"""
+
+    session_id: str = Field(..., description="本次 Agent 运行所属会话 ID")
+    run_id: str = Field(..., description="本次 Agent 运行 ID")
+    status: str = Field(..., description="Agent 运行状态")
+    answer: str | None = Field(None, description="最终回答；达到步数上限时可能为空")
+    steps: list[AgentStepSchema] = Field(
+        default_factory=list, description="执行步骤记录"
+    )
+    confirmation: AgentActionConfirmationSchema | None = Field(
+        None, description="存在副作用动作时返回的待确认信息"
+    )
+
+
+class AgentOrderSupportReqSchema(AgentReqSchema):
+    """订单支持 Agent 请求。"""
+
+
+class AgentOrderSupportRespSchema(AgentRunRespSchema):
+    """订单支持 Agent 响应。"""
+
+
+class AgentPaymentSupportReqSchema(AgentReqSchema):
+    """支付支持 Agent 请求。"""
+
+
+class AgentPaymentSupportRespSchema(AgentRunRespSchema):
+    """支付支持 Agent 响应。"""
+
+
+class AgentChatReqSchema(AgentReqSchema):
+    """统一 Agent 聊天请求。"""
+
+
+class AgentChatRespSchema(BaseModel):
+    """统一 Agent Router 响应。"""
+
+    route: str = Field(..., description="Router 选择的业务域")
+    result: AgentRunRespSchema = Field(..., description="业务 Agent 执行结果")
+
+
+@dataclass(frozen=True, slots=True)
+class AgentStepDTO:
+    """Agent 单步执行记录 DTO。"""
+
+    index: int
+    status: str
+    action_type: str
+    tool: str | None = None
+    args: dict[str, JsonValue] = field(default_factory=dict)
+    action_result: JsonValue = None
+    error: str | None = None
+    elapsed_ms: float = 0
+
+    @classmethod
+    def from_step_record(cls, step: AgentStepRecord) -> AgentStepDTO:
+        """从通用 Agent step record 构造业务 DTO。"""
+        return cls(
+            index=step.index,
+            status=step.status.value,
+            action_type="final" if isinstance(step.action, AgentFinal) else "tool_call",
+            tool=step.action.tool if isinstance(step.action, AgentToolCall) else None,
+            args=to_json_object(step.action.args)
+            if isinstance(step.action, AgentToolCall)
+            else {},
+            action_result=to_json_value(step.action_result),
+            error=step.error,
+            elapsed_ms=step.elapsed_ms,
+        )
+
+    def to_schema(self) -> AgentStepSchema:
+        """转换为 API 响应 schema。"""
+        return AgentStepSchema(
+            index=self.index,
+            status=self.status,
+            action_type=self.action_type,
+            tool=self.tool,
+            args=self.args,
+            action_result=self.action_result,
+            error=self.error,
+            elapsed_ms=self.elapsed_ms,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class AgentMessageDTO:
+    """Agent 会话上下文消息 DTO。"""
+
+    role: str
+    content: str
+
+
+@dataclass(frozen=True, slots=True)
+class AgentConversationContextDTO:
+    """Agent 会话上下文 DTO。"""
+
+    session_id: str
+    rolling_summary: str | None = None
+    recent_messages: Sequence[AgentMessageDTO] = field(default_factory=tuple)
+    working_state: dict[str, JsonValue] = field(default_factory=dict)
+    truncated: bool = False
+
+    def to_prompt_context(self) -> dict[str, JsonValue]:
+        """转换为 LLM prompt 可安全序列化的上下文字段。"""
+        return {
+            "session_id": self.session_id,
+            "rolling_summary": self.rolling_summary,
+            "recent_messages": [
+                {"role": message.role, "content": message.content}
+                for message in self.recent_messages
+            ],
+            "working_state": self.working_state,
+            "truncated": self.truncated,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class AgentRunStartDTO:
+    """Agent run 启动结果 DTO。"""
+
+    session_id: str
+    run_id: str
+    user_message_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class AgentRunResultDTO:
+    """Agent 运行结果 DTO。"""
+
+    run_id: str
+    status: str
+    answer: str | None
+    steps: Sequence[AgentStepDTO]
+    session_id: str | None = None
+    confirmation: AgentActionConfirmationDTO | None = None
+    audit_metadata: dict[str, JsonValue] | None = None
+
+    @classmethod
+    def from_agent_result(
+        cls, result: AgentRunResult, *, session_id: str | None = None
+    ) -> AgentRunResultDTO:
+        """从 ReActAgent 运行结果构造业务 DTO。"""
+        return cls(
+            run_id=result.run_id,
+            status=result.status.value,
+            answer=result.final_answer,
+            steps=[AgentStepDTO.from_step_record(step) for step in result.steps],
+            session_id=session_id,
+            confirmation=_extract_confirmation(result),
+        )
+
+    def to_schema(self) -> AgentRunRespSchema:
+        """转换为 API 响应 schema。"""
+        return AgentRunRespSchema(
+            session_id=self.session_id or "",
+            run_id=self.run_id,
+            status=self.status,
+            answer=self.answer,
+            steps=[step.to_schema() for step in self.steps],
+            confirmation=(
+                AgentActionConfirmationSchema(
+                    token=self.confirmation.token,
+                    action=self.confirmation.action,
+                    summary=self.confirmation.summary,
+                    expires_in_seconds=self.confirmation.expires_in_seconds,
+                )
+                if self.confirmation is not None
+                else None
+            ),
+        )
+
+    @classmethod
+    def from_confirmed_invoice(
+        cls,
+        result: InvoiceRequestDTO,
+        *,
+        run_id: str | None = None,
+        session_id: str | None = None,
+    ) -> AgentRunResultDTO:
+        """构造确定性确认执行结果。"""
+        return cls(
+            run_id=run_id or uuid7_unique_str_id(),
+            status="completed",
+            answer=result.message,
+            steps=[
+                AgentStepDTO(
+                    index=0,
+                    status="completed",
+                    action_type="tool_call",
+                    tool="confirm_invoice_request",
+                    args={},
+                    action_result=to_json_value(result.to_action_result()),
+                )
+            ],
+            session_id=session_id,
+        )
+
+    @classmethod
+    def final(
+        cls,
+        *,
+        answer: str,
+        run_id: str | None = None,
+        session_id: str | None = None,
+    ) -> AgentRunResultDTO:
+        """构造无需运行专业 Agent 的最终回答。"""
+        return cls(
+            run_id=run_id or uuid7_unique_str_id(),
+            status="completed",
+            answer=answer,
+            steps=[],
+            session_id=session_id,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class AgentChatDTO:
+    """统一 Agent Router 结果。"""
+
+    route: str
+    result: AgentRunResultDTO
+
+    def to_schema(self) -> AgentChatRespSchema:
+        """转换为统一 Agent Router 响应 schema。"""
+        return AgentChatRespSchema(route=self.route, result=self.result.to_schema())
+
+
+def _extract_confirmation(result: AgentRunResult) -> AgentActionConfirmationDTO | None:
+    for step in reversed(result.steps):
+        action_result = step.action_result
+        if not isinstance(action_result, Mapping):
+            continue
+        confirmation = action_result.get("confirmation")
+        if not isinstance(confirmation, Mapping):
+            continue
+        token = confirmation.get("token")
+        action = confirmation.get("action")
+        summary = confirmation.get("summary")
+        expires_in_seconds = confirmation.get("expires_in_seconds")
+        if (
+            isinstance(token, str)
+            and isinstance(action, str)
+            and isinstance(summary, str)
+            and isinstance(expires_in_seconds, int)
+        ):
+            return AgentActionConfirmationDTO(
+                token=token,
+                action=action,
+                summary=summary,
+                expires_in_seconds=expires_in_seconds,
+            )
+    return None

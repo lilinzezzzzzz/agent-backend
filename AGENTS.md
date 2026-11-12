@@ -21,7 +21,8 @@
   `internal.core.errors` 的错误码语义保持稳定。
 - 数据库写入通过 Service / DAO 或已有数据库 helper 完成，不在 Controller 中直接操作 session。
 - Service 返回给 Router 的轻量 DTO 使用 `*DTO` 命名，放在 `internal/schemas/<domain>.py`；请求和响应
-  schema 分别使用 `*ReqSchema`、`*RespSchema` 或现有 detail/item 命名。
+  schema 分别使用 `*ReqSchema`、`*RespSchema` 或现有 detail/item 命名。较大领域可使用同名 package
+  按职责分组，并由 package 入口维持稳定的 schema/DTO 导入 contract。
 - 缓存 key/TTL、Celery task name/queue、向量 collection schema、公开 API 字段和持久化格式均按兼容性
   contract 处理；修改时同步受影响的实现、测试和必要文档。
 
@@ -35,6 +36,9 @@
   保持 API 非 root、配置和密钥只读挂载、journald 固定服务标签及最小权限边界。
 
 ## 数据与验证
+
+- 数据库仅支持 PostgreSQL 与 SQLite；SQLite 用于测试与轻量本地存储，部署、迁移、行锁和强并发
+  能力使用 PostgreSQL，不为其他方言增加兼容分支。
 
 - PostgreSQL 建库和升级以 `migrations/versions/` 的 Alembic revision 为准；结构变更同步 ORM 与新增
   revision；不维护建库 SQL 快照，离线 SQL 按需通过 Alembic 生成。当前仅支持新库初始化，不自动接管已有数据库。

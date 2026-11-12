@@ -195,7 +195,7 @@ idx_docs_duplicate_of(duplicate_of_doc_id, id)
   写入。
 - 近似重复只作为 `candidate` 诊断结果，不在第一阶段自动阻断写入。
 - 如需强唯一约束，必须按目标数据库确认软删除语义。PostgreSQL 可用 partial unique index；
-  MySQL 需用 generated active marker 或 Service 事务内重查加唯一冲突处理。
+  SQLite 仅用于本地隔离测试，不能替代 PostgreSQL 并发与唯一冲突行为的验证。
 
 首版支持文档类型：
 

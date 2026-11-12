@@ -158,6 +158,7 @@ internal/services/agents/payment.py
   -> 调用业务 Agent builder 和 ReActAgent
 
 internal/services/agents/conversation.py
+internal/services/agents/storage.py
   -> 新增：会话存储用例
   -> start_run / complete_run / fail_run / load_context / list_messages
   -> 处理事务、锁、归属校验、错误转换
@@ -228,7 +229,8 @@ class AgentStorageBackend(Protocol):
     ) -> None: ...
 ```
 
-实现类放在 `internal/services/agents/conversation.py`，内部组合 DAO。
+存储实现类放在 `internal/services/agents/storage.py`，内部组合 DAO；
+`internal/services/agents/conversation.py` 仅保留会话用例入口。
 
 好处：
 
@@ -243,6 +245,7 @@ class AgentStorageBackend(Protocol):
 
 ```text
 internal/services/agents/conversation.py
+internal/services/agents/storage.py
   -> AgentConversationService
   -> DatabaseAgentStorageBackend
   -> AgentSessionDao / AgentMessageDao / AgentRunDao / AgentRunStepDao
@@ -733,7 +736,7 @@ API 测试：
 
 ```bash
 uv run pytest tests/api/test_agent.py tests/services/test_agent_conversation.py -q
-uv run ruff check internal/controllers/api/agent.py internal/services/agents internal/schemas/agent.py tests/api/test_agent.py tests/services/test_agent_conversation.py
+uv run ruff check internal/controllers/api/agent.py internal/services/agents internal/schemas/agent/ tests/api/test_agent.py tests/services/test_agent_conversation.py
 ```
 
 ## 14. 分阶段落地

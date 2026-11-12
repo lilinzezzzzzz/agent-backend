@@ -28,6 +28,7 @@ authenticated_router = APIRouter(
     dependencies=[AuthenticatedUserDependency],
 )
 
+
 @anonymous_router.post(
     "/login", response_model=BaseResponse[UserLoginRespSchema], summary="用户登录"
 )

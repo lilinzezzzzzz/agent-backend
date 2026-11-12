@@ -41,7 +41,6 @@ async def test_token_dependency_accepts_bare_and_bearer_tokens(
 ) -> None:
     verify_token = AsyncMock(return_value={"id": TEST_USER_ID.hex})
     auth_service = SimpleNamespace(verify_token=verify_token)
-    context.set_user_id.reset_mock()
 
     principal = await require_authenticated_user(
         _request(),
@@ -52,7 +51,7 @@ async def test_token_dependency_accepts_bare_and_bearer_tokens(
     assert principal.user_id == TEST_USER_ID
     assert principal.token == "token-123"
     verify_token.assert_awaited_once_with("token-123")
-    context.set_user_id.assert_called_once_with(TEST_USER_ID)
+    assert context.get_user_id() == TEST_USER_ID
 
 
 @pytest.mark.asyncio

@@ -1,8 +1,12 @@
 from contextlib import asynccontextmanager
 from datetime import datetime
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
+from uuid import UUID
 
 import pytest
 import pytest_asyncio
+from sqlalchemy.exc import IntegrityError
 
 from internal.dao.external_identity import ExternalIdentityDao
 from internal.dao.user import UserDao
@@ -180,3 +184,53 @@ async def test_external_identity_login_rejects_invalid_identity_key(
 
     with pytest.raises(ValueError, match=field):
         await service.get_or_create_user_by_external_identity(**values)
+
+
+@pytest.mark.parametrize("recovery", ["identity_missing", "user_missing", "user_found"])
+async def test_external_identity_conflict_recovery_preserves_exception_cause(
+    recovery: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_error = IntegrityError("test insert", None, Exception("test conflict"))
+    identity = SimpleNamespace(
+        id="test-identity",
+        user_id=UUID("00000000-0000-7000-8000-000000000123"),
+    )
+    identity_dao = MagicMock()
+    identity_dao.get_by_identity = AsyncMock(
+        return_value=None if recovery == "identity_missing" else identity,
+    )
+    service = UserService(dao=MagicMock(), external_identity_dao=identity_dao)
+    monkeypatch.setattr(
+        service,
+        "_get_or_create_external_identity_in_transaction",
+        AsyncMock(side_effect=original_error),
+    )
+    user = MagicMock()
+    load_user = AsyncMock(return_value=user if recovery == "user_found" else None)
+    monkeypatch.setattr(service, "_get_active_user_from_primary", load_user)
+    values = {
+        "provider": "wechat",
+        "connection_key": "wechat_default",
+        "subject": "test-subject",
+    }
+
+    if recovery == "identity_missing":
+        with pytest.raises(IntegrityError) as integrity_error:
+            await service.get_or_create_user_by_external_identity(**values)
+        assert integrity_error.value is original_error
+        load_user.assert_not_awaited()
+    elif recovery == "user_missing":
+        with pytest.raises(
+            RuntimeError,
+            match="references a missing user",
+        ) as runtime_error:
+            await service.get_or_create_user_by_external_identity(**values)
+        assert runtime_error.value.__cause__ is original_error
+        load_user.assert_awaited_once_with(identity.user_id)
+    else:
+        result = await service.get_or_create_user_by_external_identity(**values)
+        assert result is user
+        load_user.assert_awaited_once_with(identity.user_id)
+
+    identity_dao.get_by_identity.assert_awaited_once_with(**values)

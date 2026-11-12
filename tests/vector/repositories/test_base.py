@@ -1,19 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-import sys
-import types
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
-if "pkg.vectors" not in sys.modules:
-    vectors_package = types.ModuleType("pkg.vectors")
-    vectors_package.__path__ = [
-        str(Path(__file__).resolve().parents[3] / "pkg" / "vectors")
-    ]
-    sys.modules["pkg.vectors"] = vectors_package
 
 from pkg.vectors.backends.base import (
     CollectionSpec,

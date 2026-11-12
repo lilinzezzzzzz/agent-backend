@@ -5,6 +5,8 @@ from contextlib import AsyncExitStack, asynccontextmanager
 import anyio
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
+from starlette.routing import BaseRoute, Match, Route
+from starlette.types import Scope
 
 from internal.config import init_settings, settings
 from internal.core import AppException
@@ -21,11 +23,15 @@ from pkg.tracing import init_tracing, shutdown_tracing
 
 
 def create_app() -> FastAPI:
-    debug = settings.debug
+    app_config = settings.app
     app = FastAPI(
-        debug=debug,
-        docs_url="/docs" if debug else None,
-        redoc_url="/redoc" if debug else None,
+        debug=settings.debug,
+        title=app_config.title,
+        version=app_config.version,
+        docs_url=app_config.docs_url,
+        redoc_url=app_config.redoc_url,
+        openapi_url=app_config.openapi_url,
+        swagger_ui_oauth2_redirect_url=app_config.swagger_ui_oauth2_redirect_url,
         lifespan=lifespan,
         telemetry={
             "tracing": settings.otel.tracing_enabled,
@@ -37,11 +43,40 @@ def create_app() -> FastAPI:
         },
     )
 
+    documentation_routes = list(app.routes)
     register_router(app)
+    _validate_documentation_routes(
+        documentation_routes,
+        app.routes[len(documentation_routes) :],
+    )
     register_exception(app)
     register_middleware(app)
 
     return app
+
+
+def _validate_documentation_routes(
+    documentation_routes: list[BaseRoute],
+    application_routes: list[BaseRoute],
+) -> None:
+    """防止匿名文档入口遮蔽业务路由，包括动态路径及尾斜杠重定向。"""
+    for documentation_route in documentation_routes:
+        if not isinstance(documentation_route, Route):
+            continue
+        paths = {
+            documentation_route.path,
+            documentation_route.path.rstrip("/") or "/",
+            f"{documentation_route.path.rstrip('/')}/",
+        }
+        for route in application_routes:
+            for path in paths:
+                scope: Scope = {"type": "http", "path": path, "method": "GET"}
+                match, _ = route.matches(scope)
+                if match != Match.NONE:
+                    raise ValueError(
+                        f"Documentation route {documentation_route.path!r} "
+                        "conflicts with an application route"
+                    )
 
 
 def register_router(app: FastAPI):

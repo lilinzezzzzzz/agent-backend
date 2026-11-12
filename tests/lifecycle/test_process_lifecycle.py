@@ -17,6 +17,7 @@ import internal.middlewares.endpoint_guard as endpoint_guard_module
 import internal.middlewares.recorder as recorder_module
 import internal.utils.background_tasks as background_tasks
 import pkg.tracing.otel as otel_runtime
+from internal.config import AppSettings
 from pkg.tracing import span_context
 
 
@@ -436,6 +437,16 @@ def test_fastapi_lifespan_owns_one_exporter_and_native_request_spans(
     monkeypatch.setattr(recorder_module, "logger", MagicMock())
     endpoint = "http://collector.invalid/v1/traces"
     app_module.settings.debug = True
+    app_module.settings.app = AppSettings(
+        title="test-agent-backend",
+        version="0.1.0",
+        docs_enabled=True,
+        redoc_enabled=True,
+        openapi_enabled=True,
+        docs_path="/docs",
+        redoc_path="/redoc",
+        openapi_path="/openapi.json",
+    )
     app_module.settings.otel.tracing_enabled = True
     app_module.settings.otel.operation_spans_enabled = True
     app_module.settings.otel.metrics_enabled = False

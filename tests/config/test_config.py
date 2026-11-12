@@ -17,6 +17,7 @@ from pkg.database import new_async_engine
 import internal.config as config_module
 from internal.config import (
     SECRET_FILE_KEYS,
+    AppSettings,
     CelerySettings,
     DatabaseReadReplicaSettings,
     DatabaseSettings,
@@ -73,6 +74,14 @@ def _toml_literal(value: object) -> str:
 
 _FIELD_PATHS: dict[str, tuple[str, str]] = {
     "DEBUG": ("", "debug"),
+    "APP_TITLE": ("app", "title"),
+    "APP_VERSION": ("app", "version"),
+    "APP_DOCS_ENABLED": ("app", "docs_enabled"),
+    "APP_REDOC_ENABLED": ("app", "redoc_enabled"),
+    "APP_OPENAPI_ENABLED": ("app", "openapi_enabled"),
+    "APP_DOCS_PATH": ("app", "docs_path"),
+    "APP_REDOC_PATH": ("app", "redoc_path"),
+    "APP_OPENAPI_PATH": ("app", "openapi_path"),
     "LOG_FORMAT": ("log", "format"),
     "LOG_BASE_DIR": ("log", "base_dir"),
     "LOG_WRITE_TO_FILE": ("log", "write_to_file"),
@@ -205,6 +214,14 @@ def _write_app_config(path: Path, values: dict[str, object]) -> None:
 def _base_env_values() -> dict[str, str]:
     return {
         "DEBUG": "true",
+        "APP_TITLE": "test-agent-backend",
+        "APP_VERSION": "0.2.0",
+        "APP_DOCS_ENABLED": "true",
+        "APP_REDOC_ENABLED": "true",
+        "APP_OPENAPI_ENABLED": "true",
+        "APP_DOCS_PATH": "/docs",
+        "APP_REDOC_PATH": "/redoc",
+        "APP_OPENAPI_PATH": "/openapi.json",
         "LOG_FORMAT": "text",
         "LOG_WRITE_TO_FILE": "false",
         "LOG_WRITE_TO_CONSOLE": "true",
@@ -413,10 +430,14 @@ def test_shell_environment_cannot_override_explicit_files(
     monkeypatch.setenv("DEBUG", "release")
     monkeypatch.setenv("DB_HOST", "shell-db")
     monkeypatch.setenv("REDIS_PASSWORD", "shell-redis-password")
+    monkeypatch.setenv("APP_TITLE", "shell-title")
+    monkeypatch.setenv("APP_DOCS_ENABLED", "false")
 
     settings = _new_settings(env_path, secrets_path)
 
     assert settings.debug is True
+    assert settings.app.title == "test-agent-backend"
+    assert settings.app.docs_enabled is True
     assert settings.db.host == "dotenv-db"
     assert settings.secrets.redis_password.get_secret_value() == "dotenv-redis-password"
 
@@ -580,6 +601,12 @@ def test_repository_environment_files_define_every_required_config_key() -> None
             app_env, env_path, secrets_template
         )
         assert isinstance(settings.debug, bool)
+        assert settings.app.title == "agent-backend"
+        assert settings.app.version == "0.1.0"
+        assert settings.app.docs_enabled is (app_env != "prod")
+        assert settings.app.redoc_enabled is (app_env != "prod")
+        assert settings.app.openapi_enabled is (app_env != "prod")
+        assert set(values["app"]) == set(AppSettings.model_fields)
         assert isinstance(settings.db.port, int)
         assert isinstance(settings.cors.origins, list)
         assert isinstance(settings.endpoint_guard.rules, list)
@@ -591,6 +618,199 @@ def test_secret_template_defines_every_required_secret_key() -> None:
 
     assert _required_secret_keys() <= set(values)
     assert set(values) <= SECRET_FILE_KEYS
+
+
+@pytest.fixture
+def app_values() -> dict[str, object]:
+    return {
+        "title": "test-agent-backend",
+        "version": "0.2.0",
+        "docs_enabled": True,
+        "redoc_enabled": True,
+        "openapi_enabled": True,
+        "docs_path": "/docs",
+        "redoc_path": "/redoc",
+        "openapi_path": "/openapi.json",
+    }
+
+
+def test_app_metadata_and_custom_documentation_paths_are_loaded(tmp_path: Path) -> None:
+    env_path = tmp_path / "app.test.toml"
+    secrets_path = tmp_path / ".secrets"
+    _write_app_config(
+        env_path,
+        {
+            **_base_env_values(),
+            "DEBUG": "false",
+            "APP_DOCS_PATH": "/reference/swagger",
+            "APP_REDOC_PATH": "/reference/redoc",
+            "APP_OPENAPI_PATH": "/reference/schema.json",
+        },
+    )
+    _write_env_file(secrets_path, _secret_values())
+
+    settings = _new_settings(env_path, secrets_path)
+
+    assert settings.debug is False
+    assert settings.app.title == "test-agent-backend"
+    assert settings.app.version == "0.2.0"
+    assert settings.app.docs_enabled is True
+    assert settings.app.redoc_enabled is True
+    assert settings.app.openapi_enabled is True
+    assert settings.app.docs_path == "/reference/swagger"
+    assert settings.app.redoc_path == "/reference/redoc"
+    assert settings.app.openapi_path == "/reference/schema.json"
+
+
+@pytest.mark.parametrize("field", list(AppSettings.model_fields))
+def test_app_configuration_requires_every_field(
+    app_values: dict[str, object],
+    field: str,
+) -> None:
+    app_values.pop(field)
+    with pytest.raises(ValidationError, match=field):
+        AppSettings.model_validate(app_values)
+
+
+@pytest.mark.parametrize("field", ["title", "version"])
+@pytest.mark.parametrize("value", ["", " \t"])
+def test_app_metadata_rejects_blank_values(
+    app_values: dict[str, object],
+    field: str,
+    value: str,
+) -> None:
+    app_values[field] = value
+    with pytest.raises(ValidationError, match=field):
+        AppSettings.model_validate(app_values)
+
+
+@pytest.mark.parametrize("field", ["docs_path", "redoc_path", "openapi_path"])
+@pytest.mark.parametrize(
+    "path",
+    [
+        "",
+        "docs",
+        "https://example.test/docs",
+        "//example.test/docs",
+        "/docs?view=all",
+        "/docs#section",
+        "/docs/{name}",
+        "/docs with spaces",
+        "/docs\n",
+        "/docs\\schema",
+        "/docs//schema",
+        "/docs/../schema",
+        "/docs/./schema",
+        "/docs%2Fschema",
+    ],
+)
+def test_documentation_paths_must_be_literal_absolute_paths(
+    app_values: dict[str, object],
+    field: str,
+    path: str,
+) -> None:
+    app_values[field] = path
+    with pytest.raises(ValidationError, match=field):
+        AppSettings.model_validate(app_values)
+
+
+@pytest.mark.parametrize(
+    "docs_enabled,redoc_enabled",
+    [(True, False), (False, True), (True, True)],
+)
+def test_documentation_pages_require_openapi(
+    app_values: dict[str, object],
+    docs_enabled: bool,
+    redoc_enabled: bool,
+) -> None:
+    app_values.update(
+        docs_enabled=docs_enabled,
+        redoc_enabled=redoc_enabled,
+        openapi_enabled=False,
+    )
+    with pytest.raises(ValidationError, match="require openapi_enabled"):
+        AppSettings.model_validate(app_values)
+
+
+@pytest.mark.parametrize(
+    "field,path",
+    [
+        ("redoc_path", "/docs"),
+        ("redoc_path", "/docs/"),
+        ("openapi_path", "/redoc"),
+        ("openapi_path", "/docs"),
+        ("openapi_path", "/docs/oauth2-redirect"),
+        ("redoc_path", "/docs/oauth2-redirect/"),
+    ],
+)
+def test_enabled_documentation_paths_must_not_conflict(
+    app_values: dict[str, object],
+    field: str,
+    path: str,
+) -> None:
+    app_values[field] = path
+    with pytest.raises(ValidationError, match="conflicts with"):
+        AppSettings.model_validate(app_values)
+
+
+def test_disabled_documentation_paths_may_overlap(
+    app_values: dict[str, object],
+) -> None:
+    app_values.update(
+        docs_enabled=False,
+        redoc_enabled=False,
+        openapi_enabled=False,
+        docs_path="/reference",
+        redoc_path="/reference",
+        openapi_path="/reference",
+    )
+    settings = AppSettings.model_validate(app_values)
+    assert settings.openapi_enabled is False
+
+
+@pytest.mark.parametrize(
+    "docs_enabled,redoc_enabled,openapi_enabled,expected_urls",
+    [
+        (
+            True,
+            True,
+            True,
+            ("/docs", "/redoc", "/openapi.json", "/docs/oauth2-redirect"),
+        ),
+        (True, False, True, ("/docs", None, "/openapi.json", "/docs/oauth2-redirect")),
+        (False, True, True, (None, "/redoc", "/openapi.json", None)),
+        (False, False, True, (None, None, "/openapi.json", None)),
+        (False, False, False, (None, None, None, None)),
+    ],
+)
+def test_app_settings_resolve_documentation_urls(
+    app_values: dict[str, object],
+    docs_enabled: bool,
+    redoc_enabled: bool,
+    openapi_enabled: bool,
+    expected_urls: tuple[str | None, str | None, str | None, str | None],
+) -> None:
+    app_values.update(
+        docs_enabled=docs_enabled,
+        redoc_enabled=redoc_enabled,
+        openapi_enabled=openapi_enabled,
+    )
+    settings = AppSettings.model_validate(app_values)
+    assert (
+        settings.docs_url,
+        settings.redoc_url,
+        settings.openapi_url,
+        settings.swagger_ui_oauth2_redirect_url,
+    ) == expected_urls
+    assert set(settings.model_dump()) == set(app_values)
+
+
+def test_app_configuration_rejects_unknown_fields(
+    app_values: dict[str, object],
+) -> None:
+    app_values["docs_url"] = "/reference"
+    with pytest.raises(ValidationError, match="docs_url"):
+        AppSettings.model_validate(app_values)
 
 
 def test_settings_defaults_are_limited_to_conditional_fields() -> None:

@@ -2,7 +2,7 @@
 
 AGENT-BACKEND 是面向 Agent、RAG 与 AI 平台场景的 FastAPI demo 合集与后端脚手架。它的目标是沉淀可复用的后端工程范式和示例能力，便于快速验证 Agent 运行时、RAG、认证、异步数据库访问、Redis、Celery、请求日志、第三方登录和向量检索等基础设施；它不是一套需要长期承载真实业务流量的单一业务服务。
 
-本仓库仅提供后端代码与 API，不包含 demo 前端或静态页面托管；开启 debug 时可使用 FastAPI 自带的 API 文档调试。
+本仓库仅提供后端代码与 API，不包含 demo 前端或静态页面托管；可通过 `[app]` 配置启用 FastAPI 自带的 API 文档。
 
 README 只记录当前仓库可直接核对的能力；更细的设计约束和模块说明见 `docs/`、`pkg/*/README.md` 以及各目录下的 `AGENTS.md`。
 
@@ -113,6 +113,18 @@ EMBEDDING_API_KEY=
 配置说明：
 
 - 仓库已提供 `configs/app.local.toml`、`configs/app.dev.toml`、`configs/app.test.toml`、`configs/app.prod.toml`。
+- `[app]` 管理 API 标题、展示版本和文档入口，与根级 `debug` 独立；`debug` 继续控制调试异常输出
+  和现有 SQL 调试日志，不控制文档入口。
+  新增的 `[app]` 字段均为必填，已有环境配置升级时需要同步补齐。
+- `app.title` 和 `app.version` 写入 OpenAPI 元信息；展示版本由环境配置声明，更新时同步四份环境文件，
+  不改变业务路由的 `/v1` 前缀，也不代表 OpenAPI 规范版本或 `pyproject.toml` 的项目版本。
+- local/dev/test 默认开启 Swagger UI、ReDoc 和 OpenAPI schema，prod 默认全部关闭；可按环境显式调整。
+  开启 `app.docs_enabled` 或 `app.redoc_enabled` 时必须同时开启 `app.openapi_enabled`。
+- `app.docs_path`、`app.redoc_path`、`app.openapi_path` 必须是以 `/` 开头的固定应用内路径，不能包含
+  查询串、片段、路径参数、百分号编码、空白、反斜杠、重复斜杠或 `.` / `..` 路径段；关闭入口后仍需保留合法路径。
+  启用的入口不能互相冲突；应用装配时还会拒绝与已注册业务路由冲突的文档路径，包括动态路径和尾斜杠变体。
+- Swagger UI 的 OAuth2 回调路径由 `app.docs_path` 派生为 `<docs_path 去掉尾斜杠>/oauth2-redirect`，
+  随 Swagger UI 一起启停并参与路径冲突检查。
 - `.secrets` 被 `.gitignore` 忽略，不要提交真实密钥、数据库口令、token 或生产配置。
 - `.secrets` 中的 `DB_PASSWORD`、`DB_READ_PASSWORD`、`REDIS_PASSWORD` 支持 `ENC(...)`，运行时使用 `AES_SECRET` 解密。
 - 设置 `db.read_replica.host` 后会初始化只读副本；未设置时读会话自动 fallback 到主库。
@@ -168,10 +180,15 @@ uv run uvicorn entrypoints.api:app --host 0.0.0.0 --port 8000 \
 `--log-config` 让 Uvicorn 的启动、停止、异常和 access log 复用应用的 Loguru 输出配置，
 包括 reload 父进程；详见[日志部署文档](docs/logging/log_rotation.md#uvicorn-日志接入)。
 
-当 `DEBUG=true` 时，FastAPI 文档可访问：
+local/dev/test 的默认 `[app]` 配置提供以下入口，无需开启 `debug`：
 
 - `http://127.0.0.1:8000/docs`
 - `http://127.0.0.1:8000/redoc`
+- `http://127.0.0.1:8000/openapi.json`
+
+三个入口分别由 `app.docs_enabled`、`app.redoc_enabled`、`app.openapi_enabled` 控制，路径分别由
+`app.docs_path`、`app.redoc_path`、`app.openapi_path` 指定。只提供 schema 时，将两个页面开关关闭，
+保留 `app.openapi_enabled = true`；全部关闭时，以上入口及 Swagger UI 的 OAuth2 回调入口均不注册。
 
 ### 5. 启动 Celery
 
@@ -264,8 +281,9 @@ uv run celery -A internal.infra.celery.application:celery_app beat -l info
 - `/v1/internal/**` 通过 Router dependency 使用 `X-Signature`、`X-Timestamp`、`X-Nonce` 做签名认证。
 - 其他 `/v1/**` 业务接口通过 Router dependency 校验 `Authorization` token，兼容裸 token 和
   `Bearer <token>`。
-- `/v1/auth/login`、`/v1/auth/register`、`/v1/auth/wechat/login` 挂载在匿名 Router；调试模式下的
-  `/docs`、`/redoc`、`/openapi.json` 不经过业务 Router 认证。
+- `/v1/auth/login`、`/v1/auth/register`、`/v1/auth/wechat/login` 挂载在匿名 Router。
+- 启用的 Swagger UI、ReDoc、OpenAPI schema 及 Swagger UI OAuth2 回调入口不经过业务 Router 认证；
+  开关与 `debug` 无关，关闭文档不改变业务 API 的认证要求。
 
 统一成功响应结构：
 

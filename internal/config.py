@@ -124,6 +124,76 @@ class _ConfigModel(BaseModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
 
+class AppSettings(_ConfigModel):
+    title: str = Field(min_length=1)
+    version: str = Field(min_length=1)
+    docs_enabled: bool
+    redoc_enabled: bool
+    openapi_enabled: bool
+    docs_path: str
+    redoc_path: str
+    openapi_path: str
+
+    @field_validator("title", "version")
+    @classmethod
+    def validate_metadata(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("application metadata must not be blank")
+        return value
+
+    @field_validator("docs_path", "redoc_path", "openapi_path")
+    @classmethod
+    def validate_documentation_path(cls, value: str) -> str:
+        """文档入口必须是无需解码或参数替换的应用内绝对路径。"""
+        if (
+            not value.startswith("/")
+            or "//" in value
+            or any(char.isspace() or ord(char) < 32 for char in value)
+            or any(char in value for char in "\\?#{}%")
+            or any(part in {".", ".."} for part in value.split("/"))
+        ):
+            raise ValueError("documentation path must be a literal absolute URL path")
+        return value
+
+    @property
+    def docs_url(self) -> str | None:
+        return self.docs_path if self.docs_enabled else None
+
+    @property
+    def redoc_url(self) -> str | None:
+        return self.redoc_path if self.redoc_enabled else None
+
+    @property
+    def openapi_url(self) -> str | None:
+        return self.openapi_path if self.openapi_enabled else None
+
+    @property
+    def swagger_ui_oauth2_redirect_url(self) -> str | None:
+        if not self.docs_enabled:
+            return None
+        return f"{self.docs_path.rstrip('/')}/oauth2-redirect"
+
+    @model_validator(mode="after")
+    def validate_documentation_routes(self) -> "AppSettings":
+        if (self.docs_enabled or self.redoc_enabled) and not self.openapi_enabled:
+            raise ValueError("docs_enabled and redoc_enabled require openapi_enabled")
+
+        seen: dict[str, str] = {}
+        for name, path in {
+            "openapi_path": self.openapi_url,
+            "docs_path": self.docs_url,
+            "swagger_ui_oauth2_redirect_url": self.swagger_ui_oauth2_redirect_url,
+            "redoc_path": self.redoc_url,
+        }.items():
+            if path is None:
+                continue
+            normalized_path = path.rstrip("/") or "/"
+            if normalized_path in seen:
+                raise ValueError(f"{name} conflicts with {seen[normalized_path]}")
+            seen[normalized_path] = name
+        return self
+
+
 class LogSettings(_ConfigModel):
     format: LogFormat
     base_dir: Path | None = None
@@ -391,6 +461,7 @@ class Settings(BaseSettings):
     app_env: AppEnv
     debug: bool
 
+    app: AppSettings
     log: LogSettings
     otel: OtelSettings
     auth: AuthSettings

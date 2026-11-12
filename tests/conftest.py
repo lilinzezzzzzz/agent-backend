@@ -329,10 +329,22 @@ def app():
 
     使用测试配置而非生产配置。
     """
+    from internal.config import AppSettings
+
     # Mock 配置
     with patch("internal.config.settings") as mock_settings:
         mock_settings.debug = True
         mock_settings.app_env = "test"
+        mock_settings.app = AppSettings(
+            title="test-agent-backend",
+            version="0.1.0",
+            docs_enabled=True,
+            redoc_enabled=True,
+            openapi_enabled=True,
+            docs_path="/docs",
+            redoc_path="/redoc",
+            openapi_path="/openapi.json",
+        )
         mock_settings.secrets = SimpleNamespace(
             jwt_secret=SecretStr("test-jwt-secret-key-for-testing-only"),
             aes_secret=SecretStr("test-aes-secret"),

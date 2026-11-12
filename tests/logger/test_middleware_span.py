@@ -36,6 +36,7 @@ from starlette.types import Message, Scope
 import internal.app as app_module
 import pkg.logger as logger_module
 import pkg.tracing.otel as otel_runtime
+from internal.config import AppSettings
 from internal.core import AppException, errors
 from pkg import request_context as context
 from pkg.logger import LogFormat, init_logger
@@ -120,6 +121,16 @@ def _build_app(
         "settings",
         SimpleNamespace(
             debug=True,
+            app=AppSettings(
+                title="test-agent-backend",
+                version="0.1.0",
+                docs_enabled=True,
+                redoc_enabled=True,
+                openapi_enabled=True,
+                docs_path="/docs",
+                redoc_path="/redoc",
+                openapi_path="/openapi.json",
+            ),
             otel=SimpleNamespace(
                 tracing_enabled=tracing,
                 operation_spans_enabled=operation_spans,

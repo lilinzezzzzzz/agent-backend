@@ -11,8 +11,19 @@
 
 # --- 运行与调试 ---
 
-# 调试模式；true 时暴露 /docs、/redoc 并输出更详细的错误信息，生产必须为 false。
+# 调试异常输出和 SQL 日志；与文档开关独立，生产必须为 false。
 debug = true
+
+# 应用元信息与文档入口；文档页面依赖 OpenAPI schema。
+[app]
+title = "agent-backend"
+version = "0.1.0"
+docs_enabled = true
+redoc_enabled = true
+openapi_enabled = true
+docs_path = "/docs"
+redoc_path = "/redoc"
+openapi_path = "/openapi.json"
 
 # 日志格式：text 便于阅读，json 便于集中采集与检索。
 

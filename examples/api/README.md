@@ -19,7 +19,8 @@ middleware 和 lifespan，再额外挂载实验接口。应用运行时代码不
 uv run uvicorn examples.api.app:create_demo_app --factory --host 127.0.0.1 --port 8001
 ```
 
-默认仅绑定 loopback；是否提供 `/docs` 仍由现有 `debug` 配置决定。示例请求：
+默认仅绑定 loopback；文档入口沿用 `[app]` 的开关与路径配置，与 `debug` 独立。
+默认启用 `app.docs_enabled` 时可访问 `/docs`。示例请求：
 
 ```bash
 curl -X POST http://127.0.0.1:8001/v1/public/test/test_validation_error \

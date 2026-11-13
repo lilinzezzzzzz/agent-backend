@@ -159,6 +159,11 @@ Alembic 创建当前全部业务表并通过 `alembic_version` 记录版本。�
 启动时不自动执行。当前仅支持 PostgreSQL 新库初始化；已有数据库暂不接管，不应直接执行 initial revision
 或用 `stamp head` 跳过结构差异。
 
+API 启动和 Celery 任务级资源初始化会只读核对 PostgreSQL 主库 revision；未登记或与代码 head 不一致时
+拒绝继续运行，需先核对目标库并独立完成迁移。SQLite 不执行此检查。
+运行前还需确保主库可达、运行账号具备 `alembic_version` 的 SELECT 权限，且部署产物包含完整的
+`migrations/`；连接、权限或迁移历史加载失败同样会阻止继续运行，需按原始错误排查。
+
 后续结构变更、离线 SQL 与隔离数据库验证见 [数据库迁移指南](docs/development/database_migrations.md)。
 
 ### 4. 启动 API

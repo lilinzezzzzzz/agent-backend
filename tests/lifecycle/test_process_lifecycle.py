@@ -36,6 +36,7 @@ def lifecycle_events(monkeypatch: pytest.MonkeyPatch) -> list[str]:
         monkeypatch.setattr(app_module, name, MagicMock())
 
     monkeypatch.setattr(app_module, "init_background_task_manager", AsyncMock())
+    monkeypatch.setattr(app_module, "check_database_revision", AsyncMock())
     for name in (
         "close_background_task_manager",
         "close_async_redis",
@@ -111,6 +112,7 @@ async def test_fastapi_cleans_up_and_propagates_body_failure(
     [
         ("init_tracing", ["logger.complete"]),
         ("init_async_db", _CLEANUP_ORDER[2:]),
+        ("check_database_revision", _CLEANUP_ORDER[2:]),
         ("init_async_redis", _CLEANUP_ORDER[1:]),
         ("init_signature_auth_handler", _CLEANUP_ORDER[1:]),
         ("init_background_task_manager", _CLEANUP_ORDER),

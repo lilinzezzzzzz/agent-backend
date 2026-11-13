@@ -41,6 +41,17 @@ uv run alembic check
 迁移由一个独立步骤串行执行，完成后再启动依赖该结构的 API、Worker 和 Beat。
 应用启动不自动迁移，也不负责并发迁移协调。这里不增加部署编排或执行远端数据库变更。
 
+API 启动和 Celery 任务级数据库资源初始化后，会只读核对 PostgreSQL 主库的 Alembic revision
+是否与仓库唯一 head 一致；未登记、落后或超前都会拒绝继续启动或执行任务，并清理已创建的资源。
+检查不修改结构或版本表，不检查只读副本，也不代替 `alembic check` 的结构比较。
+当前要求先迁移再启动匹配版本的进程；不提供跨 revision 的滚动兼容窗口。
+
+运行前需确保 PostgreSQL 主库可达、运行账号具有版本表 `alembic_version` 的 SELECT 权限，
+部署镜像或其他产物包含完整且可读取的 `migrations/` 目录（包括 revision 文件）。
+连接失败、权限不足及迁移历史缺失/不可读也会阻止启动或任务执行，保留原始异常用于区分原因；
+只有实际读到的 revision 与代码 head 不一致时，才抛出提示执行升级的版本错误。
+排查时先核对目标和对应前置条件，不将所有检查失败都当作需要迁移。
+
 已有表的数据库不适用上述初始化流程；不要直接运行 initial revision，也不要通过 `stamp head`
 声明它已经一致。已有数据库的接管需要单独核对结构、历史数据和兼容要求。
 
@@ -53,6 +64,11 @@ uv run alembic check
 type = "sqlite"
 database = "runtime/local.sqlite3"
 echo = false
+
+[db.sqlite]
+busy_timeout_ms = 5000
+allow_create = true
+explicit_transactions = false
 ```
 
 `database` 可用 `:memory:`、绝对路径或相对路径；相对路径统一基于仓库根目录解析。
@@ -61,6 +77,19 @@ SQLite 文件名中的 `?`、`#`、百分号、空格和中文保持字面值，
 
 文件模式需先创建父目录（例如 `mkdir -p runtime`）；SQLite 不使用 host、port、username 或数据库密码，
 不支持 `db.read_replica`。连接使用 `sqlite+aiosqlite`，内存模式使用方言默认连接池。
+每条 SQLite 连接启用外键检查，锁等待时间由 `db.sqlite.busy_timeout_ms` 指定；该字段只接受
+1 至 2147483647 的原生整数毫秒值，拒绝 bool、字符串及浮点数。
+`db.sqlite.explicit_transactions` 默认为 `false`，沿用驱动 legacy transaction control 的行为：
+SELECT、DDL 和 SAVEPOINT 不会自动开启外层事务。设为 `true` 后，由 SQLAlchemy 显式发出 `BEGIN`，
+使这些操作也参与事务；开启前需验证读改写、取消收尾等路径的锁争用，锁等待时间不能解决所有读事务升级冲突。
+内存库的默认连接池共用一条物理连接，显式事务下不能让独立 session 重叠开启事务。
+多 session 并发及行锁能力使用 PostgreSQL 验证；共享 SQLite fixture 保持现有驱动模式，显式事务有专项测试。
+不强制切换 WAL 或 `BEGIN IMMEDIATE`。
+
+`db.sqlite.allow_create` 默认为 `true`，保留首次连接创建文件的用法；完成独立初始化后可设为 `false`，
+通过 SQLite URI 的 `mode=rw` 拒绝启动或重连时误建空库。此开关不影响内存库，也不负责建表。
+这些配置项在 PostgreSQL 下不生效；公共 engine factory 对应参数为 `sqlite_busy_timeout_ms`、
+`sqlite_allow_create` 和 `sqlite_explicit_transactions`。
 配置仍由 `.env` 选择 TOML 和根 `.secrets` 加载，不新增连接串环境变量；SQLite 的 `DB_PASSWORD=` 可留空，
 密钥模板中的键仍需保留；SQLite 不使用网络数据库凭据，
 其他应用功能的配置与凭据要求不变。
@@ -81,6 +110,12 @@ reconciler_beat_enabled = false
 `JSONType` 在 PostgreSQL 使用 JSONB，在 SQLite 使用原生 JSON；保留 `none_as_null`、JSON null、
 顶层 Mutable 追踪及 SQLite 历史双重编码读取行为。其他方言被明确拒绝，没有 TEXT/CLOB 降级路径。
 SQLite 文件不作为业务数据快照提交到仓库。
+
+## SQL 日志与参数保护
+
+公共 engine factory 默认设置 `hide_parameters=True`，隐藏 SQLAlchemy 日志及异常字符串中的绑定参数。
+应用 debug SQL 和慢 SQL 日志只保留语句模板与耗时，不展开绑定参数。调用方仍应使用参数绑定，
+不要将敏感值直接拼接到 SQL 文本；此保护不清理 SQL 字面量，也不会删除异常对象的原始参数属性。
 
 ## 开发结构变更
 

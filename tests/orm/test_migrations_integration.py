@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async
 from internal import models
 from internal.dao.user import UserDao
 from internal.models import User
+from internal.infra.database import connection as database_module
 from pkg.database.audit import AuditActor
 
 pytestmark = pytest.mark.integration
@@ -363,9 +364,14 @@ async def test_upgrade_preserves_data_and_detects_drift(
     postgres_engine: AsyncEngine,
     orm_engine: AsyncEngine,
     model_metadata: MetaData,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(database_module, "_engine", postgres_engine)
+    with pytest.raises(RuntimeError, match="alembic upgrade head"):
+        await database_module.check_database_revision()
     result = run_alembic(postgres_project, "upgrade", "head")
     assert result.returncode == 0, result.stdout + result.stderr
+    await database_module.check_database_revision()
     result = run_alembic(postgres_project, "check")
     assert result.returncode == 0, result.stdout + result.stderr
     assert_current_head(postgres_project)

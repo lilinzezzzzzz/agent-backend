@@ -1,11 +1,18 @@
 """Celery 同步任务调用应用异步服务的执行适配。"""
 
 from collections.abc import Callable, Coroutine
+from contextlib import AsyncExitStack
 
 import anyio
 
 from internal.config import settings
-from internal.infra.database import close_async_db, init_async_db, reset_async_db
+from internal.infra.database import (
+    check_database_revision,
+    close_async_db,
+    init_async_db,
+    reset_async_db,
+)
+from internal.infra.lifecycle import close_resources
 from internal.infra.redis import close_async_redis, init_async_redis, reset_async_redis
 from pkg import request_context as context
 
@@ -18,14 +25,16 @@ def run_in_async[T](
     reset_async_redis()
 
     async def _wrapper() -> T:
-        init_async_db(echo=settings.db.echo)
-        init_async_redis()
-        context.init(trace_id=trace_id)
-
+        cleanup = AsyncExitStack()
         try:
+            cleanup.push_async_callback(close_async_db)
+            init_async_db(echo=settings.db.echo)
+            await check_database_revision()
+            cleanup.push_async_callback(close_async_redis)
+            init_async_redis()
+            context.init(trace_id=trace_id)
             return await coro_func()
         finally:
-            await close_async_db()
-            await close_async_redis()
+            await close_resources(cleanup)
 
     return anyio.run(_wrapper)

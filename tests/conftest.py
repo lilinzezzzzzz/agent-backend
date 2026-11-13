@@ -33,7 +33,6 @@ from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
     async_sessionmaker,
-    create_async_engine,
 )
 
 # ==========================================
@@ -178,10 +177,11 @@ async def db_engine() -> AsyncGenerator[AsyncEngine, None]:
 
     使用内存 SQLite，每个测试函数独立创建和销毁。
     """
-    engine = create_async_engine(
-        TEST_DATABASE_URL,
+    from pkg.database.session import new_async_engine
+
+    engine = new_async_engine(
+        database_uri=TEST_DATABASE_URL,
         echo=False,  # 设为 True 可查看 SQL 语句
-        future=True,
     )
 
     yield engine

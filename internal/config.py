@@ -23,6 +23,7 @@ from pydantic import (
     Field,
     PositiveInt,
     SecretStr,
+    StrictInt,
     field_validator,
     model_validator,
 )
@@ -346,6 +347,12 @@ class DatabaseReadReplicaSettings(_ConfigModel):
     database: str | None = None
 
 
+class SQLiteSettings(_ConfigModel):
+    busy_timeout_ms: StrictInt = Field(default=5000, gt=0, le=2_147_483_647)
+    allow_create: bool = True
+    explicit_transactions: bool = False
+
+
 class DatabaseSettings(_ConfigModel):
     type: DBType
     host: str | None = None
@@ -353,6 +360,7 @@ class DatabaseSettings(_ConfigModel):
     username: str | None = None
     database: str
     echo: bool
+    sqlite: SQLiteSettings = Field(default_factory=SQLiteSettings)
     read_replica: DatabaseReadReplicaSettings | None = None
 
     @field_validator("type", mode="before")

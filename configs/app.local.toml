@@ -111,6 +111,13 @@ echo = true
 # db.read_replica.username / db.read_replica.database，并在 .secrets 增加 DB_READ_PASSWORD；
 # 未配置 db.read_replica.host 时读会话回落到主库。
 
+# SQLite 连接策略；PostgreSQL 不使用此分组。内存库忽略 allow_create。
+[db.sqlite]
+busy_timeout_ms = 5000
+allow_create = true
+# 开启后 SELECT/DDL 也进入事务；需先验证并发读改写的锁争用。
+explicit_transactions = false
+
 # --- Redis ---
 
 # Redis 地址；密码写在 .secrets 的 REDIS_PASSWORD，无密码时留空。

@@ -608,8 +608,20 @@ def test_repository_environment_files_define_every_required_config_key() -> None
         assert settings.app.openapi_enabled is (app_env != "prod")
         assert set(values["app"]) == set(AppSettings.model_fields)
         assert isinstance(settings.db.port, int)
+        assert values["db"]["sqlite"] == settings.db.sqlite.model_dump()
         assert isinstance(settings.cors.origins, list)
         assert isinstance(settings.endpoint_guard.rules, list)
+
+
+@pytest.mark.parametrize("timeout", [0, -1, 2_147_483_648, True, False, "5000", 1.0])
+def test_sqlite_settings_reject_invalid_busy_timeout(timeout: object) -> None:
+    with pytest.raises(ValidationError):
+        config_module.SQLiteSettings.model_validate({"busy_timeout_ms": timeout})
+
+
+def test_sqlite_settings_reject_unknown_options() -> None:
+    with pytest.raises(ValidationError, match="extra_forbidden"):
+        config_module.SQLiteSettings.model_validate({"unknown_option": True})
 
 
 def test_secret_template_defines_every_required_secret_key() -> None:

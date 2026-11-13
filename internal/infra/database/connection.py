@@ -5,13 +5,16 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any
 
-from sqlalchemy import event
+from alembic.migration import MigrationContext
+from alembic.script import ScriptDirectory
+from sqlalchemy import Connection, event
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
     async_sessionmaker,
 )
 
+from internal import BASE_DIR
 from internal.config import settings
 from pkg.database.session import new_async_engine, new_async_session_maker
 from pkg.logger import logger
@@ -58,6 +61,9 @@ def init_async_db(echo: bool | None = None) -> None:
         pool_recycle=1800,
         json_serializer=orjson_dumps,
         json_deserializer=orjson_loads,
+        sqlite_busy_timeout_ms=settings.db.sqlite.busy_timeout_ms,
+        sqlite_allow_create=settings.db.sqlite.allow_create,
+        sqlite_explicit_transactions=settings.db.sqlite.explicit_transactions,
     )
 
     # 2. 注册主库 SQL 监控事件
@@ -85,6 +91,29 @@ def init_async_db(echo: bool | None = None) -> None:
         _register_event_listeners(_read_engine)
         _read_session_maker = new_async_session_maker(engine=_read_engine)
         logger.success("Read Replica Database connection initialized successfully.")
+
+
+async def check_database_revision() -> None:
+    """在运行时资源所属 loop 中校验 PostgreSQL 主库版本，不执行迁移。"""
+    if _engine is None:
+        raise RuntimeError("Database is not initialized. Call init_async_db() first.")
+    if _engine.dialect.name != "postgresql":
+        return
+    async with _engine.connect() as connection:
+        await connection.run_sync(_check_database_revision)
+
+
+def _check_database_revision(connection: Connection) -> None:
+    expected = set(ScriptDirectory(str(BASE_DIR / "migrations")).get_heads())
+    if len(expected) != 1:
+        raise RuntimeError("Migration history must contain exactly one head.")
+    current = set(MigrationContext.configure(connection).get_current_heads())
+    if current != expected:
+        raise RuntimeError(
+            "Database schema revision is not current. "
+            "Verify the target database and run 'uv run alembic upgrade head' "
+            "with the same APP_ENV and configuration before starting."
+        )
 
 
 async def close_async_db() -> None:
@@ -206,21 +235,7 @@ def _after_cursor_execute(conn, cursor, statement, parameters, context, executem
     is_debug = settings.debug
 
     if elapsed > slow_threshold:
-        sql_str = _get_formatted_sql(context, statement, parameters)
-        logger.warning(f"SLOW SQL ({elapsed:.4f}s): {sql_str}")
+        logger.warning(f"SLOW SQL ({elapsed:.4f}s): {statement}")
     elif is_debug:
-        sql_str = _get_formatted_sql(context, statement, parameters)
-        logger.info(f"SQL ({elapsed:.4f}s): {sql_str}")
-
-
-def _get_formatted_sql(context, statement, parameters) -> str:
-    try:
-        if context and context.compiled:
-            return context.compiled.statement.compile(
-                dialect=context.dialect, compile_kwargs={"literal_binds": True}
-            )
-        if parameters:
-            return f"{statement} | Params: {parameters}"
-        return str(statement)
-    except Exception as e:
-        return f"SQL_FORMAT_ERROR: {e} | Raw: {statement}"
+        # 只记录驱动收到的语句模板，不展开绑定参数或序列化业务 payload。
+        logger.info(f"SQL ({elapsed:.4f}s): {statement}")

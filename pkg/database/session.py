@@ -34,7 +34,10 @@ def new_async_engine(
     sqlite_allow_create: bool = True,
     sqlite_explicit_transactions: bool = False,
 ) -> AsyncEngine:
-    """创建异步 engine，隐藏绑定参数并按需为 SQLite 显式管理 BEGIN。"""
+    """创建异步 engine，隐藏绑定参数并按需为 SQLite 显式管理 BEGIN。
+
+    调用方拥有生命周期：先归还全部 session/连接，再在所属事件循环中 await engine.dispose()。
+    """
     url = make_url(database_uri)
     backend = url.get_backend_name()
     if backend not in {"postgresql", "sqlite"}:

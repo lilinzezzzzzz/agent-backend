@@ -111,5 +111,8 @@ markers = [
     "integration: 集成测试，需要外部服务或完整基础设施",
 ]
 
+[tool.ruff]
+target-version = "py314"
+
 [tool.fastapi]
 entrypoint = "entrypoints.api:app"

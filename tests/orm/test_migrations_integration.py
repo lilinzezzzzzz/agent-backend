@@ -1,5 +1,6 @@
 """只操作测试自身创建的 PostgreSQL 容器，永不使用工作区的数据库配置。"""
 
+import asyncio
 import os
 import re
 import shutil
@@ -16,7 +17,16 @@ import pytest
 import pytest_asyncio
 from alembic.config import Config
 from alembic.script import ScriptDirectory
-from sqlalchemy import Column, Connection, MetaData, String, inspect, select, text
+from sqlalchemy import (
+    Column,
+    Connection,
+    MetaData,
+    String,
+    event,
+    inspect,
+    select,
+    text,
+)
 from sqlalchemy.engine import URL
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 
@@ -685,3 +695,93 @@ async def test_scoped_lock_try_contention_keeps_caller_transaction_usable(
         finally:
             await owner.rollback()
             await contender.rollback()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("finish", ["commit", "rollback"])
+async def test_application_transaction_lock_releases_before_session_and_pool_close(
+    postgres_project: Path,
+    postgres_engine: AsyncEngine,
+    monkeypatch: pytest.MonkeyPatch,
+    finish: str,
+) -> None:
+    """验证现有事务锁归属；复用隔离容器，不创建新的运行时锁。"""
+    from internal.dao.scoped_operation_lock import ScopedOperationLockDao
+    from internal.services.scoped_operation_lock import (
+        LockMode,
+        ScopedOperationLockService,
+    )
+
+    result = run_alembic(postgres_project, "upgrade", "head")
+    assert result.returncode == 0, result.stdout + result.stderr
+    observer_engine = create_async_engine(postgres_engine.url)
+    owner_sessions = async_sessionmaker(postgres_engine, expire_on_commit=False)
+    contender_sessions = async_sessionmaker(observer_engine, expire_on_commit=False)
+    locks = ScopedOperationLockService(
+        dao=ScopedOperationLockDao(session_provider=owner_sessions),
+    )
+    monkeypatch.setattr(database_module, "_engine", postgres_engine)
+    monkeypatch.setattr(database_module, "_read_engine", None)
+    monkeypatch.setattr(database_module, "_session_maker", owner_sessions)
+    monkeypatch.setattr(database_module, "_read_session_maker", None)
+    events: list[str] = []
+
+    def disposed(_engine) -> None:
+        events.append("pool_disposed")
+
+    event.listen(postgres_engine.sync_engine, "engine_disposed", disposed)
+    try:
+        async with database_module.get_session() as owner:
+            await owner.begin()
+            assert await locks.acquire_lock(
+                session=owner,
+                operation_scope="lifecycle",
+                resource_key="one",
+            )
+            pid = await owner.scalar(text("SELECT pg_backend_pid()"))
+            connection = await owner.connection()
+            raw = connection.sync_connection.connection.driver_connection
+            async with contender_sessions() as contender:
+                await contender.begin()
+                assert not await locks.acquire_lock(
+                    session=contender,
+                    operation_scope="lifecycle",
+                    resource_key="one",
+                    mode=LockMode.TRY,
+                )
+                await getattr(owner, finish)()
+                assert await locks.acquire_lock(
+                    session=contender,
+                    operation_scope="lifecycle",
+                    resource_key="one",
+                    mode=LockMode.TRY,
+                )
+                await contender.rollback()
+            events.append("transaction_lock_released")
+            assert database_module._engine is postgres_engine
+            assert not raw.is_closed()
+        events.append("session_closed")
+        assert connection.closed
+        await database_module.close_async_db()
+        assert events == [
+            "transaction_lock_released",
+            "session_closed",
+            "pool_disposed",
+        ]
+        assert database_module._engine is None
+        assert raw.is_closed()
+        async with observer_engine.connect() as observer:
+            async with asyncio.timeout(5):
+                while True:
+                    count = await observer.scalar(
+                        text("SELECT count(*) FROM pg_stat_activity WHERE pid = :pid"),
+                        {"pid": pid},
+                    )
+                    await observer.rollback()
+                    if count == 0:
+                        break
+                    await asyncio.sleep(0.02)
+    finally:
+        await database_module.close_async_db()
+        event.remove(postgres_engine.sync_engine, "engine_disposed", disposed)
+        await observer_engine.dispose()

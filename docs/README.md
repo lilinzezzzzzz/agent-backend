@@ -21,6 +21,7 @@ Celery 任务状态、幂等、取消和后台收敛机制相关文档。
 
 - [uv 工作流最佳实践指南](development/uv_use_guide.md)
 - [数据库迁移指南](development/database_migrations.md)
+- [数据库连接生命周期与事务锁归属](development/database_lifecycle.md)
 - [Python `@dataclass` 实战指南](development/dataclass_use_guide.md)
 - [乐观锁、悲观锁与 Redis 分布式锁选型指南](development/lock_selection_guide.md)
 

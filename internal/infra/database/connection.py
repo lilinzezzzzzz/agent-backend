@@ -1,9 +1,9 @@
 """数据库连接管理"""
 
+import builtins
 import time
 from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
-from typing import Any
+from contextlib import AsyncExitStack, asynccontextmanager
 
 from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import (
 
 from internal import BASE_DIR
 from internal.config import settings
+from internal.infra.lifecycle import close_resources
 from pkg.database.session import new_async_engine, new_async_session_maker
 from pkg.logger import logger
 from pkg.toolkit.json import orjson_dumps, orjson_loads
@@ -35,15 +36,20 @@ _read_session_maker: async_sessionmaker[AsyncSession] | None = None
 def init_async_db(echo: bool | None = None) -> None:
     """
     初始化数据库连接池。
-    应在 FastAPI lifespan 或 Celery worker_process_init 中调用。
+    应在 FastAPI lifespan 或 Celery 任务级事件循环中调用。
 
     Args:
         echo: 是否输出 SQL 日志，None 时使用配置文件中的值
     """
     global _engine, _session_maker, _read_engine, _read_session_maker
     logger.info("Initializing Database Connection...")
-    # 幂等性检查：如果已经初始化，直接返回
-    if _engine is not None:
+    if _engine is not None or _read_engine is not None:
+        if _session_maker is None or (
+            _read_engine is not None and _read_session_maker is None
+        ):
+            raise RuntimeError(
+                "Await close_async_db() before reinitializing database resources."
+            )
         logger.info("Database connection already initialized.")
         return
 
@@ -99,8 +105,13 @@ async def check_database_revision() -> None:
         raise RuntimeError("Database is not initialized. Call init_async_db() first.")
     if _engine.dialect.name != "postgresql":
         return
-    async with _engine.connect() as connection:
+    connection = await _engine.connect()
+    cleanup = AsyncExitStack()
+    cleanup.push_async_callback(connection.close)
+    try:
         await connection.run_sync(_check_database_revision)
+    finally:
+        await close_resources(cleanup)
 
 
 def _check_database_revision(connection: Connection) -> None:
@@ -117,33 +128,41 @@ def _check_database_revision(connection: Connection) -> None:
 
 
 async def close_async_db() -> None:
-    """关闭数据库连接池（包括主库和只读副本）"""
+    """由生命周期所有者调用；两个池分别清理，失败池保留引用供顺序重试。"""
     global _engine, _session_maker, _read_engine, _read_session_maker
-    if _read_engine:
-        await _read_engine.dispose()
-        logger.warning("Read Replica Database connection disposed.")
-    _read_engine = None
-    _read_session_maker = None
-
-    if _engine:
-        await _engine.dispose()
-        logger.warning("Database connection disposed.")
-    _engine = None
+    # 所有者应先结束业务工作和 session；收尾开始后不再发放新的 session。
     _session_maker = None
+    _read_session_maker = None
+    errors: list[BaseException] = []
+    if _read_engine is not None:
+        try:
+            await _read_engine.dispose()
+        except BaseException as exc:
+            errors.append(exc)
+        else:
+            _read_engine = None
+    if _engine is not None:
+        try:
+            await _engine.dispose()
+        except BaseException as exc:
+            errors.append(exc)
+        else:
+            _engine = None
+    if len(errors) == 1:
+        raise errors[0]
+    if errors:
+        raise builtins.BaseExceptionGroup("Database connection cleanup failed", errors)
+    logger.warning("Database connections disposed.")
 
 
 def reset_async_db() -> None:
-    """
-    重置数据库连接池（同步版本，包括主库和只读副本）。
-    用于 Celery 任务中使用 asyncio.run/anyio.run 创建新事件循环前，
-    先清理旧的连接池，避免事件循环绑定冲突。
-
-    注意：此函数不会异步关闭连接，仅重置全局变量。
-    """
-    global _engine, _session_maker, _read_engine, _read_session_maker
-    _engine = None
+    """仅清除无活动 engine 的引用；同步 reset 不能替代异步 dispose。"""
+    global _session_maker, _read_session_maker
+    if _engine is not None or _read_engine is not None:
+        raise RuntimeError(
+            "Await close_async_db() before resetting database resources."
+        )
     _session_maker = None
-    _read_engine = None
     _read_session_maker = None
 
 
@@ -151,63 +170,45 @@ def reset_async_db() -> None:
 
 
 @asynccontextmanager
-async def get_session(autoflush: bool = True) -> AsyncGenerator[AsyncSession, Any]:
-    """
-    通用的 Session 获取上下文管理器（主库），FastAPI 和 Celery 均可用。
-    """
-    session_maker = _session_maker
-
-    if session_maker is None:
-        raise RuntimeError("Database is not initialized. Call init_db() first.")
-
-    async with session_maker() as session:
-        if autoflush:
-            try:
-                yield session
-            except Exception:
-                if session.is_active:
-                    await session.rollback()
-                raise
-        else:
-            with session.no_autoflush:
-                try:
-                    yield session
-                except Exception:
-                    if session.is_active:
-                        await session.rollback()
-                    raise
+async def get_session(autoflush: bool = True) -> AsyncGenerator[AsyncSession, None]:
+    """获取主库 session，事务由调用方控制，退出时等待 session 关闭。"""
+    async with _session_scope(_session_maker, autoflush) as session:
+        yield session
 
 
 @asynccontextmanager
-async def get_read_session(autoflush: bool = True) -> AsyncGenerator[AsyncSession, Any]:
-    """
-    只读副本 Session 获取上下文管理器。
-    如果未配置只读副本，自动 fallback 到主库（优雅降级）。
-    """
-    # 优雅降级：未配置读库时使用主库
-    session_maker = (
-        _read_session_maker if _read_session_maker is not None else _session_maker
-    )
+async def get_read_session(
+    autoflush: bool = True,
+) -> AsyncGenerator[AsyncSession, None]:
+    """获取只读池 session，未配置副本时使用主库。"""
+    maker = _read_session_maker if _read_session_maker is not None else _session_maker
+    async with _session_scope(maker, autoflush) as session:
+        yield session
 
-    if session_maker is None:
-        raise RuntimeError("Database is not initialized. Call init_db() first.")
 
-    async with session_maker() as session:
+@asynccontextmanager
+async def _session_scope(
+    maker: async_sessionmaker[AsyncSession] | None,
+    autoflush: bool,
+) -> AsyncGenerator[AsyncSession, None]:
+    if maker is None:
+        raise RuntimeError("Database is not initialized. Call init_async_db() first.")
+    session = maker()
+    cleanup = AsyncExitStack()
+    cleanup.push_async_callback(session.close)
+    try:
         if autoflush:
-            try:
-                yield session
-            except Exception:
-                if session.is_active:
-                    await session.rollback()
-                raise
+            yield session
         else:
             with session.no_autoflush:
-                try:
-                    yield session
-                except Exception:
-                    if session.is_active:
-                        await session.rollback()
-                    raise
+                yield session
+    except Exception:
+        if session.is_active:
+            await session.rollback()
+        raise
+    finally:
+        # 复用已有取消保护；不让 session 清理在后台晚于 engine.dispose 完成。
+        await close_resources(cleanup)
 
 
 # ---------------------- 3. SQL 监控逻辑 (私有) ----------------------

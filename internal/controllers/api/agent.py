@@ -5,7 +5,7 @@ import anyio
 from fastapi import APIRouter, Depends, Path
 from fastapi.responses import StreamingResponse
 
-from internal.config import settings
+from internal.config import Settings, get_settings
 from internal.services.agents import (
     AgentExecutionService,
     AgentRouterService,
@@ -530,6 +530,7 @@ async def resume_managed_run_stream(
         AgentExecutionService,
         Depends(new_agent_execution_service),
     ],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> StreamingResponse:
     """以 SSE 流式恢复受管理 run。
 
@@ -549,6 +550,7 @@ async def resume_managed_run_stream(
         req: 本次执行尝试的幂等键。
         run_id: 运行 ID。
         execution_service: 通过依赖注入获取的 `AgentExecutionService` 实例。
+        settings: 当前应用配置，用于确定 SSE 心跳间隔。
 
     Returns:
         `StreamingResponse`：受管理运行事件流，含等待工具期间的 SSE 注释心跳。
@@ -558,12 +560,15 @@ async def resume_managed_run_stream(
             user_id=get_user_id(),
             run_id=run_id,
             request_key=req.request_key,
-        )
+        ),
+        heartbeat_seconds=float(settings.agent.control_poll_seconds),
     )
 
 
 def _managed_streaming_response(
     events: AsyncIterable[AgentStreamEventDTO],
+    *,
+    heartbeat_seconds: float,
 ) -> StreamingResponse:
     """构造受管理运行的事件流响应。
 
@@ -573,7 +578,7 @@ def _managed_streaming_response(
     return StreamingResponse(
         _serialize_managed_events(
             events,
-            heartbeat_seconds=float(settings.agent.control_poll_seconds),
+            heartbeat_seconds=heartbeat_seconds,
         ),
         media_type=_SSE_MEDIA_TYPE,
         headers=_SSE_HEADERS,

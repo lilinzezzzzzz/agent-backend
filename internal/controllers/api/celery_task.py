@@ -3,7 +3,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends
 
-from internal.config import settings
+from internal.config import Settings, get_settings
 from internal.core import AppException, errors
 from internal.schemas import BaseResponse
 from internal.schemas.celery_task import (
@@ -32,6 +32,7 @@ router = APIRouter(prefix="/celery-tasks", tags=["api celery tasks"])
 async def create_idempotent_sum_task(
     req: IdempotentSumCreateReqSchema,
     service: Annotated[CeleryTaskService, Depends(new_celery_task_service)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> ResponsePayload:
     """创建幂等 Celery 加法任务。
 
@@ -50,6 +51,7 @@ async def create_idempotent_sum_task(
     Args:
         req: 请求体，包含幂等键和两个待相加整数。
         service: 通过依赖注入获取的任务 Service。
+        settings: 当前应用配置，用于检查幂等任务开关。
 
     Returns:
         `BaseResponse[CeleryTaskDispatchRespSchema]`：返回 record ID、稳定 task ID、状态和

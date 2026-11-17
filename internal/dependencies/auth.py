@@ -6,9 +6,10 @@ from fastapi import Depends, Header, Request
 
 from internal.core import AppException, errors
 from internal.services.auth import AuthService, new_auth_service
-from internal.utils.signature import signature_auth_handler
+from internal.utils.signature import get_signature_auth_handler
 from pkg import request_context as context
 from pkg.logger import logger
+from pkg.security import SignatureAuthHandler
 
 OptionalSignatureHeader = Annotated[str | None, Header(alias="X-Signature")]
 OptionalTimestampHeader = Annotated[str | None, Header(alias="X-Timestamp")]
@@ -63,13 +64,17 @@ AuthenticatedUserDependency = Depends(require_authenticated_user)
 
 async def require_internal_signature(
     request: Request,
+    signature_handler: Annotated[
+        SignatureAuthHandler,
+        Depends(get_signature_auth_handler),
+    ],
     x_signature: OptionalSignatureHeader = None,
     x_timestamp: OptionalTimestampHeader = None,
     x_nonce: OptionalNonceHeader = None,
 ) -> None:
     """校验内部接口签名，不建立登录用户上下文。"""
     logger.debug(f"Internal API access: {request.url.path}")
-    if not signature_auth_handler.verify(
+    if not signature_handler.verify(
         x_signature=x_signature,
         x_timestamp=x_timestamp,
         x_nonce=x_nonce,

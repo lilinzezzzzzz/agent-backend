@@ -1,14 +1,18 @@
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
 from starlette.requests import Request
 from starlette.types import Scope
 
 from internal.controllers import internal as internal_controller
 from internal.core import AppException, errors
 from internal.dependencies import auth as internal_auth_dependencies
+from internal.middlewares.exceptions import request_exception_handler
+from internal.utils import signature as signature_module
+from internal.utils.signature import get_signature_auth_handler
+from pkg.security import SignatureAuthHandler
 
 
 def _request(path: str = "/v1/internal/test") -> Request:
@@ -30,24 +34,19 @@ def _request(path: str = "/v1/internal/test") -> Request:
 
 
 @pytest.mark.asyncio
-async def test_internal_signature_dependency_accepts_valid_headers(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    verify = MagicMock(return_value=True)
-    monkeypatch.setattr(
-        internal_auth_dependencies,
-        "signature_auth_handler",
-        SimpleNamespace(verify=verify),
-    )
+async def test_internal_signature_dependency_accepts_valid_headers() -> None:
+    handler = MagicMock(spec=SignatureAuthHandler)
+    handler.verify.return_value = True
 
     await internal_auth_dependencies.require_internal_signature(
         _request(),
+        handler,
         x_signature="signature",
         x_timestamp="1710000000",
         x_nonce="nonce",
     )
 
-    verify.assert_called_once_with(
+    handler.verify.assert_called_once_with(
         x_signature="signature",
         x_timestamp="1710000000",
         x_nonce="nonce",
@@ -55,20 +54,64 @@ async def test_internal_signature_dependency_accepts_valid_headers(
 
 
 @pytest.mark.asyncio
-async def test_internal_signature_dependency_preserves_invalid_signature_error(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        internal_auth_dependencies,
-        "signature_auth_handler",
-        SimpleNamespace(verify=MagicMock(return_value=False)),
-    )
+async def test_internal_signature_preserves_invalid_signature_error() -> None:
+    handler = MagicMock(spec=SignatureAuthHandler)
+    handler.verify.return_value = False
 
     with pytest.raises(AppException) as exc_info:
-        await internal_auth_dependencies.require_internal_signature(_request())
+        await internal_auth_dependencies.require_internal_signature(_request(), handler)
 
     assert exc_info.value.error is errors.InvalidSignature
     assert exc_info.value.message == "Signature authentication failed"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("valid", [True, False])
+async def test_internal_signature_uses_overridden_handler(
+    monkeypatch: pytest.MonkeyPatch,
+    valid: bool,
+) -> None:
+    monkeypatch.setattr(signature_module, "_signature_auth_handler", None)
+    handler = MagicMock(spec=SignatureAuthHandler)
+    handler.verify.return_value = valid
+    app = FastAPI()
+    app.add_exception_handler(AppException, request_exception_handler)
+    app.dependency_overrides[get_signature_auth_handler] = lambda: handler
+
+    @app.get(
+        "/v1/internal/test",
+        dependencies=[internal_auth_dependencies.InternalSignatureDependency],
+    )
+    async def endpoint() -> dict[str, bool]:
+        return {"ok": True}
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        response = await client.get(
+            "/v1/internal/test",
+            headers={
+                "X-Signature": "signature",
+                "X-Timestamp": "1710000000",
+                "X-Nonce": "nonce",
+            },
+        )
+
+    assert response.status_code == 200
+    if valid:
+        assert response.json() == {"ok": True}
+    else:
+        assert response.json()["code"] == errors.InvalidSignature.code
+        assert (
+            response.json()["message"]
+            == "签名验证失败: Signature authentication failed"
+        )
+    handler.verify.assert_called_once_with(
+        x_signature="signature",
+        x_timestamp="1710000000",
+        x_nonce="nonce",
+    )
 
 
 def test_internal_router_documents_optional_signature_headers() -> None:

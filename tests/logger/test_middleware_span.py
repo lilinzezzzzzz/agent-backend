@@ -154,12 +154,16 @@ def _build_app(
     app = app_module.create_app()
 
     from internal.services.auth import new_auth_service
+    from internal.utils.signature import get_signature_auth_handler
 
     class FakeAuthService:
         async def verify_token(self, _token: str) -> dict[str, object]:
             return {"id": _TEST_USER_ID.hex}
 
     app.dependency_overrides[new_auth_service] = FakeAuthService
+    app.dependency_overrides[get_signature_auth_handler] = lambda: SimpleNamespace(
+        verify=MagicMock(return_value=True),
+    )
 
     @app.get("/v1/public/ping")
     async def public_ping() -> dict[str, bool]:
@@ -347,22 +351,12 @@ async def middleware_client(
 )
 async def test_request_and_route_auth_create_expected_spans(
     configured_logger: Path,
-    middleware_modules: tuple[ModuleType, ModuleType],
     middleware_client: AsyncClient,
     tracing_runtime: InMemorySpanExporter,
-    monkeypatch: pytest.MonkeyPatch,
     path: str,
     headers: dict[str, str],
     handler_message: str,
 ) -> None:
-    internal_auth_module, _ = middleware_modules
-    if path == "/v1/internal/ping":
-        monkeypatch.setattr(
-            internal_auth_module,
-            "signature_auth_handler",
-            SimpleNamespace(verify=MagicMock(return_value=True)),
-        )
-
     response = await middleware_client.get(path, headers=headers)
     expected_trace_id = headers["traceparent"].split("-")[1]
     assert response.status_code == 200

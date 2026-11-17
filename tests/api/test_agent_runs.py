@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any
+from unittest.mock import MagicMock
 from uuid import UUID
 
 import pytest
@@ -12,6 +14,7 @@ import pytest_asyncio
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
+import internal.config as config_module
 from internal.controllers.api import agent as agent_controller
 from internal.schemas.agent import (
     AgentRunCreateDTO,
@@ -128,6 +131,9 @@ async def managed_run_client():
     app.include_router(agent_controller.router, prefix="/v1")
     service = FakeAgentExecutionService()
     app.dependency_overrides[new_agent_execution_service] = lambda: service
+    app.dependency_overrides[config_module.get_settings] = lambda: SimpleNamespace(
+        agent=SimpleNamespace(control_poll_seconds=7),
+    )
 
     async with AsyncClient(
         transport=ASGITransport(app=app),
@@ -277,8 +283,18 @@ async def test_resume_rejects_question_override(managed_run_client) -> None:
 
 
 @pytest.mark.asyncio
-async def test_resume_stream_endpoint_emits_sse_events(managed_run_client) -> None:
+async def test_resume_stream_endpoint_emits_sse_events(
+    managed_run_client,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     client, service = managed_run_client
+    serializer = MagicMock(wraps=agent_controller._serialize_managed_events)
+    monkeypatch.setattr(agent_controller, "_serialize_managed_events", serializer)
+
+    def reject_config_load() -> None:
+        pytest.fail("overridden settings must not load configuration files")
+
+    monkeypatch.setattr(config_module, "load_config", reject_config_load)
 
     response = await client.post(
         f"/v1/agent/runs/{RUN_ID}/resume/stream",
@@ -295,6 +311,18 @@ async def test_resume_stream_endpoint_emits_sse_events(managed_run_client) -> No
     assert '"attempt_no":2' in body
     assert '"checkpoint_revision":3' in body
     assert service.calls[0][0] == "resume_run_stream"
+    serializer.assert_called_once()
+    assert serializer.call_args.kwargs == {"heartbeat_seconds": 7.0}
+
+
+def test_stream_settings_dependency_does_not_add_request_parameters() -> None:
+    app = FastAPI()
+    app.include_router(agent_controller.router, prefix="/v1")
+
+    operation = app.openapi()["paths"]["/v1/agent/runs/{run_id}/resume/stream"]["post"]
+    assert {(item["in"], item["name"]) for item in operation["parameters"]} == {
+        ("path", "run_id"),
+    }
 
 
 @pytest.mark.asyncio
@@ -352,7 +380,8 @@ async def test_stream_claim_failure_is_a_structured_sse_error(monkeypatch, error
     response = agent_controller._managed_streaming_response(
         service.resume_run_stream(
             user_id=TEST_USER_ID, run_id=RUN_ID, request_key="resume_rejected"
-        )
+        ),
+        heartbeat_seconds=7.0,
     )
     sent = []
 

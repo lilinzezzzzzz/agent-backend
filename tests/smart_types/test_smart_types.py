@@ -1,6 +1,7 @@
 import json
 from datetime import UTC, datetime
 from decimal import Decimal
+from types import SimpleNamespace
 
 import pytest
 from pydantic import BaseModel, TypeAdapter, ValidationError
@@ -251,12 +252,11 @@ class TestIntStr:
 # 5. 测试 LazyProxy
 # ==========================================
 class TestLazyProxy:
-
-    def test_lazy_proxy_deferred_init(self):
+    def test_lazy_proxy_deferred_init(self) -> None:
         """测试延迟初始化"""
         call_count = 0
 
-        def get_value():
+        def get_value() -> str:
             nonlocal call_count
             call_count += 1
             return "initialized"
@@ -269,28 +269,84 @@ class TestLazyProxy:
         _ = proxy.upper()
         assert call_count == 1
 
-    def test_lazy_proxy_type_inference(self):
-        """测试类型推断"""
+    def test_lazy_proxy_forwards_method_calls(self) -> None:
+        """通过属性读取取得目标方法并调用。"""
+
         def get_str() -> str:
             return "hello"
 
         proxy = lazy_proxy(get_str)
-        # proxy 应该被推断为 str 类型
         assert proxy.upper() == "HELLO"
         assert proxy.startswith("he")
 
-    def test_lazy_proxy_repr(self):
-        """测试 __repr__ 方法"""
-        def get_value():
-            return 42
+    def test_lazy_proxy_repr_does_not_load_target(self) -> None:
+        call_count = 0
+
+        def get_value() -> str:
+            nonlocal call_count
+            call_count += 1
+            return "initialized"
 
         proxy = lazy_proxy(get_value)
-        assert repr(proxy) == "42"
+        assert repr(proxy) == "<_LazyProxy>"
+        assert call_count == 0
 
-    def test_lazy_proxy_repr_uninitialized(self):
-        """测试未初始化时的 repr"""
-        def get_value():
-            raise RuntimeError("Not initialized")
+        assert proxy.upper() == "INITIALIZED"
+        assert repr(proxy) == "<_LazyProxy>"
+        assert call_count == 1
+
+    def test_lazy_proxy_repr_does_not_call_failing_getter(self) -> None:
+        def get_value() -> str:
+            pytest.fail("repr() must not call the getter")
+
+        assert repr(lazy_proxy(get_value)) == "<_LazyProxy>"
+
+    def test_lazy_proxy_reads_current_target_after_replacement(self) -> None:
+        current = SimpleNamespace(value="first")
+
+        def get_value() -> SimpleNamespace:
+            return current
 
         proxy = lazy_proxy(get_value)
-        assert repr(proxy) == "<_LazyProxy: uninitialized>"
+        assert proxy.value == "first"
+
+        current = SimpleNamespace(value="second")
+        assert proxy.value == "second"
+
+    @pytest.mark.parametrize(
+        "error",
+        [RuntimeError("not ready"), ValueError("invalid target")],
+    )
+    def test_lazy_proxy_propagates_getter_errors(self, error: Exception) -> None:
+        def get_value() -> str:
+            raise error
+
+        proxy = lazy_proxy(get_value)
+        with pytest.raises(type(error)) as caught:
+            proxy.upper()
+        assert caught.value is error
+
+    def test_lazy_proxy_preserves_missing_attribute_error(self) -> None:
+        target = SimpleNamespace(value="initialized")
+        proxy = lazy_proxy(lambda: target)
+
+        with pytest.raises(AttributeError, match="missing"):
+            getattr(proxy, "missing")
+
+    @pytest.mark.parametrize("keyword", ["unexpected", "__type__"])
+    def test_lazy_proxy_rejects_keyword_options(self, keyword: str) -> None:
+        def get_value() -> str:
+            pytest.fail("invalid arguments must be rejected before calling the getter")
+
+        with pytest.raises(TypeError, match="unexpected keyword argument"):
+            lazy_proxy(get_value, **{keyword: str})
+
+    def test_lazy_proxy_does_not_forward_attribute_writes_or_deletes(self) -> None:
+        target = SimpleNamespace(value="original")
+        proxy = lazy_proxy(lambda: target)
+
+        with pytest.raises(AttributeError):
+            proxy.value = "changed"
+        with pytest.raises(AttributeError):
+            del proxy.value
+        assert target.value == "original"
